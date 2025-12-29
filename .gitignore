@@ -1,0 +1,16 @@
+# Ignorar arquivos de ambiente virtual e compilados
+__pycache__/
+*.pyc
+venv/
+.env
+
+# IGNORAR DADOS (Isso garante que o BDGD não vá para o GitHub)
+dados/
+*.zip
+*.gdb
+*.shp
+*.shx
+*.dbf
+
+# Ignorar arquivos do sistema operacional
+.DS_Store
