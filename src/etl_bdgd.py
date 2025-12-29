@@ -3,57 +3,67 @@ import os
 import sys
 
 # --- CONFIGURAÇÃO ---
-# Nome EXATO da pasta .gdb que você descompactou dentro de 'dados'
+# Verifique se o nome bate com a pasta dentro de 'dados'
 NOME_PASTA_GDB = "Energisa_SE_6587_2023-12-31_V11_20250701-0833.gdb"
 
 def carregar_subestacoes():
     """
-    Lê o arquivo GDB da Energisa localizado na pasta '../dados'
-    e retorna um GeoDataFrame limpo contendo as subestações.
+    Lê o arquivo GDB da Energisa e retorna um GeoDataFrame limpo.
     """
-    # 1. Montar o caminho dinâmico (funciona no seu PC e no Servidor)
     dir_atual = os.path.dirname(os.path.abspath(__file__))
     caminho_gdb = os.path.join(dir_atual, "..", "dados", NOME_PASTA_GDB)
     
-    # 2. Verificação de Segurança
     if not os.path.exists(caminho_gdb):
-        print("\n❌ ERRO CRÍTICO: Pasta de dados não encontrada!")
-        print(f"   O sistema procurou em: {caminho_gdb}")
-        print("   -> Verifique se o nome da pasta .gdb está correto no script 'etl_bdgd.py'")
-        print("   -> Verifique se a pasta 'dados' está na raiz do projeto.")
+        print(f"❌ ERRO: Pasta não encontrada em {caminho_gdb}")
         sys.exit(1)
 
-    print(f"📂 Carregando base oficial da ANEEL: {NOME_PASTA_GDB} ...")
+    print(f"📂 Lendo GDB: {NOME_PASTA_GDB} ...")
     
     try:
-        # 3. Ler a camada 'SUB' (Subestações)
-        # O GeoPandas detecta automaticamente se é FileGDB
-        gdf = gpd.read_file(caminho_gdb, layer='SUB')
+        # Usa pyogrio para ser rápido
+        gdf = gpd.read_file(caminho_gdb, layer='SUB', engine='pyogrio')
         
-        # 4. Selecionar apenas colunas essenciais
-        # COD_ID: Identificador único
-        # NOM: Nome da Subestação
-        # geometry: O polígono do terreno
-        colunas_desejadas = ['COD_ID', 'NOM', 'geometry']
+        # --- DEBUG: MOSTRAR COLUNAS REAIS ---
+        print("\n🔍 AS COLUNAS ENCONTRADAS FORAM:")
+        print(gdf.columns.tolist())
+        print("-" * 30)
         
-        # Filtra apenas as colunas que realmente existem no arquivo
-        cols_finais = [c for c in colunas_desejadas if c in gdf.columns]
+        # Tenta adivinhar o nome da coluna de Nome se 'NOM' não existir
+        coluna_nome = 'NOM'
+        if 'NOM' not in gdf.columns:
+            # Tenta variações comuns
+            possiveis = ['NOME', 'Nom', 'DS_NOME', 'NO_SUB']
+            for p in possiveis:
+                if p in gdf.columns:
+                    coluna_nome = p
+                    break
+        
+        print(f"🎯 Usando coluna de nome: '{coluna_nome}'")
+
+        # Se mesmo assim não achar, avisa e para
+        if coluna_nome not in gdf.columns:
+            print("❌ ERRO: Não achei nenhuma coluna parecida com 'Nome'.")
+            print("👉 Copie a lista de colunas acima e mande no chat!")
+            sys.exit(1)
+
+        # Padronizar para o nosso código (renomear para NOM)
+        gdf = gdf.rename(columns={coluna_nome: 'NOM'})
+
+        # Selecionar apenas o necessário
+        cols_finais = ['COD_ID', 'NOM', 'geometry']
+        # Adiciona COD_ID se não existir (às vezes é ID)
+        if 'COD_ID' not in gdf.columns and 'ID' in gdf.columns:
+             gdf = gdf.rename(columns={'ID': 'COD_ID'})
+
         gdf_limpo = gdf[cols_finais]
-        
-        # Remover subestações sem nome ou inválidas (limpeza básica)
         gdf_limpo = gdf_limpo.dropna(subset=['NOM'])
         
-        print(f"✅ Dados carregados com sucesso! Total de Subestações: {len(gdf_limpo)}")
+        print(f"✅ Sucesso! {len(gdf_limpo)} subestações carregadas.")
         return gdf_limpo
 
     except Exception as e:
-        print(f"\n❌ Erro ao ler o arquivo GDB. Detalhes: {e}")
-        print("Dica: Verifique se você instalou as bibliotecas (pip install geopandas pyogrio)")
+        print(f"❌ Erro ao ler o GDB: {e}")
         sys.exit(1)
 
-# Bloco de teste (roda se você executar 'python src/etl_bdgd.py')
 if __name__ == "__main__":
-    df = carregar_subestacoes()
-    if df is not None:
-        print("\n--- Amostra dos Dados ---")
-        print(df.head())
+    carregar_subestacoes()
