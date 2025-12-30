@@ -4,13 +4,11 @@ import os
 import json
 import warnings
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import PATH_GDB, PATH_GEOJSON, PATH_JSON_MERCADO
+
 # Ignora avisos do pandas
 warnings.filterwarnings('ignore')
-
-# --- CONFIGURACAO ---
-NOME_PASTA_GDB = "Energisa_SE_6587_2023-12-31_V11_20250701-0833.gdb"
-NOME_ARQUIVO_VORONOI = "subestacoes_logicas_aracaju.geojson"
-NOME_ARQUIVO_SAIDA = "perfil_mercado_aracaju.json"
 
 MAPA_CLASSES = {
     'RE': 'Residencial',
@@ -23,12 +21,9 @@ MAPA_CLASSES = {
 def analisar_mercado():
     print("INICIANDO ANALISE DETALHADA (POR CLASSE)...")
     
-    dir_script = os.path.dirname(os.path.abspath(__file__))
-    dir_raiz = os.path.dirname(os.path.dirname(dir_script))
-    
-    path_voronoi = os.path.join(dir_raiz, NOME_ARQUIVO_VORONOI)
-    path_gdb = os.path.join(dir_raiz, "dados", NOME_PASTA_GDB)
-    path_saida = os.path.join(dir_raiz, NOME_ARQUIVO_SAIDA)
+    path_voronoi = PATH_GEOJSON
+    path_gdb = PATH_GDB
+    path_saida = PATH_JSON_MERCADO
 
     if not os.path.exists(path_voronoi):
         print("Erro: Voronoi nao encontrado.")
@@ -50,7 +45,6 @@ def analisar_mercado():
         return
 
     # 3. PROCESSAR CONSUMO (UCBT)
-    # Importante: Lemos PN_CON para poder cruzar com a geracao depois
     print("3. Processando Consumidores...")
     try:
         gdf_uc = gpd.read_file(path_gdb, layer='UCBT_tab', engine='pyogrio', columns=['UNI_TR_MT', 'CLAS_SUB', 'ENE_12', 'PN_CON'])
@@ -82,7 +76,7 @@ def analisar_mercado():
         # Link com Subestacao
         df_gd_final = pd.merge(df_gd, ref_trafos, left_on='UNI_TR_MT', right_on='COD_ID', how='inner')
         
-        # A MAGICA: Cruzamos com o consumidor para saber se eh Residencial ou Comercial
+        # Cruzamos com o consumidor para saber se eh Residencial ou Comercial
         df_gd_final['TIPO'] = df_gd_final['PN_CON'].map(mapa_pn_classe).fillna('Outros')
         
         print(f"   -> {len(df_gd_final)} usinas mapeadas e classificadas.")
@@ -119,7 +113,6 @@ def analisar_mercado():
                 "consumo_anual_mwh": float(round(consumo_total/1000, 2)),
                 "nivel_criticidade_gd": nivel_criticidade
             },
-            # AQUI ESTA A NOVIDADE: SEPARADO POR TIPO
             "geracao_distribuida": {
                 "total_unidades": int(qtd_gd_total),
                 "potencia_total_kw": float(round(potencia_gd_total, 2)),
@@ -138,7 +131,7 @@ def analisar_mercado():
                     "pct": round((qtd_cli/total_clientes)*100, 1)
                 }
             
-            # Dados de Geracao (Potencia KW) - O QUE VOCE PEDIU
+            # Dados de Geracao
             pot_classe = dados_gd[dados_gd['TIPO'] == cls]['POT_INST'].sum()
             if pot_classe > 0:
                 stats["geracao_distribuida"]["detalhe_por_classe"][cls] = float(round(pot_classe, 2))
