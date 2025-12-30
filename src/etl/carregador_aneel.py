@@ -2,27 +2,22 @@ import geopandas as gpd
 import os
 import sys
 
-NOME_PASTA_GDB = "Energisa_SE_6587_2023-12-31_V11_20250701-0833.gdb"
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import PATH_GDB
 
 def carregar_subestacoes():
     print("Iniciando módulo de carregamento (ETL)...")
+    print(f"Lendo GDB em: {PATH_GDB}")
 
-    caminho_deste_arquivo = os.path.abspath(__file__)
-    pasta_etl = os.path.dirname(caminho_deste_arquivo)
-    pasta_src = os.path.dirname(pasta_etl)
-    pasta_raiz = os.path.dirname(pasta_src)
-    caminho_gdb = os.path.join(pasta_raiz, "dados", NOME_PASTA_GDB)
-    print(f"Caminho calculado: {caminho_gdb}")
     
-    if not os.path.exists(caminho_gdb):
+    if not os.path.exists(PATH_GDB):
         print(f"ERRO CRÍTICO: Pasta de dados não encontrada!")
-        print(f"O sistema esperava encontrar em: {caminho_gdb}")
-        print("DICA: Verifique se o nome da pasta .gdb dentro de 'dados' está exatamente igual ao nome no código.")
+        print(f"O sistema esperava encontrar em: {PATH_GDB}")
         sys.exit(1)
-    print(f"Arquivo encontrado! Lendo GDB...")
+
     
     try:
-        gdf = gpd.read_file(caminho_gdb, layer='SUB', engine='pyogrio')
+        gdf = gpd.read_file(PATH_GDB, layer='SUB', engine='pyogrio')
         coluna_nome = 'NOM'
         if 'NOM' not in gdf.columns:
             possiveis = ['NOME', 'Nom', 'DS_NOME', 'NO_SUB']
