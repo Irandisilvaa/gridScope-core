@@ -9,12 +9,8 @@ import os
 import sys
 from datetime import date, timedelta
 
-# ==================================================
-# CONFIGURAÇÃO INICIAL E IMPORTAÇÃO DE UTILS
-# ==================================================
 st.set_page_config(layout="wide", page_title="GridScope")
 
-# Adiciona o diretório atual ao path para importar o utils
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
@@ -23,9 +19,6 @@ except ImportError:
     st.error("Erro: Arquivo 'utils.py' não encontrado na pasta src/.")
     st.stop()
 
-# ==================================================
-# CONSTANTES E ESTILOS
-# ==================================================
 CATEGORIAS_ALVO = ["Residencial", "Comercial", "Industrial"]
 CORES_MAPA = {
     "Residencial": "#007bff",
@@ -33,14 +26,8 @@ CORES_MAPA = {
     "Industrial": "#dc3545"
 }
 
-# ==================================================
-# FUNÇÕES DE CARREGAMENTO E API
-# ==================================================
 @st.cache_data
 def obter_dados_dashboard():
-    """
-    Carrega os dados geoespaciais e de mercado do cache local.
-    """
     try:
         gdf, dados_lista = carregar_dados_cache()
         return gdf, pd.DataFrame(dados_lista)
@@ -48,9 +35,6 @@ def obter_dados_dashboard():
         raise Exception(f"Erro ao carregar dados base: {e}")
 
 def consultar_simulacao(subestacao, data_escolhida):
-    """
-    Consulta a API VPP (Porta 8000) para dados meteorológicos e geração estimada.
-    """
     data_str = data_escolhida.strftime("%d-%m-%Y")
     url = f"http://127.0.0.1:8000/simulacao/{subestacao}?data={data_str}"
     try:
@@ -62,9 +46,6 @@ def consultar_simulacao(subestacao, data_escolhida):
     return None
 
 def consultar_ia_predict(payload):
-    """
-    Consulta a API de Inteligência Artificial (Porta 8001) para Duck Curve.
-    """
     try:
         resp = requests.post(
             "http://127.0.0.1:8001/predict/duck-curve",
@@ -80,56 +61,39 @@ def consultar_ia_predict(payload):
     except Exception as e:
         return None, str(e)
 
-# ==================================================
-# EXECUÇÃO PRINCIPAL: CARGA DE DADOS
-# ==================================================
 try:
     gdf, df_mercado = obter_dados_dashboard()
 except Exception as e:
     st.error(f"Erro Crítico ao iniciar dashboard: {e}")
     st.stop()
 
-# ==================================================
-# BARRA LATERAL (SIDEBAR)
-# ==================================================
 st.sidebar.title("GridScope")
 st.sidebar.caption("Centro de Operações Integrado")
 
-# Filtros
 lista_subs = sorted(gdf["NOM"].unique())
 escolha = st.sidebar.selectbox("Selecione a Subestação:", lista_subs)
 
 data_analise = st.sidebar.date_input("Data da Análise:", date.today(), format="DD/MM/YYYY")
 
-# Lógica de Modo
 modo = "Auditoria (Passado)" if data_analise < date.today() else "Previsão (Futuro)"
 st.sidebar.info(f"Modo: {modo}")
 
-# ==================================================
-# PREPARAÇÃO DOS DADOS DA SELEÇÃO
-# ==================================================
 area_sel = gdf[gdf["NOM"] == escolha]
 dados_raw = df_mercado[df_mercado["subestacao"] == escolha].iloc[0]
 
-# Extração segura de dados usando .get para evitar erros
 metricas = dados_raw.get("metricas_rede", {})
 dados_gd = dados_raw.get("geracao_distribuida", {})
 perfil = dados_raw.get("perfil_consumo", {})
 detalhe_gd = dados_gd.get("detalhe_por_classe", {})
 
-# Coordenadas Centrais
 if not area_sel.empty:
     lat_c = area_sel.geometry.centroid.y.values[0]
     lon_c = area_sel.geometry.centroid.x.values[0]
 else:
     lat_c, lon_c = -10.9472, -37.0731
 
-# ==================================================
-# LAYOUT PRINCIPAL - INÍCIO
-# ==================================================
 st.title(f"Subestação: {escolha}")
 
-# --- 1. Infraestrutura Instalada ---
 st.header("Infraestrutura Instalada")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Clientes", f"{metricas.get('total_clientes', 0):,}".replace(",", "."))
@@ -139,7 +103,6 @@ c4.metric("Potência Instalada (kW)", f"{dados_gd.get('potencia_total_kw', 0):,.
 
 st.divider()
 
-# --- 2. Simulação VPP (Monitoramento) ---
 st.header(f"Simulação VPP: {data_analise.strftime('%d/%m/%Y')}")
 
 dados_simulacao = consultar_simulacao(escolha, data_analise)
@@ -153,7 +116,6 @@ if dados_simulacao:
     perda = dados_simulacao.get("fator_perda_termica", 0)
     sc4.metric("Perda Térmica", f"-{perda}%")
 
-    # Alertas de Impacto
     impacto = dados_simulacao.get("impacto_na_rede", "NORMAL")
     if "ALTA" in impacto or "CRITICO" in impacto:
         st.error(f"Status da Rede: {impacto}")
@@ -162,23 +124,20 @@ if dados_simulacao:
     else:
         st.success(f"Status da Rede: {impacto}")
 else:
-    st.warning("⚠️ API de Simulação Offline (Porta 8000). Verifique o servidor.")
+    st.warning("API de Simulação Offline (Porta 8000). Verifique o servidor.")
 
 st.divider()
 
-# --- 3. Módulo de IA (Duck Curve) ---
-st.header("🤖 Análise Preditiva (AI Duck Curve)")
+st.header("Análise Preditiva (AI Duck Curve)")
 st.markdown("Previsão de Fluxo Reverso usando Inteligência Artificial e Meteo-Analytics.")
 
-# Inicializa o estado da sessão para os resultados da IA não sumirem
 if 'resultado_ia' not in st.session_state:
     st.session_state.resultado_ia = None
 
 col_ia_in, col_ia_act = st.columns([1, 4])
 data_ia = col_ia_in.date_input("Data para Previsão IA:", date.today() + timedelta(days=1), key="input_data_ia")
 
-# Botão de Execução
-if col_ia_act.button("🚀 Rodar Análise de IA", use_container_width=True):
+if col_ia_act.button("Rodar Análise de IA", use_container_width=True):
     with st.spinner("Conectando à API de IA (Porta 8001)..."):
         payload = {
             "data_alvo": str(data_ia),
@@ -187,7 +146,6 @@ if col_ia_act.button("🚀 Rodar Análise de IA", use_container_width=True):
             "lon": float(lon_c)
         }
         
-        # Chama a função e guarda o resultado na sessão do Streamlit
         res, erro = consultar_ia_predict(payload)
         if res:
             st.session_state.resultado_ia = res
@@ -195,14 +153,12 @@ if col_ia_act.button("🚀 Rodar Análise de IA", use_container_width=True):
             st.error(f"Falha na requisição: {erro}")
             st.session_state.resultado_ia = None
 
-# EXIBIÇÃO DOS RESULTADOS (FORA DO IF DO BOTÃO)
-# Isso garante que o gráfico não suma quando você mexer em outra coisa
+
 if st.session_state.resultado_ia:
     res = st.session_state.resultado_ia
-    
-    # Exibe Banner de Alerta
+
     cor_box = "#dc3545" if res['alerta'] else "#28a745"
-    icone = "⚠️" if res['alerta'] else "✅"
+    icone = " " if res['alerta'] else " "
     
     st.markdown(f"""
     <div style='background-color:{cor_box}; color:white; padding:15px; border-radius:8px; text-align:center; margin-bottom:15px;'>
@@ -210,30 +166,25 @@ if st.session_state.resultado_ia:
     </div>
     """, unsafe_allow_html=True)
 
-    # Gráfico Duck Curve
     fig_duck = go.Figure()
     
-    # 1. Linha de Consumo
     fig_duck.add_trace(go.Scatter(
         x=res['timeline'], y=res['consumo_mwh'], 
         name="Consumo (Carga)", line=dict(color='#1f77b4', width=3)
     ))
-    
-    # 2. Linha de Geração
+
     fig_duck.add_trace(go.Scatter(
         x=res['timeline'], y=res['geracao_mwh'], 
         name="Geração Solar", line=dict(color='#ff7f0e', width=3)
     ))
-    
-    # 3. Área de Carga Líquida
+
     fig_duck.add_trace(go.Scatter(
         x=res['timeline'], y=res['carga_liquida_mwh'], 
         name="Carga Líquida", fill='tozeroy', 
         line=dict(color='white', dash='dot'),
         fillcolor='rgba(128, 128, 128, 0.3)'
     ))
-    
-    # Linha Crítica de Zero
+
     fig_duck.add_hline(y=0, line_dash="dash", line_color="red", annotation_text="Injeção na Rede (Fluxo Reverso)")
     
     fig_duck.update_layout(
@@ -248,10 +199,8 @@ if st.session_state.resultado_ia:
 
 st.divider()
 
-# --- 4. Visualizações Finais (Gráficos e Mapa) ---
 col_graf, col_map = st.columns([1.5, 2])
 
-# Coluna da Esquerda: Gráfico de Pizza
 with col_graf:
     st.subheader("Perfil de Consumo")
     dados_pie = [{"Segmento": k, "Clientes": v["qtd_clientes"]} for k, v in perfil.items() if k in CATEGORIAS_ALVO]
@@ -271,17 +220,15 @@ with col_graf:
     else:
         st.info("Sem dados de perfil disponíveis.")
 
-# Coluna da Direita: Mapa
 with col_map:
     st.subheader("Geolocalização")
     if not area_sel.empty:
         m = folium.Map(location=[lat_c, lon_c], zoom_start=13, tiles="OpenStreetMap")
 
-        # Estilo Dinâmico do Mapa
         def style_function(feature):
             nome = feature['properties']['NOM']
             cor = '#007bff'
-            # Tenta achar risco na base de mercado
+
             dado_sub = df_mercado[df_mercado['subestacao'] == nome]
             if not dado_sub.empty:
                 risco = dado_sub.iloc[0].get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO')
