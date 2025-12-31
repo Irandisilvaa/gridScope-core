@@ -26,12 +26,11 @@ except ImportError:
     st.stop()
 
 # --- CONSTANTES E ESTILOS ---
-CATEGORIAS_ALVO = ["Residencial", "Comercial", "Industrial", "Rural"]
+CATEGORIAS_ALVO = ["Residencial", "Comercial", "Industrial"]
 CORES_MAPA = {
     "Residencial": "#007bff",
     "Comercial": "#ffc107",
     "Industrial": "#dc3545",
-    "Rural": "#28a745"
 }
 
 # --- FUNÇÕES AUXILIARES ---
