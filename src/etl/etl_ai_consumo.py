@@ -3,152 +3,173 @@ import geopandas as gpd
 import os
 import sys
 import random
-import time
 
 # --- CONFIGURAÇÃO DE CAMINHOS ---
-# Tenta importar o caminho do config, ou usa manual
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Tenta pegar o caminho do config, senão define manual
 try:
     from config import PATH_GDB
 except ImportError:
-    # Ajuste este caminho se necessário
+    # Ajuste aqui se necessário
     PATH_GDB = r"C:\Users\irand\Documents\gridscope-core\data\raw\SE_2023.gdb"
 
+# --- SINÔNIMOS DE COLUNAS ---
+COLUNAS_POSSIVEIS = {
+    "NOME_SUB": ["NOM", "NOME", "DS_SUB", "NO_SUB", "NOME_SUBESTACAO", "DS_NOME"],
+    "ID_SUB": ["COD_ID", "ID", "PAC", "CD_SUB", "SUB_ID", "CODIGO", "UNI_TR_S"],
+    "TABELA_SUB": ["SUB", "SSD", "SUBESTACAO", "LOC_SUB"], 
+    "TABELA_CONSUMIDOR": ["UCBT_tab", "UCBT", "CONSUMIDOR", "CLIENTE"] 
+}
+
+def encontrar_coluna(df, lista_candidatas):
+    """ Retorna o nome real da coluna no DF se bater com a lista. """
+    cols_existentes = [c.upper() for c in df.columns]
+    for tentativa in lista_candidatas:
+        if tentativa in cols_existentes:
+            return df.columns[cols_existentes.index(tentativa)]
+    return None
+
 def buscar_dados_reais_para_ia(nome_subestacao):
-    """
-    Função Robusta para IA:
-    1. Tenta encontrar a SUB e seus Circuitos (CTMT).
-    2. Tenta encontrar Clientes (UCBT) ligados a esses Circuitos.
-    3. Retorna o perfil MENSAL detalhado para alimentar a sazonalidade da IA.
-    """
-    print(f"\n🤖 IA: Buscando dados reais no BDGD para '{nome_subestacao}'...")
+    print(f"\n🤖 IA (ETL V3 - Sherlock): Buscando '{nome_subestacao}'...")
     
     if not os.path.exists(PATH_GDB):
-        return {"erro": "Arquivo GDB não encontrado."}
+        print(f"❌ GDB não encontrado: {PATH_GDB}")
+        return {"erro": "GDB 404"}
 
     try:
-        # --- PASSO 1: Descobrir o ID da Subestação ---
-        # Lê apenas colunas essenciais para ser rápido
-        gdf_sub = gpd.read_file(PATH_GDB, layer='SUB', engine='pyogrio', columns=['NOM', 'COD_ID'])
+        # --- 1. LOCALIZAR SUBESTAÇÃO ---
+        layer_sub = None
+        for layer in COLUNAS_POSSIVEIS["TABELA_SUB"]:
+            try:
+                gpd.read_file(PATH_GDB, layer=layer, rows=1)
+                layer_sub = layer
+                break
+            except: continue
         
-        # Normaliza nomes para busca
-        nome_alvo_norm = nome_subestacao.strip().upper()
+        if not layer_sub:
+            print("❌ Camada de Subestação não encontrada.")
+            return gerar_estimativa_fallback(nome_subestacao)
+
+        gdf_sub = gpd.read_file(PATH_GDB, layer=layer_sub, engine='pyogrio')
         
-        # Filtra a subestação pelo nome
-        filtro = gdf_sub['NOM'].str.upper().str.contains(nome_alvo_norm, na=False)
+        col_nome = encontrar_coluna(gdf_sub, COLUNAS_POSSIVEIS["NOME_SUB"])
+        col_id = encontrar_coluna(gdf_sub, COLUNAS_POSSIVEIS["ID_SUB"])
+        
+        if not col_nome or not col_id:
+            print(f"❌ Colunas de Nome/ID não identificadas em {layer_sub}.")
+            return gerar_estimativa_fallback(nome_subestacao)
+
+        # Filtra pelo nome
+        filtro = gdf_sub[col_nome].astype(str).str.upper().str.contains(nome_subestacao.upper(), na=False)
         sub_encontrada = gdf_sub[filtro]
         
         if sub_encontrada.empty:
-            print(f"   ⚠️ Subestação '{nome_subestacao}' não achada. Usando fallback.")
+            print(f"⚠️ Subestação '{nome_subestacao}' não encontrada.")
             return gerar_estimativa_fallback(nome_subestacao)
-        
-        id_sub = sub_encontrada.iloc[0]['COD_ID']
-        nome_real = sub_encontrada.iloc[0]['NOM']
-        print(f"   ✅ Subestação localizada: {nome_real} (ID: {id_sub})")
-
-        # --- PASSO 2: Achar os Alimentadores (CTMT) ---
-        # A "Ponte": Subestação -> CTMT -> Cliente
-        print("   🔍 Mapeando circuitos (CTMT) da subestação...")
-        
-        try:
-            # Tenta ler a camada de circuitos
-            gdf_ctmt = gpd.read_file(PATH_GDB, layer='CTMT', engine='pyogrio', columns=['COD_ID', 'SUB'])
             
-            # Pega todos os circuitos que têm o ID da nossa Subestação
-            circuitos = gdf_ctmt[gdf_ctmt['SUB'] == id_sub]['COD_ID'].unique()
-            print(f"   🔗 Encontrados {len(circuitos)} alimentadores conectados.")
-        except Exception:
-            print("   ⚠️ Camada CTMT não encontrada ou erro de leitura. Tentando link direto...")
-            circuitos = []
+        id_sub_alvo = sub_encontrada.iloc[0][col_id]
+        nome_real = sub_encontrada.iloc[0][col_nome]
+        print(f"✅ Subestação: {nome_real} | ID Alvo: {id_sub_alvo}")
 
-        # --- PASSO 3: Somar Consumo dos Clientes (UCBT) ---
-        print("   ⏳ Lendo tabela de consumidores (pode demorar)...")
+        # --- 2. LOCALIZAR CONSUMIDORES (MODO SHERLOCK) ---
+        layer_uc = "UCBT_tab" # Tenta o padrão primeiro
+        try:
+            gpd.read_file(PATH_GDB, layer=layer_uc, rows=1, ignore_geometry=True)
+        except:
+            # Tenta variações se falhar
+            for l in COLUNAS_POSSIVEIS["TABELA_CONSUMIDOR"]:
+                try: 
+                    gpd.read_file(PATH_GDB, layer=l, rows=1, ignore_geometry=True)
+                    layer_uc = l
+                    break
+                except: continue
+
+        print(f"⏳ Varrendo tabela '{layer_uc}' em busca do ID {id_sub_alvo}...")
+        df_uc = gpd.read_file(PATH_GDB, layer=layer_uc, engine='pyogrio', ignore_geometry=True)
         
-        # Lê a tabela sem geometria (muito mais rápido)
-        # Importante: Garantir que lemos as colunas de energia
-        df_uc = gpd.read_file(PATH_GDB, layer='UCBT_tab', engine='pyogrio', ignore_geometry=True)
-        
+        # --- A MÁGICA: Busca em TODAS as colunas ---
         clientes = pd.DataFrame()
+        coluna_de_ligacao_encontrada = None
 
-        # TENTATIVA A: Via Circuitos (Mais correto)
-        if len(circuitos) > 0 and 'CTMT' in df_uc.columns:
-            clientes = df_uc[df_uc['CTMT'].isin(circuitos)]
-        
-        # TENTATIVA B: Link Direto (Caso raro, mas possível)
-        if clientes.empty and 'SUB' in df_uc.columns:
-            clientes = df_uc[df_uc['SUB'] == id_sub]
+        # Converte ID alvo para string para garantir comparação
+        id_str = str(id_sub_alvo).strip()
+        id_num = id_sub_alvo if isinstance(id_sub_alvo, (int, float)) else None
 
-        qtd_clientes = len(clientes)
+        # Prioriza colunas óbvias para ganhar tempo
+        cols_prioridade = ["SUB", "CTMT", "UNI_TR_S", "CONJUNTO", "PAC"]
+        cols_teste = [c for c in df_uc.columns if c in cols_prioridade] + [c for c in df_uc.columns if c not in cols_prioridade]
+
+        for col in cols_teste:
+            # Pega uma amostra para ver se tem chance de ser essa coluna
+            # Se a coluna só tem texto "A, B, C", não adianta comparar com ID numérico
+            if df_uc[col].dtype == 'object':
+                match = df_uc[df_uc[col].astype(str).str.strip() == id_str]
+            else:
+                if id_num is not None:
+                    match = df_uc[df_uc[col] == id_num]
+                else:
+                    continue # Coluna numérica vs ID string -> pula
+
+            if not match.empty:
+                print(f"🎉 ENCONTRADO! A coluna de ligação é: '{col}'")
+                clientes = match
+                coluna_de_ligacao_encontrada = col
+                break
         
-        # --- PASSO 4: Verificação e Fallback ---
-        if qtd_clientes == 0:
-            print(f"   ⚠️ Nenhum cliente encontrado via vínculo CTMT ou SUB.")
+        if clientes.empty:
+            print(f"⚠️ Varri todas as {len(df_uc.columns)} colunas e nenhuma possui o ID {id_sub_alvo}.")
+            print("   -> Tente verificar se o ID na tabela SUB é o mesmo usado na UCBT.")
             return gerar_estimativa_fallback(nome_real)
 
-        # --- PASSO 5: Extração Detalhada Mês a Mês (PARA A IA) ---
-        print("   📊 Calculando perfil sazonal mensal...")
-        
+        print(f"✅ Sucesso: {len(clientes)} clientes vinculados encontrados.")
+
+        # --- 3. SOMAR ENERGIA ---
         perfil_mensal = {}
         total_anual = 0.0
         
-        # Itera de 01 a 12 para pegar cada coluna ENE_XX
         for i in range(1, 13):
-            mes_str = f"{i:02d}" # '01', '02', etc.
-            coluna_alvo = f"ENE_{mes_str}"
+            mes_str = f"{i:02d}"
+            possiveis_cols = [f"ENE_{mes_str}", f"ENE{mes_str}", f"CONS_{mes_str}"]
             
-            # Procura a coluna no dataframe (ignorando case sensitive)
-            col_encontrada = next((c for c in df_uc.columns if c.upper() == coluna_alvo), None)
+            col_energia = encontrar_coluna(clientes, possiveis_cols)
             
-            if col_encontrada:
-                # Soma e converte de kWh para MWh
-                soma_mes_mwh = clientes[col_encontrada].sum() / 1000.0
-                perfil_mensal[i] = soma_mes_mwh
-                total_anual += soma_mes_mwh
+            if col_energia:
+                soma = clientes[col_energia].fillna(0).sum() / 1000.0 # MWh
+                perfil_mensal[i] = soma
+                total_anual += soma
             else:
                 perfil_mensal[i] = 0.0
 
-        print(f"   ✅ Dados extraídos! Jan: {perfil_mensal[1]:.1f} MWh ... Dez: {perfil_mensal[12]:.1f} MWh")
+        print(f"📊 Volume Total Extraído: {total_anual:.2f} MWh")
 
         return {
             "subestacao": nome_real,
-            "total_clientes": qtd_clientes,
+            "total_clientes": len(clientes),
             "consumo_anual_mwh": float(total_anual),
-            "consumo_mensal": perfil_mensal, # <--- O DADO IMPORTANTE ESTÁ AQUI
+            "consumo_mensal": perfil_mensal,
             "origem": "BDGD (Real)"
         }
 
     except Exception as e:
-        print(f"   ❌ Erro crítico no ETL: {e}")
+        print(f"❌ Erro ETL: {e}")
         return gerar_estimativa_fallback(nome_subestacao)
 
 def gerar_estimativa_fallback(nome_sub):
-    """
-    Gera dados estatísticos plausíveis com sazonalidade simulada
-    para não travar a aplicação quando o BDGD falha.
-    """
-    print("   🔄 Ativando modo de ESTIMATIVA (Fallback)...")
-    
-    clientes_est = random.randint(2500, 8000)
-    base_kwh_cliente = 180.0 # Média residencial
-    
-    perfil_mensal = {}
-    total_anual = 0.0
-    
+    print("🔄 [FALLBACK] Usando dados estatísticos...")
+    clientes_est = 5000
+    base_kwh = 180.0
+    perfil = {}
+    total = 0.0
     for i in range(1, 13):
-        # Cria uma curva de verão (Jan/Fev/Dez mais altos)
-        fator_sazonal = 1.0
-        if i in [12, 1, 2, 3]: fator_sazonal = 1.25
-        elif i in [6, 7]: fator_sazonal = 0.9
+        val = (clientes_est * base_kwh) / 1000.0
+        perfil[i] = val
+        total += val
         
-        consumo_mes = (clientes_est * base_kwh_cliente * fator_sazonal) / 1000.0 # MWh
-        perfil_mensal[i] = consumo_mes
-        total_anual += consumo_mes
-    
     return {
         "subestacao": nome_sub,
-        "total_clientes": clientes_est,
-        "consumo_anual_mwh": round(total_anual, 2),
-        "consumo_mensal": perfil_mensal,
-        "origem": "Estimado (Dados Indisponíveis)",
+        "consumo_anual_mwh": total,
+        "consumo_mensal": perfil,
+        "origem": "Estimado",
         "alerta": True
     }

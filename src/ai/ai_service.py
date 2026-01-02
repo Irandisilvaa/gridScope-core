@@ -3,180 +3,185 @@ import numpy as np
 import joblib
 import uvicorn
 import traceback
+import sys
+import os
+import requests
+import holidays
+import calendar
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
-import requests
-import os
-import holidays
-import calendar  # <--- IMPORTANTE: Para saber quantos dias tem no mês
+from contextlib import asynccontextmanager
 
-# --- CONFIGURAÇÃO DA API ---
-app = FastAPI(title="GridScope AI - Enterprise Core", version="4.0", port=8001)
-
-# --- CARREGAMENTO DO MODELO ---
+# --- CONFIGURAÇÃO ---
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(DIR_ATUAL, "modelo_consumo.pkl")
 
-try:
-    modelo_ia = joblib.load(MODEL_PATH)
-    print(f"✅ Cérebro da IA carregado com sucesso: {MODEL_PATH}")
-except:
-    print("⚠️ Modelo ML não encontrado. O sistema usará fallback matemático.")
-    modelo_ia = None
+# Nome do modelo padrão (O que você acabou de treinar e validou)
+MODELO_PADRAO_NOME = "modelo_consumo_real.pkl"
+MODELO_PADRAO_PATH = os.path.join(DIR_ATUAL, MODELO_PADRAO_NOME)
 
-# --- MODELO DE DADOS (INPUT) ---
+# Cache para não carregar o modelo do disco a cada request
+cache_modelos = {}
+
+def log(msg):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"[{timestamp}] [AI_API] {msg}", flush=True)
+
+# --- CICLO DE VIDA ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    log("Inicializando API GridScope AI...")
+    
+    # Carrega o modelo principal na memória ao iniciar
+    if os.path.exists(MODELO_PADRAO_PATH):
+        try:
+            model = joblib.load(MODELO_PADRAO_PATH)
+            cache_modelos["PADRAO"] = model
+            log(f"Modelo Principal carregado: {MODELO_PADRAO_NOME}")
+        except Exception as e:
+            log(f"Erro ao carregar modelo padrão: {e}")
+    else:
+        log(f"Modelo padrão não encontrado em: {MODELO_PADRAO_PATH}")
+    
+    yield
+    log("Encerrando API...")
+
+app = FastAPI(title="GridScope AI Service", version="5.0", lifespan=lifespan)
+
+# --- INPUT DA API (Agora com 'subestacao') ---
 class DuckCurveRequest(BaseModel):
+    subestacao: str            # <--- O NOME QUE VOCÊ QUER PASSAR
     data_alvo: str
     potencia_gd_kw: float
-    consumo_mes_alvo_mwh: float  # <--- AGORA É MENSAL, NÃO ANUAL
+    consumo_mes_alvo_mwh: float # O volume real vem do seu Dashboard/BD
     lat: float
     lon: float
 
-# --- FUNÇÃO AUXILIAR DE CLIMA ---
+# --- FUNÇÃO DE CLIMA (Mantida igual) ---
 def obter_clima(lat, lon, data_str):
-    """ Busca irradiação e temperatura na Open-Meteo. """
+    # (Mesmo código da sua versão anterior para Open-Meteo)
     try:
         url = "https://api.open-meteo.com/v1/forecast"
-        params = {
-            "latitude": lat, "longitude": lon,
-            "start_date": data_str, "end_date": data_str,
-            "hourly": ["shortwave_radiation", "temperature_2m"],
-            "timezone": "America/Sao_Paulo"
-        }
-        r = requests.get(url, params=params, timeout=3.0)
-        
+        params = {"latitude": lat, "longitude": lon, "start_date": data_str, "end_date": data_str, 
+                  "hourly": ["shortwave_radiation", "temperature_2m"], "timezone": "America/Sao_Paulo"}
+        r = requests.get(url, params=params, timeout=1.5)
         if r.status_code == 200:
-            data = r.json()
-            if 'hourly' in data:
-                rad = np.array(data['hourly']['shortwave_radiation'])
-                temp = np.array(data['hourly']['temperature_2m'])
-                if len(rad) == 24 and len(temp) == 24:
-                    return rad, temp
-    except Exception as e:
-        print(f"   ⚠️ Clima API Error: {e}")
-    
-    # Fallback (Dia de sol padrão)
-    rad = np.array([0,0,0,0,0,0, 50,200,450,700,850,950,900,800,600,350,150,20, 0,0,0,0,0,0])
-    temp = np.array([25.0] * 24)
-    return rad, temp
+            d = r.json()
+            if 'hourly' in d:
+                return np.array(d['hourly']['shortwave_radiation']), np.array(d['hourly']['temperature_2m'])
+    except:
+        pass
+    # Fallback
+    rad = np.array([0]*6 + [50,200,450,700,850,950,900,800,600,350,150,20] + [0]*6)
+    if len(rad) != 24: rad = np.resize(rad, 24)
+    return rad, np.array([25.0]*24)
 
-# --- ENDPOINT PRINCIPAL ---
+# --- ENDPOINT INTELIGENTE ---
 @app.post("/predict/duck-curve")
-def calcular_curva_inteligente(payload: DuckCurveRequest):
-    print(f"\n🧠 IA Processando: Data={payload.data_alvo} | GD={payload.potencia_gd_kw}kW | Carga Mês={payload.consumo_mes_alvo_mwh:.2f}MWh")
+def prever_curva(payload: DuckCurveRequest):
+    log(f"Request recebido: {payload.subestacao} | Data: {payload.data_alvo}")
     
     try:
-        # --- 1. DATA PARSE E CALENDÁRIO ---
+        # 1. Tenta encontrar modelo específico, senão usa o Padrão
+        # Isso permite que no futuro você treine "modelo_ITABAIANA.pkl" e a API ache ele.
+        nome_modelo_especifico = f"modelo_{payload.subestacao.upper()}.pkl"
+        path_especifico = os.path.join(DIR_ATUAL, nome_modelo_especifico)
+        
+        modelo_ativo = None
+        
+        # Lógica de Seleção de Modelo
+        if nome_modelo_especifico in cache_modelos:
+            modelo_ativo = cache_modelos[nome_modelo_especifico] # Já está na memória
+        elif os.path.exists(path_especifico):
+            log(f"Carregando modelo específico: {nome_modelo_especifico}")
+            modelo_ativo = joblib.load(path_especifico)
+            cache_modelos[nome_modelo_especifico] = modelo_ativo # Salva no cache
+        else:
+            # Usa o modelo genérico (Aracaju) que serve como base comportamental
+            modelo_ativo = cache_modelos.get("PADRAO")
+
+        # 2. Prepara Features
         try:
             dt = datetime.strptime(payload.data_alvo, "%Y-%m-%d")
         except:
             dt = datetime.now()
-        
+            
         br_holidays = holidays.Brazil()
+        dias_mes = calendar.monthrange(dt.year, dt.month)[1]
         
-        # Descobre quantos dias tem nesse mês específico (Ex: Fev 2024 = 29 dias)
-        _, dias_no_mes = calendar.monthrange(dt.year, dt.month)
-        
-        # Calcula a média diária REAL baseada no dado do BDGD
-        if payload.consumo_mes_alvo_mwh <= 0: payload.consumo_mes_alvo_mwh = 10.0 # Proteção
-        media_diaria_mwh = payload.consumo_mes_alvo_mwh / dias_no_mes
+        # Média diária baseada no volume que o usuário mandou
+        if payload.consumo_mes_alvo_mwh <= 0: payload.consumo_mes_alvo_mwh = 100
+        media_dia_mwh = payload.consumo_mes_alvo_mwh / dias_mes
 
-        # --- 2. PREDIÇÃO DO PERFIL (FORMA DO BOLO) ---
-        horas = np.arange(24)
+        # 3. Inferência da IA (Forma da Curva)
+        perfil_base = np.zeros(24)
         
-        # Prepara o DataFrame exatamente como foi treinado (com a coluna ANO!)
-        df_input = pd.DataFrame({
-            "hora": horas,
-            "mes": dt.month,
-            "dia_semana": dt.weekday(),
-            "eh_feriado": int(dt in br_holidays),
-            "eh_fim_semana": int(dt.weekday() >= 5),
-            "ano": dt.year, # <--- CRUCIAL: O novo modelo exige isso
-            "dia_ano": dt.timetuple().tm_yday # Opcional, se usou no treino
-        })
-
-        # Garante que só mandamos as colunas que o modelo conhece
-        if modelo_ia:
+        if modelo_ativo:
+            df = pd.DataFrame({
+                "hora": range(24),
+                "mes": dt.month,
+                "dia_semana": dt.weekday(),
+                "dia_ano": dt.timetuple().tm_yday,
+                "ano": dt.year,
+                "eh_feriado": int(dt in br_holidays),
+                "eh_fim_semana": int(dt.weekday() >= 5)
+            })
+            # Garante ordem das colunas
+            cols = ["hora", "mes", "dia_semana", "dia_ano", "ano", "eh_feriado", "eh_fim_semana"]
             try:
-                colunas_modelo = modelo_ia.feature_names_in_
-                df_filtrado = df_input[colunas_modelo]
-                perfil_bruto = modelo_ia.predict(df_filtrado)
+                perfil_base = modelo_ativo.predict(df[cols])
             except Exception as e:
-                print(f"   ⚠️ Erro de Features na IA: {e}. Usando fallback.")
-                perfil_bruto = 10 + 10 * np.exp(-(horas-19)**2/8) # Gaussiana
-        else:
-            perfil_bruto = 10 + 10 * np.exp(-(horas-19)**2/8)
+                log(f"Erro no predict: {e}. Usando fallback.")
+        
+        # Se a IA falhar ou modelo for None, usa fallback matemático
+        if np.sum(perfil_base) == 0:
+            perfil_base = 10 + 8 * np.exp(-(np.arange(24)-19)**2/8)
 
-        # --- 3. NORMALIZAÇÃO E ESCALONAMENTO ---
-        # A IA previu um valor absoluto baseado no treino, mas precisamos ajustar
-        # para a realidade exata da subestação vinda do BDGD.
+        # 4. NORMALIZAÇÃO E ESCALA (O Segredo!)
+        # A IA diz: "Às 19h o consumo é o dobro das 04h".
+        # A matemática diz: "O total do dia tem que dar X MWh".
+        perfil_base = np.maximum(perfil_base, 0.1) # Evita negativos
+        fator_forma = perfil_base / perfil_base.sum() # Transforma em % do dia
         
-        perfil_bruto = np.maximum(perfil_bruto, 0) # Remove negativos
-        soma_perfil = perfil_bruto.sum()
+        # Aplica o volume que veio do payload
+        consumo_final = fator_forma * media_dia_mwh
         
-        if soma_perfil == 0: soma_perfil = 1.0 # Evita div zero
-        
-        # Transforma a previsão em uma distribuição percentual (Forma)
-        fator_forma = perfil_bruto / soma_perfil
-        
-        # Aplica essa forma ao volume diário real
-        # AQUI É O PULO DO GATO: Se for feriado, a IA já "achatou" o perfil_bruto relativo a outros dias,
-        # mas aqui forçamos o volume a bater com a média mensal.
-        # Para ser PERFEITO, deveríamos ajustar a media_diaria baseado se hoje é feriado ou não
-        # em relação à média do mês. Vamos fazer um ajuste fino:
-        
-        # Se a IA diz que hoje consome 20% menos que um dia normal, respeitamos isso.
-        # Fator de ajuste do dia = (Soma Prevista Hoje) / (Média das Somas Previstas no Mês)
-        # Simplificação robusta: Usamos a forma da IA aplicada à média.
-        curve_consumo = fator_forma * media_diaria_mwh
-        
-        # Se for feriado, aplicamos um "redutor extra" se a média mensal for muito alta
-        # (Opcional, mas ajuda a destacar a queda)
-        if dt in br_holidays:
-             # Se a média mensal vem cheia, mas hoje é feriado, reduzimos um pouco a média aplicada
-             curve_consumo *= 0.85 
+        # Ajuste fino para feriados se não capturado
+        if dt in br_holidays: consumo_final *= 0.9
 
-        # --- 4. GERAÇÃO SOLAR E CARGA LÍQUIDA ---
+        # 5. Cálculo Solar e Net Load
         rad, temp = obter_clima(payload.lat, payload.lon, payload.data_alvo)
+        gd_mw = payload.potencia_gd_kw / 1000.0
+        perda = (temp - 25).clip(min=0) * 0.004
+        geracao = gd_mw * (rad / 1000.0) * 0.85 * (1 - perda)
         
-        # Ajuste de tamanhos
-        if len(rad) != 24: rad = np.resize(rad, 24)
-        if len(temp) != 24: temp = np.resize(temp, 24)
+        carga_liquida = consumo_final - geracao
 
-        potencia_mw = payload.potencia_gd_kw / 1000.0
-        
-        # Modelo Físico PV
-        perda_temp = (temp - 25).clip(min=0) * 0.004
-        eficiencia_termica = 1 - perda_temp
-        curve_geracao = potencia_mw * (rad / 1000.0) * 0.85 * eficiencia_termica
-
-        curve_liquida = curve_consumo - curve_geracao
-
-        # --- 5. ANÁLISE DE FLUXO ---
-        min_net = np.min(curve_liquida)
+        # 6. Diagnóstico
+        min_net = np.min(carga_liquida)
+        status = "Operação Normal"
         alerta = False
-        analise = "✅ Operação Segura"
         
         if min_net < 0:
-            analise = f"⚠️ ALERTA: Fluxo Reverso ({abs(min_net):.2f} MWh)"
+            status = f"FLUXO REVERSO DETECTADO ({abs(min_net):.2f} MWh)"
             alerta = True
-        elif np.min(curve_liquida) < (np.max(curve_consumo) * 0.2):
-             analise = "⚠️ ATENÇÃO: Risco de Rampa (Duck Curve Profunda)"
+        elif min_net < (np.max(consumo_final) * 0.15):
+             status = "Cuidado: Margem Baixa (Rampa)"
              alerta = True
 
         return {
+            "subestacao": payload.subestacao,
+            "modelo_usado": "Especifico" if nome_modelo_especifico in cache_modelos else "Generico (Base Regional)",
             "timeline": [f"{h:02d}:00" for h in range(24)],
-            "consumo_mwh": np.round(curve_consumo, 3).tolist(),
-            "geracao_mwh": np.round(curve_geracao, 3).tolist(),
-            "carga_liquida_mwh": np.round(curve_liquida, 3).tolist(),
-            "analise": analise,
+            "consumo": np.round(consumo_final, 3).tolist(),
+            "geracao": np.round(geracao, 3).tolist(),
+            "carga_liquida": np.round(carga_liquida, 3).tolist(),
+            "status": status,
             "alerta": alerta
         }
 
     except Exception as e:
-        print("❌ ERRO CRÍTICO NA API:")
-        traceback.print_exc()
+        log(f"ERRO CRÍTICO: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
