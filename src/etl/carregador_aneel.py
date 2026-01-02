@@ -2,8 +2,14 @@ import geopandas as gpd
 import os
 import sys
 
+# Ajusta o caminho para encontrar o config.py na raiz
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import PATH_GDB
+
+try:
+    from config import PATH_GDB
+except ImportError:
+    # Fallback caso não ache o config
+    PATH_GDB = "caminho/para/seu/arquivo.gdb" 
 
 def carregar_subestacoes():
     print("Iniciando módulo de carregamento (ETL)...")
@@ -16,6 +22,7 @@ def carregar_subestacoes():
 
     try:
         # 1. Carrega Subestações (Mapa)
+        # engine='pyogrio' é muito mais rápido para GDBs grandes
         gdf = gpd.read_file(PATH_GDB, layer='SUB', engine='pyogrio')
         
         # 2. Normaliza Nome
@@ -39,6 +46,10 @@ def carregar_subestacoes():
         if 'COD_ID' not in gdf.columns and 'ID' in gdf.columns:
             gdf = gdf.rename(columns={'ID': 'COD_ID'})
 
+        # Garante que o COD_ID seja string para evitar erro de comparação com a tabela de clientes
+        if 'COD_ID' in gdf.columns:
+            gdf['COD_ID'] = gdf['COD_ID'].astype(str)
+
         # --- MODIFICAÇÃO: FILTRO DE CARGA (CLIENTES REAIS) ---
         print("Cruzando com base de consumidores para validar operação...")
         
@@ -58,7 +69,8 @@ def carregar_subestacoes():
                 )
                 
                 # Lista de IDs de subestações que realmente têm contas de luz ativas
-                ids_com_carga = df_clientes['SUB'].unique()
+                # Converte para string para garantir o match com o gdf
+                ids_com_carga = df_clientes['SUB'].astype(str).unique()
                 
                 total_antes = len(gdf)
                 
@@ -78,6 +90,8 @@ def carregar_subestacoes():
         cols_finais = ['COD_ID', 'NOM', 'geometry']
         cols_existentes = [c for c in cols_finais if c in gdf.columns]
         gdf_limpo = gdf[cols_existentes].copy()
+        
+        # Remove nomes vazios
         gdf_limpo = gdf_limpo.dropna(subset=['NOM'])
         
         print(f"Sucesso! {len(gdf_limpo)} subestações COM CARGA carregadas.")

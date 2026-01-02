@@ -9,14 +9,46 @@ from typing import Dict, Optional, List, Any
 from shapely.geometry import mapping
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from config import PATH_GEOJSON
-from utils import carregar_dados_cache, fundir_dados_geo_mercado
+try:
+    from config import PATH_GEOJSON
+    from utils import carregar_dados_cache, fundir_dados_geo_mercado
+except ImportError:
+    pass
 
 app = FastAPI(
     title="GridScope API",
     description="API Avançada de Monitoramento de Rede",
-    version="4.2"
+    version="4.5" # Versão atualizada com correção de fallback
 )
+
+# --- FUNÇÃO DE LIMPEZA ROBUSTA ---
+def limpar_float(valor):
+    """
+    Converte strings BR (1.000,00), strings sujas ou None para float Python.
+    """
+    if valor is None:
+        return 0.0
+    if isinstance(valor, (int, float)):
+        return float(valor)
+    if isinstance(valor, str):
+        try:
+            # Remove R$, espaços e caracteres invisíveis
+            limpo = valor.replace("R$", "").replace(" ", "").strip()
+            
+            # Lógica para detectar formato BR (1.000,00) vs US (1,000.00 ou 1000.00)
+            if "," in limpo and "." in limpo: 
+                # Assumimos formato BR: remove ponto de milhar, troca vírgula por ponto
+                limpo = limpo.replace(".", "").replace(",", ".")
+            elif "," in limpo: 
+                # Apenas vírgula decimal
+                limpo = limpo.replace(",", ".")
+            
+            return float(limpo)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+# --- MODELOS DE DADOS ---
 
 class MetricasRede(BaseModel):
     total_clientes: int
@@ -26,6 +58,7 @@ class MetricasRede(BaseModel):
 class PerfilClasse(BaseModel):
     qtd_clientes: int
     pct: float
+    consumo_anual_mwh: Optional[float] = 0.0 
 
 class GeracaoDistribuida(BaseModel):
     total_unidades: int
@@ -50,6 +83,8 @@ class SimulacaoSolar(BaseModel):
     potencia_instalada_kw: float
     geracao_estimada_mwh: float
     impacto_na_rede: str
+
+# --- FUNÇÕES AUXILIARES DE CLIMA ---
 
 def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
     hoje = date.today()
@@ -95,9 +130,11 @@ def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
         print(f"Erro Clima: {e}")
         return 5.0, 30.0, "Dados Offline", "Estimativa Padrao"
 
+# --- ENDPOINTS ---
+
 @app.get("/", tags=["Status"])
 def home():
-    return {"status": "online", "system": "GridScope Core 4.2"}
+    return {"status": "online", "system": "GridScope Core 4.5"}
 
 @app.get("/mercado/ranking", response_model=List[SubestacaoData], tags=["Core"])
 def obter_dados_completos():
@@ -106,11 +143,35 @@ def obter_dados_completos():
         dados_fundidos = fundir_dados_geo_mercado(gdf, dados_mercado)
         
         for item in dados_fundidos:
+            # 1. Serializa Geometria
             if item.get('geometry'):
                 item['geometry'] = mapping(item['geometry'])
-                
+            
+            # 2. LIMPEZA ESTRUTURAL
+            # Garante que os números dentro de 'metricas_rede' sejam float e limpos
+            if 'metricas_rede' in item:
+                m = item['metricas_rede']
+                if 'consumo_anual_mwh' in m:
+                    m['consumo_anual_mwh'] = limpar_float(m['consumo_anual_mwh'])
+
+            # 3. LIMPEZA DO PERFIL DE CONSUMO (Lógica de Fallback Adicionada)
+            if 'perfil_consumo' in item:
+                for classe, valores in item['perfil_consumo'].items():
+                    # TENTA PEGAR O VALOR EM VÁRIAS CHAVES POSSÍVEIS
+                    # Prioridade: 1. Nome novo do ETL, 2. Nome comum, 3. Nome original do GDB (ENE_12)
+                    val_candidato = (
+                        valores.get('consumo_anual_mwh') or 
+                        valores.get('consumo') or 
+                        valores.get('ENE_12') or 
+                        0.0
+                    )
+                    
+                    # Limpa e grava na chave oficial que o Pydantic espera
+                    valores['consumo_anual_mwh'] = limpar_float(val_candidato)
+
         return dados_fundidos
     except Exception as e:
+        print(f"Erro detalhado API: {e}") # Log no terminal para debug
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 @app.get("/mercado/geojson", tags=["Core"])
@@ -151,14 +212,20 @@ def simular_geracao(
 
     lat, lon = -10.9472, -37.0731 # Default Aracaju
     try:
+        # Tenta pegar geometria serializada ou objeto shapely
         geom = alvo.get('geometry')
-        if geom:
-            centroide = geom.centroid
-            lon, lat = centroide.x, centroide.y
+        # Se for dict (GeoJSON)
+        if isinstance(geom, dict) and 'coordinates' in geom:
+             # Simplificação para ponto (pega o primeiro ponto se for polígono)
+             coords = geom['coordinates']
+             if isinstance(coords[0], float): # Point
+                 lon, lat = coords[0], coords[1]
+             else: # Polygon
+                 lon, lat = coords[0][0][0], coords[0][0][1]
     except Exception as e:
         print(f"Aviso Geometria: {e}")
 
-    # 4. Simulação Solar
+    # 4. Simulação
     irradiacao, temp_max, desc_tempo, fonte = obter_clima_avancado(lat, lon, data_obj)
     
     perda_termica = 0.0
@@ -169,7 +236,8 @@ def simular_geracao(
     fator_performance_base = 0.75
     fator_performance_real = fator_performance_base * (1 - perda_termica)
     
-    potencia = alvo['geracao_distribuida']['potencia_total_kw']
+    # Limpeza também aqui, caso a potencia venha como string
+    potencia = limpar_float(alvo['geracao_distribuida']['potencia_total_kw'])
     
     geracao_kwh = potencia * irradiacao * fator_performance_real
     geracao_mwh = geracao_kwh / 1000
