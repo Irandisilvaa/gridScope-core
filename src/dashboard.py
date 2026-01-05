@@ -9,7 +9,7 @@ import os
 import sys
 import ast
 import urllib.parse
-from datetime import date, timedelta
+from datetime import date
 import warnings
 
 # --- SUPRESSÃO DE AVISOS (CLEAN LOGS) ---
@@ -22,13 +22,13 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 try:
     from utils import carregar_dados_cache
-    from etl.etl_ai_consumo import buscar_dados_reais_para_ia 
+    from etl.etl_ai_consumo import buscar_dados_reais_para_ia
 except ImportError as e:
     st.error(f"Erro de importação: {e}. Verifique se 'utils.py' e 'etl/etl_ai_consumo.py' existem.")
     st.stop()
 
 st.set_page_config(
-    layout="wide", 
+    layout="wide",
     page_title="GridScope | Intelligence Dashboard",
     page_icon="⚡"
 )
@@ -91,23 +91,22 @@ def obter_dados_dashboard():
 
 def consultar_simulacao(subestacao, data_escolhida):
     """Consulta API de Simulação Solar (Backend 8000) com tratamento de erro detalhado."""
-    
-    # 1. Formata a data para envio (string)
+
     data_str = data_escolhida.strftime("%d-%m-%Y")
-    
-    # 2. Codifica o nome para URL (resolve problemas com espaços e parênteses)
-    nome_seguro = urllib.parse.quote(str(subestacao).strip())
-    
-    url = f"http://127.0.0.1:8000/simulacao/{nome_seguro}?data={data_str}"
-    
+
+    subestacao_id = subestacao["id"]  # ou subestacao.id
+    id_seguro = urllib.parse.quote(subestacao_id)
+
+    url = f"http://127.0.0.1:8000/simulacao/{id_seguro}?data={data_str}"
+
     try:
         # Timeout de 10s para garantir conexões lentas
         response = requests.get(url, timeout=10)
-        
+
         # Se a API responder, retorna o JSON
         if response.status_code == 200:
             return response.json()
-        
+
         # Se der erro 404 ou 500, loga mas não quebra o dashboard
         else:
             return None
@@ -121,6 +120,8 @@ def consultar_simulacao(subestacao, data_escolhida):
 
 def consultar_ia_predict(payload):
     """Consulta crua à API de Inteligência Artificial (Backend 8001)."""
+    st.write("Payload enviado para IA:")
+    st.json(payload)
     try:
         resp = requests.post(
             "http://127.0.0.1:8001/predict/duck-curve",
@@ -138,30 +139,14 @@ def consultar_ia_predict(payload):
     except Exception as e:
         return None, str(e)
 
-@st.cache_data(ttl=600, show_spinner=False)
-def obter_previsao_ia_cached(subestacao, data_str, potencia_gd, lat, lon):
-    """Realiza o ETL e a consulta à IA."""
-    dados_reais = buscar_dados_reais_para_ia(subestacao)
-    
-    consumo_anual = 0.0
-    if dados_reais and "erro" not in dados_reais:
-        consumo_anual = dados_reais.get('consumo_anual_mwh', 0)
-    else:
-        consumo_anual = 6000.0 
-    
-    consumo_mes_estimado = consumo_anual / 12
-
-    try:
-        payload = {
-            "data_alvo": str(data_str),
-            "potencia_gd_kw": float(potencia_gd) if potencia_gd else 0.0,
-            "consumo_mes_alvo_mwh": float(consumo_mes_estimado),
-            "lat": float(lat),
-            "lon": float(lon)
-        }
-    except ValueError:
-        return None, "Erro na conversão de dados numéricos para IA."
-
+'''st.cache_data(ttl=600, show_spinner=False)'''
+def obter_previsao_ia_cached(subestacao, data_str, potencia_gd):
+    payload = {
+        "subestacao_id": subestacao["id"],
+        "data_alvo": data_str,
+        "capacidade_gd_mw": float(potencia_gd) / 1000 if potencia_gd else 0.0,
+        "fator_sol": 0.85
+    }
     return consultar_ia_predict(payload)
 
 # --- CARREGAMENTO INICIAL ---
@@ -181,7 +166,7 @@ mapa_opcoes = {}
 if 'subestacao' in df_mercado.columns:
     for idx, row in df_mercado.iterrows():
         # Tenta pegar ID tecnico se existir, senão usa indice
-        id_tec = row.get('id_tecnico', idx) 
+        id_tec = row.get('id_tecnico', idx)
         label = row['subestacao'] # Ex: "ATALAIA (ID: 15)"
         mapa_opcoes[label] = id_tec
 
@@ -224,10 +209,13 @@ try:
     if dados_filtrados.empty:
         # Fallback de emergência
         dados_filtrados = df_mercado.iloc[[0]]
-    
+
     dados_raw = dados_filtrados.iloc[0]
-    # Limpa nome visualmente
     nome_limpo_escolha = str(dados_raw["subestacao"]).split(' (ID:')[0]
+    subestacao_obj = {
+        "id": str(id_escolhido),
+        "nome": nome_limpo_escolha
+    }
 
 except Exception as e:
     st.error(f"Erro ao recuperar dados da tabela: {e}")
@@ -239,7 +227,7 @@ dados_gd = converter_para_dict(dados_raw.get("geracao_distribuida", {}))
 perfil = converter_para_dict(dados_raw.get("perfil_consumo", {}))
 
 # --- CABEÇALHO GLOBAL ---
-st.title(f"Monitoramento: {nome_limpo_escolha}")
+st.title(f"Monitoramento: {subestacao_obj}")
 st.caption(f"ID Técnico: {id_escolhido}")
 st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
@@ -260,12 +248,12 @@ with tab_visao_geral:
     st.subheader("Potência da GD Instalada por Classe")
 
     detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
-    
+
     detalhe_gd = {k: v for k, v in detalhe_raw.items() if k in CATEGORIAS_ALVO}
-    
+
     if detalhe_gd:
         fig_barras = go.Figure(data=[go.Bar(
-            x=list(detalhe_gd.keys()), 
+            x=list(detalhe_gd.keys()),
             y=list(detalhe_gd.values()),
             marker_color='#1f77b4',
             text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in detalhe_gd.values()],
@@ -277,10 +265,10 @@ with tab_visao_geral:
         st.info("Sem dados de GD para as categorias selecionadas.")
 
     st.divider()
-    
+
     # --- PARTE 2: Mapa de Cobertura (Largura Total) ---
     st.subheader("📍 Área de Cobertura Geográfica")
-    
+
     if centroid_existe:
         m = folium.Map(location=[lat_c, lon_c], zoom_start=13)
 
@@ -288,7 +276,7 @@ with tab_visao_geral:
             feature_id = feature['properties'].get('COD_ID')
             # Comparação segura string vs string
             is_sel = (str(feature_id) == str(id_escolhido))
-            cor = '#007bff' if is_sel else 'gray' 
+            cor = '#007bff' if is_sel else 'gray'
             return {'fillColor': cor, 'color': 'white' if is_sel else 'gray', 'weight': 3 if is_sel else 1, 'fillOpacity': 0.7 if is_sel else 0.3}
 
         folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"], aliases=["Subestação:", "ID:"])).add_to(m)
@@ -300,7 +288,7 @@ with tab_visao_geral:
 
     # --- PARTE 3: Gráficos de Perfil (Lado a Lado - 50% cada) ---
     st.subheader("📌 Segmentação de Mercado")
-    
+
     col_graf1, col_graf2 = st.columns(2)
 
     # ESQUERDA: PIZZA (Clientes)
@@ -313,18 +301,18 @@ with tab_visao_geral:
                 val = v_dict.get("qtd_clientes", 0)
                 if val > 0:
                     dados_pie.append({"Segmento": k, "Valor": val})
-                
+
         df_pie = pd.DataFrame(dados_pie)
         if not df_pie.empty:
             fig_pie = px.pie(df_pie, values="Valor", names="Segmento", hole=0.4, color="Segmento", color_discrete_map=CORES_MAPA)
             fig_pie.update_layout(
-                margin=dict(t=20, b=20, l=20, r=20), 
-                height=350, 
-                showlegend=True, 
+                margin=dict(t=20, b=20, l=20, r=20),
+                height=350,
+                showlegend=True,
                 legend=dict(orientation="h", y=-0.1)
             )
             fig_pie.update_traces(
-                textposition='auto', 
+                textposition='auto',
                 textinfo='percent+label',
                 textfont_size=13,
                 hovertemplate='%{label}<br>Qtd: %{value}<br>%{percent}'
@@ -333,30 +321,30 @@ with tab_visao_geral:
         else:
             st.info("Sem dados de Clientes.")
 
-    # DIREITA: BARRAS 
+    # DIREITA: BARRAS
     with col_graf2:
         st.markdown("**Carga por Classe (Consumo MWh)**")
         dados_carga = []
-        
+
         if perfil:
             for k, v in perfil.items():
-                if k not in CATEGORIAS_ALVO: 
+                if k not in CATEGORIAS_ALVO:
                      continue
                 chave_limpa = k.strip()
                 v_dict = converter_para_dict(v)
-                
+
                 # Prioriza 'consumo_anual_mwh', fallback 'ENE_12'
                 val_candidato = (v_dict.get("consumo_anual_mwh") or v_dict.get("ENE_12") or 0)
                 val_float = limpar_float(val_candidato)
-                
+
                 if val_float > 0:
                     dados_carga.append({"Segmento": chave_limpa, "Valor": val_float})
-        
+
         df_carga = pd.DataFrame(dados_carga)
-        
+
         if not df_carga.empty:
             df_carga = df_carga.sort_values(by="Valor", ascending=False)
-            
+
             fig_carga = go.Figure(data=[
                 go.Bar(
                     x=df_carga["Segmento"],
@@ -368,7 +356,7 @@ with tab_visao_geral:
                 )
             ])
             fig_carga.update_layout(
-                margin=dict(t=20, b=20, l=20, r=20), 
+                margin=dict(t=20, b=20, l=20, r=20),
                 height=350,
                 yaxis_title="Consumo Anual (MWh)",
                 showlegend=False,
@@ -379,7 +367,7 @@ with tab_visao_geral:
             st.warning("Gráfico vazio. O consumo anual está zerado no arquivo JSON.")
 
     st.divider()
-    
+
     # Tabela e Relatório
     st.header("📋 Relatório Técnico & Ações")
     col_table, col_actions = st.columns([2, 1])
@@ -388,12 +376,12 @@ with tab_visao_geral:
         st.subheader("Dados Consolidados")
         dados_consolidados = {
             "Parâmetro": [
-                "Subestação Alvo", "ID Técnico", "Consumo Anual Total", 
-                "Potência GD Instalada", "Qtd. Usinas Solares", 
+                "Subestação Alvo", "ID Técnico", "Consumo Anual Total",
+                "Potência GD Instalada", "Qtd. Usinas Solares",
                 "Total Clientes", "Criticidade da Rede"
             ],
             "Valor": [
-                str(nome_limpo_escolha), str(id_escolhido),
+                str(subestacao_obj), str(id_escolhido),
                 f"{formatar_br(metricas.get('consumo_anual_mwh', 0))} MWh",
                 f"{formatar_br(dados_gd.get('potencia_total_kw', 0))} kW",
                 f"{dados_gd.get('total_unidades', 0)} unid.",
@@ -408,12 +396,12 @@ with tab_visao_geral:
         potencia_kw = limpar_float(dados_gd.get('potencia_total_kw', 0))
         geracao_est_mwh = (potencia_kw * 4.5 * 365) / 1000
         consumo_mwh = limpar_float(metricas.get('consumo_anual_mwh', 1))
-        
+
         if consumo_mwh == 0: consumo_mwh = 1
-        
+
         penetracao = (geracao_est_mwh / consumo_mwh) * 100
         st.write(f"**Nível de Penetração GD:** {penetracao:.1f}%")
-        
+
         if penetracao > 25:
             st.warning("⚠️ **Saturação Alta:** Risco de inversão de fluxo.")
         elif penetracao > 10:
@@ -427,17 +415,17 @@ with tab_visao_geral:
 # --- ABA 2: INTELIGÊNCIA ARTIFICIAL ---
 with tab_ia:
     st.subheader(f"☀️ Simulação VPP & Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
-    
+
     # Simulação VPP (Safe Mode)
-    dados_sim = consultar_simulacao(nome_limpo_escolha, data_analise)
-    
+    dados_sim = consultar_simulacao(subestacao_obj, data_analise)
+
     if dados_sim:
         sc1, sc2, sc3, sc4 = st.columns(4)
         sc1.metric("Clima", dados_sim.get('condicao_tempo', '--'))
         sc2.metric("Irradiação", f"{dados_sim.get('irradiacao_solar_kwh_m2', 0)} kWh/m²")
         sc3.metric("Temp. Máx", f"{dados_sim.get('temperatura_max_c', 0)}°C")
         sc4.metric("Perda Térmica", f"{dados_sim.get('fator_perda_termica', 0)}%")
-        
+
         impacto = dados_sim.get("impacto_na_rede", "NORMAL")
         if "CRITICO" in str(impacto).upper() or "ALTA" in str(impacto).upper():
             st.error(f"🚨 Status da Rede: {impacto}")
@@ -449,21 +437,25 @@ with tab_ia:
     st.divider()
 
     st.header("🧠 Análise Preditiva (AI Duck Curve)")
-    
+
     with st.spinner(f"IA: Calculando fluxo energético para {data_analise.strftime('%d/%m')}..."):
-        res_ia, erro_ia = obter_previsao_ia_cached(
-            subestacao=nome_limpo_escolha,
-            data_str=str(data_analise),
-            potencia_gd=dados_gd.get('potencia_total_kw', 0),
-            lat=lat_c,
-            lon=lon_c
-        )
+
+        payload_duck = {
+            "subestacao_id": subestacao_obj["id"],
+            "data_alvo": data_analise.isoformat(),
+            "capacidade_gd_mw": float(
+                limpar_float(dados_gd.get("potencia_total_kw", 0)) / 1000
+            ),
+            "fator_sol": 0.85
+        }
+
+        res_ia, erro_ia = consultar_ia_predict(payload_duck)
 
         if res_ia:
             if 'timeline' in res_ia and 'consumo_mwh' in res_ia and len(res_ia['timeline']) > 0:
                 analise_texto = res_ia.get('analise', 'Análise processada')
                 is_alerta = res_ia.get('alerta', False)
-                
+
                 if is_alerta:
                     st.error(f"**ALERTA DETECTADO:** {analise_texto}", icon="⚠️")
                 else:

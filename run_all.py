@@ -9,7 +9,6 @@ from datetime import datetime
 DIR_RAIZ = os.path.dirname(os.path.abspath(__file__))
 DIR_SRC = os.path.join(DIR_RAIZ, "src")
 DIR_LOGS = os.path.join(DIR_RAIZ, "logs")
-# Definindo onde o modelo fica para verificar se ele já existe
 CAMINHO_MODELO_PKL = os.path.join(DIR_SRC, "ai", "modelo_consumo.pkl")
 
 PYTHON_EXEC = sys.executable
@@ -83,16 +82,13 @@ def run_step(script_name, description):
 def run_ai_training(script_name, description, forcar_treino=False):
     """Executa script de treinamento na pasta AI, APENAS SE NECESSÁRIO."""
     
-    # --- NOVA LÓGICA: Verifica se o modelo já existe ---
     if os.path.exists(CAMINHO_MODELO_PKL) and not forcar_treino:
         logger.info(f"⏩ MODELO JÁ EXISTE: {description}. Pulando treinamento para inicializar rápido.")
         return
-    # ----------------------------------------------------
 
     logger.info(f"🧠 TREINANDO IA: {description} ({script_name})")
     script_path = os.path.join(DIR_SRC, "ai", script_name)
     
-    # Fallback caso esteja em modelos (compatibilidade)
     if not os.path.exists(script_path):
         script_path = os.path.join(DIR_SRC, "modelos", script_name)
         
@@ -110,8 +106,12 @@ def start_api():
     logger.info("INICIANDO API PRINCIPAL (Backend 8000)...")
     log_api = open(os.path.join(DIR_LOGS, "api_service.log"), "w")
     
+    # Windows não suporta workers múltiplos bem, usa apenas 1 worker
+    import platform
+    workers = "1" if platform.system() == "Windows" else "4"
+    
     processo = subprocess.Popen(
-        [PYTHON_EXEC, "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"],
+        [PYTHON_EXEC, "-m", "uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", workers],
         cwd=DIR_RAIZ,
         env=get_env_with_src(),
         stdout=log_api, 
@@ -123,8 +123,11 @@ def start_api_ai():
     logger.info("INICIANDO API IA (Backend 8001)...")
     log_ai = open(os.path.join(DIR_LOGS, "api_ai.log"), "w")
     
+    import platform
+    workers = "1" if platform.system() == "Windows" else "4"
+    
     processo = subprocess.Popen(
-        [PYTHON_EXEC, "-m", "uvicorn", "src.ai.ai_service:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "4"],
+        [PYTHON_EXEC, "-m", "uvicorn", "src.ai.ai_service:app", "--host", "0.0.0.0", "--port", "8001", "--workers", workers],
         cwd=DIR_RAIZ,
         env=get_env_with_src(),
         stdout=log_ai, 
@@ -146,29 +149,19 @@ def start_dashboard():
 if __name__ == "__main__":
     logger.info("--- ⚡ INICIANDO SISTEMA GRIDSCOPE (MODO INTELIGENTE) ⚡ ---")
     try:
-        # 1. Pipeline de ETL (Extração e Tratamento)
-        run_etl("etl_ai_consumo.py", "ETL: Carga de Consumo Real (BDGD)") 
-        
-        # 2. Processamento Geoespacial e Mercado
+        run_etl("etl_ai_consumo.py", "ETL: Carga de Consumo Real (BDGD)")
         run_step("processar_voronoi.py", "Gerando Territorios (Voronoi)")
-        
-        # --- CORREÇÃO AQUI: Script agora roda obrigatoriamente ---
-        run_step("analise_mercado.py", "Cruzando Dados de Mercado") 
-        
-        # 3. Treinamento de IA (Verifica se precisa treinar ou se já existe)
+        run_step("analise_mercado.py", "Cruzando Dados de Mercado")
         run_ai_training("train_model.py", "Treinamento Modelo Duck Curve", forcar_treino=False)
-        
-        # 4. Inicialização dos Servidores
         logger.info("Subindo Servidores de Aplicação...")
         api_proc = start_api()   
         api_ai_proc = start_api_ai() 
         
-        time.sleep(5) # Aguarda APIs subirem
+        time.sleep(5)
         dash_proc = start_dashboard()
         
         logger.info("✅ SISTEMA ONLINE (Ctrl+C para parar)")
         
-        # Loop de Monitoramento
         while True:
             time.sleep(1)
             if api_proc.poll() is not None:
