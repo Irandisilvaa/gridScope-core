@@ -1,111 +1,120 @@
+import os
+import joblib
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, mean_absolute_error
-import joblib
-import os
+from datetime import datetime
 import holidays
 
-# --- CONFIGURAÇÃO ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_PATH = os.path.join(BASE_DIR, "modelo_consumo.pkl")
+current_dir = os.path.dirname(os.path.abspath(__file__))
+MODELS_DIR = os.path.join(current_dir, "modelos")
+os.makedirs(MODELS_DIR, exist_ok=True)
 
-print("--- 1. Gerando Dataset Histórico de Longo Prazo (2015-2025) ---")
-print("   (Isso cria uma base sólida para a IA entender padrões climáticos e de calendário)")
+def gerar_fator_subestacao(identificador: str) -> int:
+    return abs(hash(identificador)) % 10
 
-# 10 Anos de Histórico (aprox 96.000 linhas de dados)
-# Quanto mais dados, mais robusta a IA fica contra variações estranhas
-dates = pd.date_range("2015-01-01", "2025-12-31", freq="h")
-df = pd.DataFrame({"data_hora": dates})
 
-# --- ENGENHARIA DE FEATURES (O que a IA vê) ---
-print("   > Calculando variáveis temporais e feriados...")
-df["hora"] = df["data_hora"].dt.hour
-df["mes"] = df["data_hora"].dt.month
-df["dia_semana"] = df["data_hora"].dt.dayofweek # 0=Seg, 6=Dom
-df["ano"] = df["data_hora"].dt.year  # <--- NOVIDADE: A IA agora entende o passar dos anos
-df["dia_ano"] = df["data_hora"].dt.dayofyear
+def treinar_modelo_simulado(identificador):
+    identificador_str = str(identificador).strip()
+    nome_arquivo = identificador_str.replace(" ", "_")
 
-# Calendário Brasil Completo
-br_holidays = holidays.Brazil()
-df["eh_feriado"] = df["data_hora"].apply(lambda x: x in br_holidays).astype(int)
-df["eh_fim_semana"] = df["dia_semana"].apply(lambda x: 1 if x >= 5 else 0)
+    print(f"🔄 Treinando modelo para: {identificador_str}")
 
-# --- SIMULAÇÃO DO COMPORTAMENTO "GABARITO" ---
-# Criamos um padrão lógico para a IA aprender a estrutura da curva (Forma do Bolo)
-def simular_comportamento_robusto(row):
-    # 1. Perfil Base Diário (Gaussiana - Pico as 19h, típico residencial)
-    hora = row["hora"]
-    # Curva suave que sobe no fim da tarde
-    perfil = 15 + 12 * np.exp(-(hora - 19)**2 / 6) 
-    
-    # 2. Sazonalidade (Verão consome mais no BR)
-    if row["mes"] in [12, 1, 2, 3]: perfil *= 1.25 # Ar condicionado
-    if row["mes"] in [6, 7]: perfil *= 0.90      # Inverno
+    try:
+        seed = int(''.join(filter(str.isdigit, identificador_str))) * 97
+    except:
+        seed = sum(ord(c) for c in identificador_str)
 
-    # 3. Calendário (Fins de semana e Feriados)
-    if row["dia_semana"] == 5: perfil *= 0.85 # Sábado
-    if row["dia_semana"] == 6: perfil *= 0.65 # Domingo
-    if row["eh_feriado"] == 1: perfil *= 0.60 # Feriado (Queda forte)
+    np.random.seed(seed)
 
-    # 4. Tendência de Crescimento Anual (Growth Trend)
-    # Simula que o consumo aumenta ~2.5% a cada ano que passa
-    ano_base = 2015
-    anos_passados = row["ano"] - ano_base
-    fator_crescimento = 1 + (anos_passados * 0.025) 
-    perfil *= fator_crescimento
+    fator_sub = gerar_fator_subestacao(identificador_str)
 
-    # 5. Aleatoriedade (Ruído)
-    # Adiciona variação para a IA não decorar, mas sim "entender"
-    ruido = np.random.normal(0, 1.5) 
-    
-    return max(0, perfil + ruido)
+    datas = pd.date_range(end=datetime.now(), periods=365 * 24, freq="h")
+    features = []
 
-print("   > Simulando dados de carga... (Aguarde, processando 10 anos)")
-df["consumo_kwh"] = df.apply(simular_comportamento_robusto, axis=1)
+    nome_upper = identificador_str.upper()
+    br_holidays = holidays.Brazil()
 
-print(f"   > Dataset gerado: {len(df)} horas de treinamento.")
+    for data in datas:
+        h = data.hour
 
-# --- TREINAMENTO DO MODELO ---
-print("\n--- 2. Treinando a IA (Random Forest Regressor) ---")
+        if "30290967" in identificador_str:
+            consumo_base = 25 + 8 * np.sin((h - 8) * np.pi / 12)
+        elif "30290937" in identificador_str:  # SUBESTA7 (B)
+            consumo_base = 20 + 12 * np.sin((h - 18) * np.pi / 12)
+        elif "CONTORNO" in nome_upper or "SUBESTA6" in nome_upper:
+            consumo_base = 35 + 10 * np.sin((h - 10) * np.pi / 10)
+        elif "INDUSTRIAL" in nome_upper:
+            consumo_base = 45 + np.random.uniform(-3, 3)
+        else:
+            consumo_base = 18 + 12 * np.sin((h - 6) * np.pi / 12)
+            if 18 <= h <= 22:
+                consumo_base += 12
 
-# Features: Note que 'ano' agora é uma pergunta que fazemos ao modelo
-X = df[["hora", "mes", "dia_semana", "eh_feriado", "eh_fim_semana", "ano"]]
-y = df["consumo_kwh"]
+        ruido = np.random.normal(0, 2.5)
+        consumo = max(0, consumo_base + ruido)
 
-# Separação (80% treino / 20% teste)
-# shuffle=True mistura os anos para garantir que ela aprendeu o conceito, não a sequência
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle=True)
+        eh_fds = data.dayofweek >= 5
+        eh_feriado = data.date() in br_holidays
 
-# Modelo mais robusto (200 árvores)
-modelo = RandomForestRegressor(n_estimators=200, n_jobs=-1, random_state=42)
-modelo.fit(X_train, y_train)
+        if eh_fds or eh_feriado:
+            consumo *= 0.8
 
-# --- VALIDAÇÃO ---
-previsoes = modelo.predict(X_test)
-r2 = r2_score(y_test, previsoes)
-mae = mean_absolute_error(y_test, previsoes)
+        features.append({
+            "hora": h,
+            "mes": data.month,
+            "dia_semana": data.dayofweek,
+            "dia_ano": data.dayofyear,
+            "ano": data.year,
+            "eh_feriado": int(eh_feriado),
+            "eh_fim_semana": int(eh_fds),
+            "fator_subestacao": fator_sub,
+            "consumo": consumo
+        })
 
-print(f"\n📊 RELATÓRIO DE PERFORMANCE IA:")
-print(f"   - Acurácia (R²): {r2:.4f}")
-print(f"   - Erro Médio (MAE): {mae:.2f} kWh")
+    df = pd.DataFrame(features)
 
-# --- TESTE DE FOGO (Previsão Futura) ---
-print("\n🔍 Teste de Fogo: Prevendo Natal de 2028...")
-entrada_teste = pd.DataFrame([{
-    "hora": 19,             # Hora de Ponta
-    "mes": 12,              # Dezembro
-    "dia_semana": 1,        # Terça-feira (hipotético)
-    "eh_feriado": 1,        # É FERIADO!
-    "eh_fim_semana": 0,
-    "ano": 2028             # Futuro distante
-}])
+    X = df.drop(columns=["consumo"])
+    y = df["consumo"]
 
-resultado = modelo.predict(entrada_teste)[0]
-print(f"   A IA previu para o Natal de 2028 (19h): {resultado:.2f} kWh")
-print("   (Note como ela considerou o crescimento anual + a queda do feriado)")
+    model = RandomForestRegressor(
+        n_estimators=80,
+        random_state=seed,
+        n_jobs=-1
+    )
 
-# Salva o modelo
-joblib.dump(modelo, MODEL_PATH)
-print(f"\n💾 Cérebro da IA salvo e atualizado em: {MODEL_PATH}")
+    model.fit(X, y)
+
+    path = os.path.join(MODELS_DIR, f"modelo_{nome_arquivo}.pkl")
+    joblib.dump(model, path)
+
+    print(f"✅ Modelo salvo: {path}")
+
+
+if __name__ == "__main__":
+    lista_treino = [
+        "30290967",
+        "30290937",
+        "30290936",
+        "30290965",
+        "30290955",
+        "30290938",
+        "30290969",
+
+        "SUBESTA5",
+        "SUBESTA6",
+        "SUBESTA7",
+        "SUBESTA8",
+        "SUBESTA9",
+        "SE CONTORNO",
+        "Industrial",
+        "Centro",
+        "Zona Norte"
+    ]
+
+    print(f"🚀 Iniciando treinamento de {len(lista_treino)} modelos...")
+
+    for item in lista_treino:
+        treinar_modelo_simulado(item)
+
+    print("\n✨ Treinamento finalizado! Reinicie o ai_service.py.")
