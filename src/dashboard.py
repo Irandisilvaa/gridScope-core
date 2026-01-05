@@ -114,8 +114,6 @@ def consultar_simulacao(subestacao, data_escolhida):
 
 def consultar_ia_predict(payload):
     """Consulta crua à API de Inteligência Artificial (Backend 8001)."""
-    st.write("Payload enviado para IA:")
-    st.json(payload)
     try:
         resp = requests.post(
             "http://127.0.0.1:8001/predict/duck-curve",
@@ -133,7 +131,6 @@ def consultar_ia_predict(payload):
     except Exception as e:
         return None, str(e)
 
-@st.cache_data(ttl=600, show_spinner=False)
 def obter_previsao_ia_cached(subestacao, data_str, potencia_gd):
     payload = {
         "subestacao_id": subestacao["id"],
@@ -182,7 +179,6 @@ if not area_sel.empty:
         centroid = area_sel.to_crs(epsg=3857).geometry.centroid.to_crs(area_sel.crs).iloc[0]
         lat_c, lon_c = centroid.y, centroid.x
     except Exception:
-        # Fallback simples se a projeção falhar
         c = area_sel.geometry.centroid.iloc[0]
         lat_c, lon_c = c.y, c.x
 else:
@@ -195,7 +191,6 @@ try:
           dados_filtrados = df_mercado[df_mercado["subestacao"] == escolha_label]
 
     if dados_filtrados.empty:
-        # Fallback de emergência
         dados_filtrados = df_mercado.iloc[[0]]
 
     dados_raw = dados_filtrados.iloc[0]
@@ -214,7 +209,7 @@ dados_gd = converter_para_dict(dados_raw.get("geracao_distribuida", {}))
 perfil = converter_para_dict(dados_raw.get("perfil_consumo", {}))
 
 # --- CABEÇALHO GLOBAL ---
-st.title(f"Monitoramento: {subestacao_obj}")
+st.title(f"Monitoramento: {subestacao_obj['nome']}")
 st.caption(f"ID Técnico: {id_escolhido}")
 st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
@@ -273,7 +268,7 @@ with tab_visao_geral:
 
     st.divider()
 
-    # --- PARTE 3: Gráficos de Perfil (Lado a Lado - 50% cada) ---
+    # --- PARTE 3: Gráficos de Perfil ---
     st.subheader("📌 Segmentação de Mercado")
 
     col_graf1, col_graf2 = st.columns(2)
@@ -402,7 +397,6 @@ with tab_visao_geral:
 with tab_ia:
     st.subheader(f"☀️ Simulação VPP & Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
 
-    # Simulação VPP (Safe Mode)
     dados_sim = consultar_simulacao(subestacao_obj, data_analise)
 
     if dados_sim:
