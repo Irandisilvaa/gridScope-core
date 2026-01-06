@@ -379,27 +379,57 @@ def render_view():
     with col_stat2:
         st.subheader("Top 5 - Maior Potência GD")
         
-        top5 = df_tabela.nlargest(5, 'Potência GD (kW)')[['Subestação', 'Potência GD (kW)']]
+        # 1. CRIA IDENTIFICADOR ÚNICO (Nome + ID)
+        # Isso garante que subestações com mesmo nome não se sobreponham
+        df_tabela['Identificacao_Unica'] = df_tabela['Subestação'] + " (ID: " + df_tabela['ID'].astype(str) + ")"
         
+        # 2. Pega os Top 5 baseado na potência
+        top5 = df_tabela.nlargest(5, 'Potência GD (kW)')
+        
+        # --- LÓGICA DE CORES ALEATÓRIAS/ESCALÁVEIS ---
+        import plotly.express as px
+        import random
+
+        pool_cores = (
+            px.colors.qualitative.Plotly + 
+            px.colors.qualitative.Bold + 
+            px.colors.qualitative.Vivid
+        )
+        
+        qtde = len(top5)
+        cores_finais = []
+        
+        if qtde <= len(pool_cores):
+            cores_finais = pool_cores[:qtde]
+        else:
+            cores_finais = pool_cores[:]
+            for _ in range(qtde - len(pool_cores)):
+                cores_finais.append("#{:06x}".format(random.randint(0, 0xFFFFFF)))
+        # ---------------------------------------------
+
         fig_barras = go.Figure(data=[go.Bar(
-            x=top5['Subestação'],
+            x=top5['Identificacao_Unica'],  # <--- USA O ID COMPOSTO NO EIXO X
             y=top5['Potência GD (kW)'],
-            marker_color='#007bff',
-            text=top5['Potência GD (kW)'].apply(lambda x: f"{x:,.0f} kW"),
-            textposition='auto'
+            marker_color=cores_finais,
+            # Texto formatado padrão BR
+            text=top5['Potência GD (kW)'].apply(lambda x: f"{x:,.0f} kW".replace(",", "X").replace(".", ",").replace("X", ".")),
+            textposition='auto',
+            # No hover, mostra o nome limpo e o ID separado
+            hovertemplate='<b>%{x}</b><br>Potência: %{y:,.2f} kW<extra></extra>'
         )])
         
         fig_barras.update_layout(
             height=300,
-            margin=dict(t=20, b=20, l=20, r=20),
+            margin=dict(t=20, b=40, l=20, r=20), # Aumentei margem inferior para caber os nomes longos
             xaxis_title="",
             yaxis_title="Potência (kW)",
-            showlegend=False
+            showlegend=False,
+            # Se os nomes ficarem muito grandes, rotaciona um pouco
+            xaxis=dict(tickangle=-15) 
         )
         
         st.plotly_chart(fig_barras, use_container_width=True)
     
-    # Informações adicionais
     penetracao_media = (metricas['total_potencia_kw'] * 4.5 * 365 / 1000) / metricas['total_consumo_mwh'] * 100 if metricas['total_consumo_mwh'] > 0 else 0
     
     st.info(f"""
