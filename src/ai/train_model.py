@@ -40,7 +40,7 @@ def treinar_modelo_simulado(identificador):
 
         if "30290967" in identificador_str:
             consumo_base = 25 + 8 * np.sin((h - 8) * np.pi / 12)
-        elif "30290937" in identificador_str:  # SUBESTA7 (B)
+        elif "30290937" in identificador_str:
             consumo_base = 20 + 12 * np.sin((h - 18) * np.pi / 12)
         elif "CONTORNO" in nome_upper or "SUBESTA6" in nome_upper:
             consumo_base = 35 + 10 * np.sin((h - 10) * np.pi / 10)

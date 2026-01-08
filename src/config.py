@@ -22,3 +22,5 @@ CRS_PROJETADO = "EPSG:31984"
 
 ANEEL_API_HUB_URL = os.getenv("ANEEL_API_HUB_URL", "https://hub.arcgis.com/api/search/v1/collections/all/items")
 DISTRIBUIDORA_ALVO = os.getenv("DISTRIBUIDORA_ALVO", "Energisa SE")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5433/gridscope_local")

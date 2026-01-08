@@ -82,7 +82,7 @@ def render_view():
     if 'subestacao' in df_mercado.columns:
         for idx, row in df_mercado.iterrows():
             id_tec = row.get('id_tecnico', idx)
-            label = row['subestacao']  
+            label = row['subestacao']
             mapa_opcoes[label] = id_tec
 
     if not mapa_opcoes:
@@ -137,6 +137,7 @@ def render_view():
     st.caption(f"ID Técnico: {id_escolhido}")
     st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
+    # --- ROW 1: KPIs  ---
     st.header("Infraestrutura de Rede")
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -165,8 +166,9 @@ def render_view():
             fig_barras = go.Figure(data=[go.Bar(
                 x=list(detalhe_gd.keys()),
                 y=list(detalhe_gd.values()),
-                marker_color=lista_cores, 
-                text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in detalhe_gd.values()],
+                marker_color='#1f77b4',
+                text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
+                      detalhe_gd.values()],
                 textposition='auto'
             )])
             
@@ -189,7 +191,8 @@ def render_view():
                         'fillOpacity': 0.7 if is_sel else 0.3}
 
             folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                     aliases=["Subestação:", "ID:"])).add_to(m)
+                                                                                       aliases=["Subestação:",
+                                                                                                "ID:"])).add_to(m)
             st_folium(m, use_container_width=True, height=400)
         else:
             st.warning("⚠️ Geometria não encontrada para este ID.")
@@ -210,18 +213,23 @@ def render_view():
                     if val > 0:
                         dados_clientes.append({"Segmento": k, "Valor": val})
 
-            df_clientes = pd.DataFrame(dados_clientes)
-            if not df_clientes.empty:
-                df_clientes = df_clientes.sort_values(by="Valor", ascending=False)
-                fig_bar_cli = go.Figure(data=[go.Bar(
-                    x=df_clientes["Segmento"],
-                    y=df_clientes["Valor"],
-                    marker_color=[CORES_MAPA.get(s, '#007bff') for s in df_clientes["Segmento"]],
-                    text=df_clientes["Valor"],
-                    textposition='auto'
-                )])
-                fig_bar_cli.update_layout(margin=dict(t=20, b=20), height=350, yaxis_title="Qtd Clientes")
-                st.plotly_chart(fig_bar_cli, use_container_width=True)
+            df_pie = pd.DataFrame(dados_pie)
+            if not df_pie.empty:
+                fig_pie = px.pie(df_pie, values="Valor", names="Segmento", hole=0.4, color="Segmento",
+                                 color_discrete_map=CORES_MAPA)
+                fig_pie.update_layout(
+                    margin=dict(t=20, b=20, l=20, r=20),
+                    height=350,
+                    showlegend=True,
+                    legend=dict(orientation="h", y=-0.1)
+                )
+                fig_pie.update_traces(
+                    textposition='auto',
+                    textinfo='percent+label',
+                    textfont_size=13,
+                    hovertemplate='%{label}<br>Qtd: %{value}<br>%{percent}'
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
             else:
                 st.info("Sem dados de Clientes.")
 
@@ -240,21 +248,33 @@ def render_view():
             df_carga = pd.DataFrame(dados_carga)
             if not df_carga.empty:
                 df_carga = df_carga.sort_values(by="Valor", ascending=False)
-                fig_carga = go.Figure(data=[go.Bar(
-                    x=df_carga["Segmento"],
-                    y=df_carga["Valor"],
-                    marker_color=[CORES_MAPA.get(s, '#17a2b8') for s in df_carga["Segmento"]],
-                    text=[f"{val:,.0f}".replace(",", ".") for val in df_carga["Valor"]],
-                    textposition='auto'
-                )])
-                fig_carga.update_layout(margin=dict(t=20, b=20), height=350, yaxis_title="MWh")
+
+                fig_carga = go.Figure(data=[
+                    go.Bar(
+                        x=df_carga["Segmento"],
+                        y=df_carga["Valor"],
+                        marker_color=[CORES_MAPA.get(s, '#17a2b8') for s in df_carga["Segmento"]],
+                        text=[f"{val:,.0f} MWh".replace(",", "X").replace(".", ",").replace("X", ".") for val in
+                              df_carga["Valor"]],
+                        textposition='auto',
+                        hovertemplate='<b>%{x}</b><br>Consumo: %{y:,.2f} MWh<extra></extra>'
+                    )
+                ])
+                fig_carga.update_layout(
+                    margin=dict(t=20, b=20, l=20, r=20),
+                    height=350,
+                    yaxis_title="Consumo Anual (MWh)",
+                    showlegend=False,
+                    xaxis=dict(title=None)
+                )
                 st.plotly_chart(fig_carga, use_container_width=True)
             else:
                 st.info("Sem dados de Carga.")
 
         st.divider()
 
-        st.header("📋 Relatório Técnico")
+        # Tabela e Relatório
+        st.header("📋 Relatório Técnico & Ações")
         col_table, col_actions = st.columns([2, 1])
 
         with col_table:
@@ -284,16 +304,88 @@ def render_view():
             if penetracao > 25:
                 st.warning("⚠️ Risco de inversão de fluxo.")
             else:
-                st.success("✅ Rede com capacidade.")
+                st.success("✅ **Rede Estável:** Capacidade disponível.")
 
-    with tab_ia_render:
-        if tab_ia is not None:
-            try:
-                tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
-            except Exception as e:
-                st.error(f"Erro ao executar módulo de IA: {e}")
-                st.code(str(e))
+            csv = pd.DataFrame(dados_consolidados).to_csv(index=False).encode('utf-8')
+            st.download_button(label="📥 Baixar Relatório CSV", data=csv, file_name=f"relatorio_{id_escolhido}.csv",
+                               mime="text/csv", use_container_width=True)
+
+    # --- ABA 2: INTELIGÊNCIA ARTIFICIAL ---
+    with tab_ia:
+        st.subheader(f"☀️ Simulação VPP & Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
+
+        dados_sim = consultar_simulacao(subestacao_obj, data_analise)
+
+        if dados_sim:
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("Clima", dados_sim.get('condicao_tempo', '--'))
+            sc2.metric("Irradiação", f"{dados_sim.get('irradiacao_solar_kwh_m2', 0)} kWh/m²")
+            sc3.metric("Temp. Máx", f"{dados_sim.get('temperatura_max_c', 0)}°C")
+            sc4.metric("Perda Térmica", f"{dados_sim.get('fator_perda_termica', 0)}%")
+
+            impacto = dados_sim.get("impacto_na_rede", "NORMAL")
+            if "CRITICO" in str(impacto).upper() or "ALTA" in str(impacto).upper():
+                st.error(f"🚨 Status da Rede: {impacto}")
+            else:
+                st.success(f"✅ Status da Rede: {impacto}")
         else:
-            st.error("❌ O arquivo 'tab_ia.py' não foi encontrado na pasta 'views'. Verifique se o nome está correto (com underline, não ponto).")
+            st.warning("⚠️ VPP Offline ou não conectou (Porta 8000). Verifique o terminal para ver o erro detalhado.")
+
+        st.divider()
+
+        st.header("🧠 Análise Preditiva (AI Duck Curve)")
+
+        with st.spinner(f"IA: Calculando fluxo energético para {data_analise.strftime('%d/%m')}..."):
+
+            payload_duck = {
+                "subestacao_id": subestacao_obj["id"],
+                "data_alvo": data_analise.isoformat(),
+                "capacidade_gd_mw": float(
+                    limpar_float(dados_gd.get("potencia_total_kw", 0)) / 1000
+                ),
+                "fator_sol": 0.85
+            }
+
+            res_ia, erro_ia = consultar_ia_predict(payload_duck)
+
+            if res_ia:
+                if 'timeline' in res_ia and 'consumo_mwh' in res_ia and len(res_ia['timeline']) > 0:
+                    analise_texto = res_ia.get('analise', 'Análise processada')
+                    is_alerta = res_ia.get('alerta', False)
+
+                    if is_alerta:
+                        st.error(f"**ALERTA DETECTADO:** {analise_texto}", icon="⚠️")
+                    else:
+                        st.success(f"**OPERAÇÃO NORMAL:** {analise_texto}", icon="✅")
+
+                    fig_duck = go.Figure()
+                    fig_duck.add_trace(go.Scatter(x=res_ia['timeline'], y=res_ia['consumo_mwh'], name="Carga (Consumo)",
+                                                  fill='tozeroy', line=dict(color='#007bff', width=2),
+                                                  fillcolor='rgba(0, 123, 255, 0.1)'))
+                    fig_duck.add_trace(go.Scatter(x=res_ia['timeline'], y=res_ia['geracao_mwh'], name="Geração Solar",
+                                                  line=dict(color='#ffc107', width=3)))
+                    fig_duck.add_trace(
+                        go.Scatter(x=res_ia['timeline'], y=res_ia['carga_liquida_mwh'], name="Carga Líquida (Saldo)",
+                                   line=dict(color='white', dash='dot', width=2)))
+                    fig_duck.add_hline(y=0, line_dash="solid", line_color="#dc3545", annotation_text="Limite Reverso")
+                    fig_duck.update_layout(height=500, title="Projeção Energética (24h)", hovermode="x unified",
+                                           legend=dict(orientation="h", y=1.1))
+                    st.plotly_chart(fig_duck, use_container_width=True)
+
+                    kp1, kp2, kp3 = st.columns(3)
+                    pico_solar = max(res_ia['geracao_mwh']) if res_ia['geracao_mwh'] else 0
+                    min_liquida = min(res_ia['carga_liquida_mwh']) if res_ia['carga_liquida_mwh'] else 0
+                    cons_tot = sum(res_ia['consumo_mwh']) if res_ia['consumo_mwh'] else 0
+                    ger_tot = sum(res_ia['geracao_mwh']) if res_ia['geracao_mwh'] else 0
+                    cobertura = (ger_tot / cons_tot * 100) if cons_tot > 0 else 0
+
+                    kp1.metric("Pico de Geração Solar", f"{pico_solar:.2f} MW")
+                    kp2.metric("Menor Carga Líquida", f"{min_liquida:.2f} MW",
+                               delta="Crítico" if min_liquida < 0 else "Estável", delta_color="inverse")
+                    kp3.metric("Cobertura Solar Diária", f"{cobertura:.1f}%")
+                else:
+                    st.error("Dados incompletos retornados pela IA.")
+            else:
+                st.warning(f"Não foi possível calcular a curva. Detalhe: {erro_ia}")
 
     st.caption(f"GridScope v4.9 Enterprise | Dados atualizados em: {date.today().strftime('%d/%m/%Y')}")
