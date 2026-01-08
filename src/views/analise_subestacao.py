@@ -34,11 +34,11 @@ def render_view():
     CATEGORIAS_ALVO = ["Residencial", "Comercial", "Industrial", "Rural", "Poder Público"]
 
     CORES_MAPA = {
-      "Residencial": "#007bff",        
-      "Comercial": "#ffc107",          
-      "Industrial": "#dc3545",         
-      "Rural": "#28a745",              
-      "Poder Público": "#6f42c1",      
+        "Residencial": "#007bff",        
+        "Comercial": "#ffc107",          
+        "Industrial": "#dc3545",         
+        "Rural": "#28a745",              
+        "Poder Público": "#6f42c1",      
     }
 
     def formatar_br(valor):
@@ -137,7 +137,6 @@ def render_view():
     st.caption(f"ID Técnico: {id_escolhido}")
     st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
-    # --- ROW 1: KPIs  ---
     st.header("Infraestrutura de Rede")
     k1, k2, k3, k4 = st.columns(4)
     with k1:
@@ -168,7 +167,7 @@ def render_view():
                 y=list(detalhe_gd.values()),
                 marker_color='#1f77b4',
                 text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
-                      detalhe_gd.values()],
+                    detalhe_gd.values()],
                 textposition='auto'
             )])
             
@@ -191,8 +190,8 @@ def render_view():
                         'fillOpacity': 0.7 if is_sel else 0.3}
 
             folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                       aliases=["Subestação:",
-                                                                                                "ID:"])).add_to(m)
+                                                                                    aliases=["Subestação:",
+                                                                                            "ID:"])).add_to(m)
             st_folium(m, use_container_width=True, height=400)
         else:
             st.warning("⚠️ Geometria não encontrada para este ID.")
@@ -216,7 +215,7 @@ def render_view():
             df_pie = pd.DataFrame(dados_pie)
             if not df_pie.empty:
                 fig_pie = px.pie(df_pie, values="Valor", names="Segmento", hole=0.4, color="Segmento",
-                                 color_discrete_map=CORES_MAPA)
+                                color_discrete_map=CORES_MAPA)
                 fig_pie.update_layout(
                     margin=dict(t=20, b=20, l=20, r=20),
                     height=350,
@@ -255,7 +254,7 @@ def render_view():
                         y=df_carga["Valor"],
                         marker_color=[CORES_MAPA.get(s, '#17a2b8') for s in df_carga["Segmento"]],
                         text=[f"{val:,.0f} MWh".replace(",", "X").replace(".", ",").replace("X", ".") for val in
-                              df_carga["Valor"]],
+                            df_carga["Valor"]],
                         textposition='auto',
                         hovertemplate='<b>%{x}</b><br>Consumo: %{y:,.2f} MWh<extra></extra>'
                     )
@@ -273,7 +272,6 @@ def render_view():
 
         st.divider()
 
-        # Tabela e Relatório
         st.header("📋 Relatório Técnico & Ações")
         col_table, col_actions = st.columns([2, 1])
 
@@ -308,9 +306,8 @@ def render_view():
 
             csv = pd.DataFrame(dados_consolidados).to_csv(index=False).encode('utf-8')
             st.download_button(label="📥 Baixar Relatório CSV", data=csv, file_name=f"relatorio_{id_escolhido}.csv",
-                               mime="text/csv", use_container_width=True)
+                            mime="text/csv", use_container_width=True)
 
-    # --- ABA 2: INTELIGÊNCIA ARTIFICIAL ---
     with tab_ia:
         st.subheader(f"☀️ Simulação VPP & Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
 
@@ -360,16 +357,16 @@ def render_view():
 
                     fig_duck = go.Figure()
                     fig_duck.add_trace(go.Scatter(x=res_ia['timeline'], y=res_ia['consumo_mwh'], name="Carga (Consumo)",
-                                                  fill='tozeroy', line=dict(color='#007bff', width=2),
-                                                  fillcolor='rgba(0, 123, 255, 0.1)'))
+                                                fill='tozeroy', line=dict(color='#007bff', width=2),
+                                                fillcolor='rgba(0, 123, 255, 0.1)'))
                     fig_duck.add_trace(go.Scatter(x=res_ia['timeline'], y=res_ia['geracao_mwh'], name="Geração Solar",
-                                                  line=dict(color='#ffc107', width=3)))
+                                                line=dict(color='#ffc107', width=3)))
                     fig_duck.add_trace(
                         go.Scatter(x=res_ia['timeline'], y=res_ia['carga_liquida_mwh'], name="Carga Líquida (Saldo)",
-                                   line=dict(color='white', dash='dot', width=2)))
+                                line=dict(color='white', dash='dot', width=2)))
                     fig_duck.add_hline(y=0, line_dash="solid", line_color="#dc3545", annotation_text="Limite Reverso")
                     fig_duck.update_layout(height=500, title="Projeção Energética (24h)", hovermode="x unified",
-                                           legend=dict(orientation="h", y=1.1))
+                                        legend=dict(orientation="h", y=1.1))
                     st.plotly_chart(fig_duck, use_container_width=True)
 
                     kp1, kp2, kp3 = st.columns(3)
@@ -381,7 +378,7 @@ def render_view():
 
                     kp1.metric("Pico de Geração Solar", f"{pico_solar:.2f} MW")
                     kp2.metric("Menor Carga Líquida", f"{min_liquida:.2f} MW",
-                               delta="Crítico" if min_liquida < 0 else "Estável", delta_color="inverse")
+                            delta="Crítico" if min_liquida < 0 else "Estável", delta_color="inverse")
                     kp3.metric("Cobertura Solar Diária", f"{cobertura:.1f}%")
                 else:
                     st.error("Dados incompletos retornados pela IA.")
