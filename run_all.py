@@ -80,6 +80,10 @@ def start_api_process(module_name, port, log_filename, description):
 
 
 def run_pipeline():
+    # Passo 0: Verificar atualizações na ANEEL (Monitor)
+    logger.info("📡 Verificando atualizações na ANEEL...")
+    run_script(os.path.join(DIR_SRC, "etl", "monitor_aneel.py"), "Monitor ANEEL")
+
     logger.info("📦 Migrando dados do GDB para PostgreSQL...")
     if not run_script(os.path.join(DIR_SRC, "etl", "migracao_db.py"), "Migração Database (GDB -> SQL)"):
         logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
