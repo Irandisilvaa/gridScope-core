@@ -74,3 +74,4 @@ redis==5.0.1
 SQLAlchemy>=2.0
 psycopg2-binary>=2.9
 GeoAlchemy2>=0.14
+weasyprint>=60.0

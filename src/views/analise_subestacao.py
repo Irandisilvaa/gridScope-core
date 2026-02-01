@@ -305,9 +305,45 @@ def render_view():
                 st.success("✅ **Rede Estável:** Capacidade disponível.")
 
             csv = pd.DataFrame(dados_consolidados).to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Baixar Relatório CSV", data=csv, file_name=f"relatorio_{id_escolhido}.csv",
+            st.download_button(label="📥 Baixar Dados (CSV)", data=csv, file_name=f"dados_{id_escolhido}.csv",
                             mime="text/csv", use_container_width=True)
 
+            # --- PDF Export Section ---
+            st.divider()
+            
+            # Button to generate PDF
+            try:
+                import importlib
+                import reports.data
+                import reports.generator
+                
+                # Force reload to pick up data/template changes instantly
+                importlib.reload(reports.data)
+                importlib.reload(reports.generator)
+                
+                from reports.data import get_report_data
+                from reports.generator import generate_pdf
+                
+                data_hoje = date.today().strftime("%Y%m%d")
+                nome_arquivo_pdf = f"Relatorio_GridScope_{subestacao_obj['nome'].replace(' ', '_')}_{data_hoje}.pdf"
+                
+                # Fetch data (Using fixed data layout v2)
+                report_data = get_report_data(str(id_escolhido))
+                
+                # Generate PDF (Binary)
+                pdf_bytes = generate_pdf(report_data)
+                
+                st.download_button(
+                    label="📄 Exportar Relatório PDF",
+                    data=pdf_bytes,
+                    file_name=nome_arquivo_pdf,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary"
+                )
+            except Exception as e:
+                st.error(f"Erro ao gerar PDF: {e}")
+                
     with tab_ia_render:
         tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
 
