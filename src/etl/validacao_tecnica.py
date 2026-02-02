@@ -12,7 +12,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import CIDADE_ALVO, DIR_RAIZ
 
 # Arquivo gerado pelo script anterior
-ARQUIVO_GEOJSON = os.path.join(DIR_RAIZ, "subestacoes_logicas_aracaju.geojson")
+ARQUIVO_GEOJSON = os.path.join(DIR_RAIZ, "subestacoes_logicas.geojson")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("Auditoria")

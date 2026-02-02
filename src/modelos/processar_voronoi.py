@@ -14,7 +14,7 @@ from config import CIDADE_ALVO, DIR_RAIZ
 from database import salvar_voronoi 
 
 NOME_IMAGEM_SAIDA = "territorios_voronoi.png"
-NOME_JSON_SAIDA = "subestacoes_logicas_aracaju.geojson"
+NOME_JSON_SAIDA = "subestacoes_logicas.geojson"
 MINIMO_TRAFOS_PARA_VALIDAR = 5
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
