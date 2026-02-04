@@ -9,6 +9,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+try:
+    from views import analise_subestacao, visao_geral, relatorios
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
 
@@ -126,23 +130,27 @@ if st.sidebar.button("✨ Conversar com Helios"):
 
 st.sidebar.markdown("---")
 
-opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral"]
-
+opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
 try:
     index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
 except ValueError:
     index_atual = 0 
-
 navegacao = st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
     key="nav_radio"
 )
-
 if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
     st.session_state['pagina_atual'] = navegacao
-    st.rerun() 
+    st.rerun()
+
+if navegacao == "🔍 Análise por Subestação":
+    analise_subestacao.render_view()
+elif navegacao == "📊 Visão Geral":
+    visao_geral.render_view()
+elif navegacao == "📄 Relatórios":
+    relatorios.render_view()
 
 st.sidebar.markdown("---")
 st.sidebar.caption("GridScope v4.9 Enterprise")
@@ -152,7 +160,7 @@ pagina = st.session_state['pagina_atual']
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        # Aqui também aplicamos um estilo arredondado simples se quiser
+        
         st.markdown(f'<img src="{url_avatar}" style="width:70px; border-radius:70%;">', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
@@ -178,3 +186,12 @@ elif pagina == "📊 Visão Geral":
             visao_geral.render_view()
     except Exception as e:
         st.error(f"Erro ao carregar módulo de Visão Geral: {e}")
+
+elif navegacao == "📄 Relatórios":
+    try:
+        if hasattr(relatorios, 'render_view'):
+            relatorios.render_view()
+        else:
+            st.warning("Módulo 'relatorios' carregado, mas sem função render_view().")
+    except Exception as e:
+        st.error(f"Erro ao carregar módulo de Relatórios: {e}")
