@@ -174,35 +174,34 @@ def render_view():
 
         detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
         
-        # Garante que todas as categorias alvo apareçam, mesmo com valor 0
         detalhe_gd = {}
-        for categoria in CATEGORIAS_ALVO:
-            valor = detalhe_raw.get(categoria, 0.0)
-            detalhe_gd[categoria] = valor
-        
-        # Ordenação
-        detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
-        
-        chaves = list(detalhe_gd.keys())
-        valores = list(detalhe_gd.values())
-        
-        # Atribui cores corretamente
-        lista_cores = [CORES_MAPA.get(k, '#1f77b4') for k in chaves]
+        for k, v in detalhe_raw.items():     
+            potencia = 0
+            if isinstance(v, dict):
+                potencia = v.get('potencia_kw', 0)
+            elif isinstance(v, (int, float)):
+                potencia = float(v)
+                
+            if potencia > 0:
+                detalhe_gd[k] = potencia
 
-        fig_barras = go.Figure(data=[go.Bar(
-            x=chaves,
-            y=valores,
-            marker_color=lista_cores,
-            text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") if v > 0 else "" for v in valores],
-            textposition='auto'
-        )])
-        
-        fig_barras.update_layout(
-            height=250, 
-            margin=dict(l=10, r=10, t=10, b=10), 
-            yaxis_title="kW"
-        )
-        st.plotly_chart(fig_barras, use_container_width=True)
+        if detalhe_gd:
+            detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
+            lista_cores = [CORES_MAPA.get(k, '#6c757d') for k in detalhe_gd.keys()]
+
+            fig_barras = go.Figure(data=[go.Bar(
+                x=list(detalhe_gd.keys()),
+                y=list(detalhe_gd.values()),
+                marker_color=lista_cores, 
+                text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
+                    detalhe_gd.values()],
+                textposition='auto'
+            )])
+            
+            fig_barras.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="kW")
+            st.plotly_chart(fig_barras, use_container_width=True)
+        else:
+            st.info("Sem dados de GD para exibir.")
 
         st.divider()
 
@@ -327,10 +326,8 @@ def render_view():
             else:
                 st.success("✅ **Rede Estável:** Capacidade disponível.")
 
-            csv = pd.DataFrame(dados_consolidados).to_csv(index=False).encode('utf-8')
-            st.download_button(label="📥 Baixar Relatório CSV", data=csv, file_name=f"relatorio_{id_escolhido}.csv",
-                            mime="text/csv", use_container_width=True)
 
+                
     with tab_ia_render:
         if tab_ia:
             tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
