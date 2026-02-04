@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Tenta importar as views
 try:
-    from views import analise_subestacao, visao_geral
+    from views import analise_subestacao, visao_geral, tab_chat
 except ImportError as e:
     st.error(f"Erro de importação no main.py: {e}")
     st.stop()
@@ -35,7 +35,7 @@ st.sidebar.markdown("---")
 
 navegacao = st.sidebar.radio(
     "Navegue pelo Sistema:",
-    ["🔍 Análise por Subestação (IA)", "📊 Visão Geral"]
+    ["🔍 Análise por Subestação (IA)", "📊 Visão Geral", "💬 Chat IA"]
 )
 
 st.sidebar.markdown("---")
@@ -44,7 +44,6 @@ st.sidebar.caption("Hackathon Edition v1.0")
 # --- Roteamento ---
 if navegacao == "🔍 Análise por Subestação (IA)":
     try:
-        # Verifica se o módulo tem a função render_view
         if hasattr(analise_subestacao, 'render_view'):
             analise_subestacao.render_view()
         else:
@@ -60,3 +59,12 @@ elif navegacao == "📊 Visão Geral":
             st.warning("Módulo 'visao_geral' carregado, mas sem função render_view().")
     except Exception as e:
         st.error(f"Erro ao carregar módulo de Visão Geral: {e}")
+
+elif navegacao == "💬 Chat IA":
+    try:
+        if hasattr(tab_chat, 'render_view'):
+            tab_chat.render_view()
+        else:
+            st.warning("Módulo 'tab_chat' carregado, mas sem função render_view().")
+    except Exception as e:
+        st.error(f"Erro ao carregar módulo de Chat: {e}")
