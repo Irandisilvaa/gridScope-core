@@ -1,181 +1,191 @@
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import osmnx as ox
-import numpy as np
 import os
 import sys
-from scipy.spatial import Voronoi
-from shapely.geometry import Polygon
-from shapely.ops import unary_union
+import hashlib
+import logging
+import numpy as np
+from shapely.ops import voronoi_diagram
+from shapely.geometry import box
+from sqlalchemy import create_engine
 
-from config import CIDADE_ALVO, CRS_PROJETADO, DIR_RAIZ
-from etl.carregador_aneel import carregar_subestacoes
-from database import salvar_voronoi
+# --- CONFIGURAÇÃO INICIAL ---
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+try:
+    from config import CIDADE_ALVO, DIR_RAIZ
+    from database import salvar_voronoi 
+except ImportError:
+    CIDADE_ALVO = "Aracaju, Brazil"
+    DIR_RAIZ = os.getcwd()
+    def salvar_voronoi(gdf): pass
 
-def voronoi_finite_polygons_2d(vor, radius=None):
+NOME_IMAGEM_SAIDA = "territorios_voronoi.png"
+NOME_JSON_SAIDA = "subestacoes_logicas.geojson"
+
+# Configuração de Logs
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("GeoProcessor")
+
+def get_database_engine():
+    """Conexão resiliente com o banco."""
+    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5433/gridscope_local")
+    return create_engine(db_url, isolation_level="AUTOCOMMIT")
+
+def gerar_cor_unica(texto_seed):
+    """Gera uma cor HEX consistente baseada no ID."""
+    hash_object = hashlib.md5(str(texto_seed).encode())
+    return '#' + hash_object.hexdigest()[:6]
+
+def obter_limite_municipal(cidade_alvo):
+    """Baixa e corrige a geometria da cidade."""
+    logger.info(f"Obtendo limites oficiais de {cidade_alvo}...")
+    try:
+        gdf_cidade = ox.geocode_to_gdf(cidade_alvo)
+        # Projeção UTM (Sirgas 2000 / UTM zone 24S) para precisão métrica
+        gdf_cidade = gdf_cidade.to_crs(epsg=31984)
+        
+        # CORREÇÃO TÉCNICA: Garante que a geometria não tenha nós cruzados
+        gdf_cidade['geometry'] = gdf_cidade.geometry.make_valid()
+        return gdf_cidade
+    except Exception as e:
+        logger.error(f"Erro crítico ao baixar limite: {e}")
+        sys.exit(1)
+
+def carregar_trafos(gdf_limite):
+    """Carrega transformadores garantindo margem de segurança."""
+    engine = get_database_engine()
+    
+    # Pega bounds em WGS84 para a query SQL
+    bbox = gdf_limite.to_crs(epsg=4326).total_bounds
+    
+    # Query otimizada: Pega trafos numa área levemente maior que a cidade
+    sql = f"""
+    SELECT 
+        t."SUB" AS cod_id_sub,
+        COALESCE(s."NOME", 'SUB-' || t."SUB") AS nome_sub,
+        t.geometry
+    FROM transformadores t
+    LEFT JOIN subestacoes s ON t."SUB" = s."COD_ID"
+    WHERE t."SUB" IS NOT NULL
+    AND t.geometry && ST_MakeEnvelope({bbox[0]-0.05}, {bbox[1]-0.05}, {bbox[2]+0.05}, {bbox[3]+0.05}, 4326)
     """
-    Algoritmo matemático para reconstruir regiões de Voronoi finitas.
-    (Mantido original, apenas limpeza de estilo)
+    
+    gdf_pontos = gpd.read_postgis(sql, engine, geom_col='geometry')
+    
+    if gdf_pontos.empty:
+        logger.error("Nenhum transformador encontrado.")
+        sys.exit(1)
+        
+    return gdf_pontos.to_crs(gdf_limite.crs)
+
+def processar_voronoi_robusto(gdf_limite, gdf_pontos):
     """
-    if vor.points.shape[1] != 2:
-        raise ValueError("Requires 2D input")
+    Gera Voronoi em 'Canvas Infinito' e recorta com 'Cortador de Biscoito'.
+    Isso impede matematicamente a existência de buracos.
+    """
+    logger.info(f"Calculando topologia para {len(gdf_pontos)} pontos...")
+
+    # 1. ENVELOPE INFINITO: Cria uma área de trabalho gigante (20km de borda)
+    # Isso garante que as células das bordas não "fechem" antes do limite da cidade
+    envelope_expandido = gdf_limite.envelope.buffer(20000).union_all()
     
-    new_regions = []
-    new_vertices = vor.vertices.tolist()
-    center = vor.points.mean(axis=0)
+    # 2. GERAÇÃO DO VORONOI
+    # Usamos todos os pontos disponíveis no buffer
+    pontos_uniao = gdf_pontos.union_all()
+    voronoi_bruto = voronoi_diagram(pontos_uniao, envelope=envelope_expandido)
     
-    if radius is None:
-        radius = np.ptp(vor.points).max() * 2
+    gdf_voronoi = gpd.GeoDataFrame(geometry=list(voronoi_bruto.geoms), crs=gdf_limite.crs)
     
-    all_ridges = {}
-    for (p1, p2), (v1, v2) in zip(vor.ridge_points, vor.ridge_vertices):
-        all_ridges.setdefault(p1, []).append((p2, v1, v2))
-        all_ridges.setdefault(p2, []).append((p1, v1, v2))
-
-    for p1, region in enumerate(vor.point_region):
-        vertices = vor.regions[region]
-        if all(v >= 0 for v in vertices):
-            new_regions.append(vertices)
-            continue
-
-        ridges = all_ridges[p1]
-        new_region = [v for v in vertices if v >= 0]
-
-        for p2, v1, v2 in ridges:
-            if v2 < 0: v1, v2 = v2, v1
-            if v1 >= 0: continue
-            
-            t = vor.points[p2] - vor.points[p1]
-            t /= np.linalg.norm(t)
-            n = np.array([-t[1], t[0]])
-            
-            midpoint = vor.points[[p1, p2]].mean(axis=0)
-            direction = np.sign(np.dot(midpoint - center, n)) * n
-            far_point = vor.vertices[v2] + direction * radius
-            
-            new_region.append(len(new_vertices))
-            new_vertices.append(far_point.tolist())
-
-        vs = np.asarray([new_vertices[v] for v in new_region])
-        c = vs.mean(axis=0)
-        angles = np.arctan2(vs[:,1] - c[1], vs[:,0] - c[0])
-        new_region = np.array(new_region)[np.argsort(angles)]
-        new_regions.append(new_region.tolist())
-
-    return new_regions, np.asarray(new_vertices)
+    # 3. SPATIAL JOIN (Atribuição)
+    # Associa cada polígono gigante ao seu transformador dono
+    gdf_mapeado = gpd.sjoin(gdf_voronoi, gdf_pontos, how="inner", predicate="contains")
+    
+    # 4. DISSOLVE (Fusão)
+    # Junta os pedaços da mesma subestação
+    gdf_territorios = gdf_mapeado.dissolve(by="cod_id_sub", aggfunc={"nome_sub": "first"}).reset_index()
+    gdf_territorios = gdf_territorios.rename(columns={"cod_id_sub": "COD_ID", "nome_sub": "NOM"})
+    
+    # 5. RECORTE BOOLEANO (O Segredo da Cobertura Total)
+    # Cortamos os territórios "infinitos" exatamente no formato da cidade
+    logger.info("Aplicando recorte de precisão (Cookie Cutter)...")
+    gdf_final = gpd.clip(gdf_territorios, gdf_limite)
+    
+    # Limpezas finais
+    gdf_final = gdf_final[~gdf_final.is_empty]
+    # Explode multipartes para garantir que ilhas sejam polígonos válidos, mas mantém o mesmo ID
+    gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
+    
+    return gdf_final
 
 def main():
-    print(f"--- INICIANDO GERAÇÃO DE TERRITÓRIOS (VORONOI) ---")
-    print(f"Alvo: {CIDADE_ALVO}")
+    print(f"--- INICIANDO PROCESSAMENTO: {CIDADE_ALVO} ---")
     
-    subs_raw = carregar_subestacoes()
-    print(f"Baixando limites geográficos via OpenStreetMap...")
+    # 1. Obter e Preparar Limites
+    limite = obter_limite_municipal(CIDADE_ALVO)
+    
+    # 2. Carregar Dados
+    pontos = carregar_trafos(limite)
+    
+    # 3. Processamento Core
+    territorios = processar_voronoi_robusto(limite, pontos)
+    
+    # 4. Exportação
+    territorios_wgs84 = territorios.to_crs(epsg=4326)
+    
+    print("Salvando no Banco de Dados...")
     try:
-        limite_cidade = ox.geocode_to_gdf(CIDADE_ALVO)
+        if callable(salvar_voronoi):
+            salvar_voronoi(territorios_wgs84)
+            print("Sucesso: Dados persistidos.")
     except Exception as e:
-        print(f"ERRO OSM: {e}")
-        print("Verifique sua conexão ou o nome da cidade no .env")
-        sys.exit(1)
+        logger.warning(f"Banco inacessível: {e}")
 
-    if subs_raw.crs is None:
-        subs_raw.set_crs(epsg=4674, inplace=True)
-    
-    limite_cidade = limite_cidade.to_crs(subs_raw.crs)
+    path_json = os.path.join(DIR_RAIZ, NOME_JSON_SAIDA)
+    territorios_wgs84.to_file(path_json, driver="GeoJSON")
+    print(f"Arquivo GeoJSON gerado: {path_json}")
 
-    print("Filtrando subestações na malha urbana...")
-    subs_cidade = gpd.clip(subs_raw, limite_cidade)
-    print(f"   -> Encontradas: {len(subs_cidade)} subestações na área urbana.")
-    
-    print("Filtrando subestações com consumidores (em operação)...")
+    # 5. Validação Visual
+    print("Gerando Mapa de Validação...")
     try:
-        from database import carregar_consumidores
-        df_consumidores = carregar_consumidores(colunas=['UNI_TR_MT'], ignore_geometry=True)
+        fig, ax = plt.subplots(figsize=(14, 14))
         
-        ids_trafos_com_consumo = set(df_consumidores['UNI_TR_MT'].dropna().unique())
+        # Fundo: Limite oficial em preto grosso (para ver se sobra algo fora)
+        limite.plot(ax=ax, facecolor='none', edgecolor='black', linewidth=4, zorder=5)
         
-        from database import carregar_transformadores
-        df_trafos = carregar_transformadores(colunas=['COD_ID', 'SUB'])
+        # Territórios
+        for _, row in territorios.iterrows():
+            gpd.GeoSeries(row.geometry).plot(
+                ax=ax,
+                color=gerar_cor_unica(row['COD_ID']),
+                alpha=0.7,
+                edgecolor='white',
+                linewidth=0.5,
+                zorder=3
+            )
+            
+            # Label inteligente: Só coloca nome se o pedaço for grande
+            if row.geometry.area > 80000: 
+                centro = row.geometry.centroid
+                ax.annotate(
+                    text=str(row['NOM']).replace("SUB-", ""),
+                    xy=(centro.x, centro.y),
+                    ha='center', va='center',
+                    fontsize=8, fontweight='bold', color='#2c3e50',
+                    bbox=dict(boxstyle="square,pad=0.1", fc="white", ec="none", alpha=0.6)
+                )
+
+        ax.set_title(f"Mapa de Calor de Responsabilidade - {CIDADE_ALVO}", fontsize=16)
+        ax.set_axis_off()
         
-        trafos_com_consumo = df_trafos[df_trafos['COD_ID'].isin(ids_trafos_com_consumo)]
-        
-        ids_subs_com_consumo = set(trafos_com_consumo['SUB'].dropna().astype(str).unique())
-        
-        subs_cidade['COD_ID'] = subs_cidade['COD_ID'].astype(str)
-        total_antes = len(subs_cidade)
-        subs_cidade = subs_cidade[subs_cidade['COD_ID'].isin(ids_subs_com_consumo)].copy()
-        
-        removidas = total_antes - len(subs_cidade)
-        print(f"   -> Removidas {removidas} subestações sem consumidores (planejadas/sem carga)")
-        print(f"   -> {len(subs_cidade)} subestações em operação.")
+        path_img = os.path.join(DIR_RAIZ, NOME_IMAGEM_SAIDA)
+        plt.savefig(path_img, dpi=150, bbox_inches='tight', pad_inches=0.1)
+        print(f"Imagem Salva: {path_img}")
         
     except Exception as e:
-        print(f"   ⚠️ Aviso: Não foi possível filtrar por consumidores: {e}")
-        print(f"   -> Mantendo todas as {len(subs_cidade)} subestações urbanas.")
-    
-    if len(subs_cidade) < 2:
-        print("ERRO: Menos de 2 subestações. Voronoi requer no mínimo 2 pontos.")
-        sys.exit(1)
+        logger.error(f"Erro na plotagem: {e}")
 
-    subs_proj = subs_cidade.to_crs(CRS_PROJETADO)
-    pontos_proj = subs_proj.copy()
-    pontos_proj['geometry'] = subs_proj.geometry.centroid
-    limite_proj = limite_cidade.to_crs(CRS_PROJETADO)
-
-    print("Calculando polígonos de influência...")
-    coords = np.array([(p.x, p.y) for p in pontos_proj.geometry])
-    vor = Voronoi(coords)
-    regions, vertices = voronoi_finite_polygons_2d(vor)
-    
-    polygons_list = []
-    for region in regions:
-        polygons_list.append(Polygon(vertices[region]))
-    
-    voronoi_gdf = gpd.GeoDataFrame(geometry=polygons_list, crs=CRS_PROJETADO)
-
-    print("Ajustando fronteiras...")
-    try:
-        subs_logicas = gpd.overlay(voronoi_gdf, limite_proj, how='intersection')
-    except:
-        subs_logicas = gpd.clip(voronoi_gdf, limite_proj)
-
-    subs_logicas_finais = gpd.sjoin(subs_logicas, pontos_proj, how="inner", predicate="contains")
-    
-    colunas_manter = ['geometry', 'NOM', 'COD_ID']
-    cols = [c for c in colunas_manter if c in subs_logicas_finais.columns]
-    subs_logicas_finais = subs_logicas_finais[cols]
-
-    print("Salvando no banco de dados PostgreSQL...")
-    try:
-        salvar_voronoi(subs_logicas_finais.to_crs(epsg=4326))
-        print("✅ Territórios Voronoi salvos no banco com sucesso!")
-    except Exception as e:
-        print(f"⚠️ Aviso: Não foi possível salvar no banco: {e}")
-
-    print("Gerando mapa visual (PNG)...")
-    try:
-        import matplotlib.pyplot as plt
-        
-        fig, ax = plt.subplots(figsize=(12, 10))
-        
-        subs_logicas_finais.plot(ax=ax, alpha=0.5, edgecolor='black', cmap='tab20')
-        
-        nome_col = 'NOM' if 'NOM' in subs_logicas_finais.columns else 'NOME'
-        if nome_col in subs_logicas_finais.columns:
-            for idx, row in subs_logicas_finais.iterrows():
-                centroid = row['geometry'].centroid
-                ax.text(centroid.x, centroid.y, row[nome_col], 
-                    fontsize=8, ha='center', bbox=dict(boxstyle='round', facecolor='white', alpha=0.7))
-        
-        ax.set_title(f'Territórios de Influência - {CIDADE_ALVO}')
-        ax.axis('off')
-        
-        path_png = os.path.join(DIR_RAIZ, 'territorios_voronoi.png')
-        plt.savefig(path_png, dpi=150, bbox_inches='tight')
-        plt.close()
-        
-        print(f"✅ Mapa salvo em: {path_png}")
-    except Exception as e:
-        print(f"Aviso: Não foi possível gerar a imagem PNG: {e}")
+    print("--- PROCESSO CONCLUÍDO COM SUCESSO ---")
 
 if __name__ == "__main__":
     main()

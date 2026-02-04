@@ -1,0 +1,417 @@
+import sys
+import os
+
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from database import get_engine, carregar_cache_mercado
+from sqlalchemy import text
+from typing import List, Dict, Any, Optional
+
+
+def obter_ranking_subestacoes(
+    criterio: str = "consumo", 
+    ordem: str = "desc", 
+    limite: int = 5
+) -> List[Dict[str, Any]]:
+    try:
+        dados = carregar_cache_mercado()
+        
+        resultados = []
+        for item in dados:
+            nome = item.get('subestacao', 'Desconhecida')
+            clientes = item.get('metricas_rede', {}).get('total_clientes', 0)
+            
+            if criterio.lower() == "consumo":
+                valor = item.get('metricas_rede', {}).get('consumo_anual_mwh', 0)
+                unidade = "MWh/ano"
+            else:
+                valor = item.get('geracao_distribuida', {}).get('potencia_total_kw', 0)
+                unidade = "kW"
+            
+            resultados.append({
+                "nome": nome,
+                "valor": float(valor),
+                "unidade": unidade,
+                "total_clientes": int(clientes)
+            })
+        
+        resultados.sort(key=lambda x: x['valor'], reverse=(ordem.lower() == "desc"))
+        
+        return resultados[:limite]
+        
+    except Exception as e:
+        return [{"erro": f"Erro ao buscar ranking: {str(e)}"}]
+
+
+def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, Any]]:
+    try:
+        dados = carregar_cache_mercado()
+        
+        niveis_ordem = {"BAIXO": 0, "MEDIO": 1, "ALTO": 2}
+        min_nivel = niveis_ordem.get(nivel_minimo.upper(), 1)
+        
+        resultados = []
+        for item in dados:
+            nivel = item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO')
+            
+            if niveis_ordem.get(nivel, 0) >= min_nivel:
+                resultados.append({
+                    "nome": item.get('subestacao', 'Desconhecida'),
+                    "nivel_risco": nivel,
+                    "potencia_gd_kw": float(item.get('geracao_distribuida', {}).get('potencia_total_kw', 0)),
+                    "num_unidades_gd": int(item.get('geracao_distribuida', {}).get('total_unidades', 0)),
+                    "total_clientes": int(item.get('metricas_rede', {}).get('total_clientes', 0))
+                })
+        
+        resultados.sort(key=lambda x: x['potencia_gd_kw'], reverse=True)
+        
+        return resultados
+        
+    except Exception as e:
+        return [{"erro": f"Erro ao buscar subestações em risco: {str(e)}"}]
+
+
+def obter_estatisticas_gerais() -> Dict[str, Any]:
+    """
+    Retorna estatísticas APENAS da cidade alvo (dados já filtrados no cache_mercado)
+    O cache_mercado contém apenas as subestações dentro dos territórios Voronoi da cidade
+    """
+    try:
+        dados_cache = carregar_cache_mercado()
+        
+        # Todas as estatísticas vêm do cache (já filtrado por cidade)
+        total_subs = len(dados_cache)
+        total_cons = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados_cache)
+        total_gd = sum(d.get('geracao_distribuida', {}).get('total_unidades', 0) for d in dados_cache)
+        pot_total = sum(d.get('geracao_distribuida', {}).get('potencia_total_kw', 0) for d in dados_cache)
+        consumo_total = sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados_cache)
+        
+        return {
+            "total_subestacoes": int(total_subs),
+            "total_consumidores": int(total_cons),
+            "total_unidades_gd": int(total_gd),
+            "potencia_total_gd_kw": float(pot_total),
+            "consumo_total_anual_mwh": float(consumo_total)
+        }
+        
+    except Exception as e:
+        return {"erro": f"Erro ao buscar estatísticas: {str(e)}"}
+
+
+def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
+    try:
+        dados = carregar_cache_mercado()
+        
+        nome_upper = nome.upper()
+        
+        for item in dados:
+            nome_sub = item.get('subestacao', '').upper()
+            if nome_upper in nome_sub:
+                item_clean = {k: v for k, v in item.items() if k != 'geometry'}
+                return item_clean
+        
+        return None
+        
+    except Exception as e:
+        return {"erro": f"Erro ao buscar subestação: {str(e)}"}
+
+
+def obter_distribuicao_consumo_por_classe() -> Dict[str, Any]:
+    try:
+        dados = carregar_cache_mercado()
+        
+        classes = {}
+        consumo_total_geral = 0
+        
+        for item in dados:
+            perfil = item.get('perfil_consumo', {})
+            for classe, info in perfil.items():
+                consumo_mwh = info.get('consumo_anual_mwh', 0)
+                qtd_clientes = info.get('qtd_clientes', 0)
+                
+                if classe not in classes:
+                    classes[classe] = {"consumo_mwh": 0, "qtd_clientes": 0}
+                
+                classes[classe]["consumo_mwh"] += consumo_mwh
+                classes[classe]["qtd_clientes"] += qtd_clientes
+                consumo_total_geral += consumo_mwh
+        
+        resultado = {}
+        for classe, dados in classes.items():
+            pct = (dados["consumo_mwh"] / consumo_total_geral * 100) if consumo_total_geral > 0 else 0
+            resultado[classe] = {
+                "consumo_anual_mwh": float(dados["consumo_mwh"]),
+                "percentual": float(pct),
+                "qtd_clientes": int(dados["qtd_clientes"])
+            }
+        
+        return {
+            "distribuicao": resultado,
+            "consumo_total_mwh": float(consumo_total_geral)
+        }
+        
+    except Exception as e:
+        return {"erro": f"Erro ao calcular distribuição: {str(e)}"}
+
+
+def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
+    """Compara 2 ou mais subestações lado a lado"""
+    try:
+        dados = carregar_cache_mercado()
+        
+        resultados = []
+        for nome_busca in nomes:
+            nome_upper = nome_busca.upper()
+            for item in dados:
+                nome_sub = item.get('subestacao', '').upper()
+                if nome_upper in nome_sub:
+                    resultados.append({
+                        "nome": item.get('subestacao', 'Desconhecida'),
+                        "consumo_anual_mwh": float(item.get('metricas_rede', {}).get('consumo_anual_mwh', 0)),
+                        "total_clientes": int(item.get('metricas_rede', {}).get('total_clientes', 0)),
+                        "potencia_gd_kw": float(item.get('geracao_distribuida', {}).get('potencia_total_kw', 0)),
+                        "unidades_gd": int(item.get('geracao_distribuida', {}).get('total_unidades', 0)),
+                        "nivel_criticidade": item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO'),
+                        "consumo_medio_kwh_cliente": float(item.get('metricas_rede', {}).get('consumo_anual_mwh', 0) * 1000 / max(item.get('metricas_rede', {}).get('total_clientes', 1), 1))
+                    })
+                    break
+        
+        return resultados
+        
+    except Exception as e:
+        return [{"erro": f"Erro ao comparar subestações: {str(e)}"}]
+
+
+def obter_insights_inteligentes() -> Dict[str, Any]:
+    """Retorna insights automáticos baseados na análise dos dados"""
+    try:
+        dados = carregar_cache_mercado()
+        
+        insights = {
+            "alertas": [],
+            "oportunidades": [],
+            "destaques": []
+        }
+        
+        subs_alto_gd = [d for d in dados if d.get('metricas_rede', {}).get('nivel_criticidade_gd') == 'ALTO']
+        if subs_alto_gd:
+            insights["alertas"].append({
+                "tipo": "CRITICIDADE_GD",
+                "mensagem": f"{len(subs_alto_gd)} subestação(ões) com criticidade ALTA de GD",
+                "subestacoes": [s.get('subestacao') for s in subs_alto_gd[:3]]
+            })
+        
+        dados_sorted = sorted(dados, key=lambda x: x.get('metricas_rede', {}).get('consumo_anual_mwh', 0), reverse=True)
+        if dados_sorted:
+            top_consumo = dados_sorted[0]
+            insights["destaques"].append({
+                "tipo": "MAIOR_CONSUMO",
+                "subestacao": top_consumo.get('subestacao'),
+                "valor": float(top_consumo.get('metricas_rede', {}).get('consumo_anual_mwh', 0)),
+                "percentual_do_total": round(top_consumo.get('metricas_rede', {}).get('consumo_anual_mwh', 0) / sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados) * 100, 1) if dados else 0
+            })
+        
+        total_clientes = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados)
+        total_unidades_gd = sum(d.get('geracao_distribuida', {}).get('total_unidades', 0) for d in dados)
+        if total_clientes > 0:
+            taxa_penetracao = (total_unidades_gd / total_clientes) * 100
+            insights["destaques"].append({
+                "tipo": "PENETRACAO_GD",
+                "taxa_percentual": round(taxa_penetracao, 2),
+                "total_unidades_gd": int(total_unidades_gd),
+                "total_clientes": int(total_clientes)
+            })
+        
+        subs_baixo_gd = [d for d in dados if d.get('geracao_distribuida', {}).get('total_unidades', 0) < 10 and d.get('metricas_rede', {}).get('total_clientes', 0) > 1000]
+        if subs_baixo_gd:
+            insights["oportunidades"].append({
+                "tipo": "EXPANSAO_GD",
+                "mensagem": f"{len(subs_baixo_gd)} subestação(ões) com potencial para expansão de GD",
+                "subestacoes": [s.get('subestacao') for s in subs_baixo_gd[:3]]
+            })
+        
+        return insights
+        
+    except Exception as e:
+        return {"erro": f"Erro ao gerar insights: {str(e)}"}
+
+
+def analisar_territorio(nome_subestacao: str) -> Dict[str, Any]:
+    """Analisa o território Voronoi de uma subestação"""
+    try:
+        from database import carregar_voronoi, carregar_subestacoes
+        import geopandas as gpd
+        
+        gdf_voronoi = carregar_voronoi()
+        gdf_subs = carregar_subestacoes()
+        
+        nome_upper = nome_subestacao.upper()
+        subestacao = None
+        for idx, row in gdf_subs.iterrows():
+            if nome_upper in str(row.get('NOM', '')).upper():
+                subestacao = row
+                cod_id = row.get('COD_ID')
+                break
+        
+        if subestacao is None:
+            return {"erro": "Subestação não encontrada"}
+        
+        territorio = gdf_voronoi[gdf_voronoi['COD_ID'] == cod_id]
+        
+        if territorio.empty:
+            return {"erro": "Território não encontrado para esta subestação"}
+        
+        territorio_proj = territorio.to_crs('EPSG:31984')
+        area_m2 = territorio_proj.geometry.area.iloc[0]
+        area_km2 = area_m2 / 1_000_000
+        
+        dados_mercado = carregar_cache_mercado()
+        dados_sub = None
+        for item in dados_mercado:
+            if item.get('id_tecnico') == str(cod_id):
+                dados_sub = item
+                break
+        
+        resultado = {
+            "nome": subestacao.get('NOM', 'Desconhecida'),
+            "area_km2": round(area_km2, 2),
+            "total_clientes": int(dados_sub.get('metricas_rede', {}).get('total_clientes', 0)) if dados_sub else 0,
+            "consumo_anual_mwh": float(dados_sub.get('metricas_rede', {}).get('consumo_anual_mwh', 0)) if dados_sub else 0
+        }
+        
+        if area_km2 > 0:
+            resultado["densidade_clientes_km2"] = round(resultado["total_clientes"] / area_km2, 1)
+            resultado["consumo_mwh_km2"] = round(resultado["consumo_anual_mwh"] / area_km2, 1)
+        
+        return resultado
+        
+    except Exception as e:
+        return {"erro": f"Erro ao analisar território: {str(e)}"}
+
+
+def buscar_subestacoes_proximas(nome_referencia: str, limite: int = 5) -> List[Dict[str, Any]]:
+    """Encontra subestações próximas a uma subestação de referência"""
+    try:
+        from database import carregar_subestacoes
+        import numpy as np
+        
+        gdf_subs = carregar_subestacoes()
+        
+        nome_upper = nome_referencia.upper()
+        sub_ref = None
+        for idx, row in gdf_subs.iterrows():
+            if nome_upper in str(row.get('NOM', '')).upper():
+                sub_ref = row
+                break
+        
+        if sub_ref is None:
+            return [{"erro": "Subestação de referência não encontrada"}]
+        
+        gdf_proj = gdf_subs.to_crs('EPSG:31984')
+        ponto_ref = gdf_proj[gdf_proj['COD_ID'] == sub_ref['COD_ID']].geometry.iloc[0]
+        
+        distancias = []
+        for idx, row in gdf_proj.iterrows():
+            if row['COD_ID'] != sub_ref['COD_ID']:
+                dist_m = ponto_ref.distance(row.geometry)
+                dist_km = dist_m / 1000
+                distancias.append({
+                    "nome": row.get('NOM', 'Desconhecida'),
+                    "distancia_km": round(dist_km, 2)
+                })
+        
+        distancias.sort(key=lambda x: x['distancia_km'])
+        
+        return distancias[:limite]
+        
+    except Exception as e:
+        return [{"erro": f"Erro ao buscar subestações próximas: {str(e)}"}]
+
+
+def obter_metricas_performance() -> Dict[str, Any]:
+    """Retorna métricas de performance do sistema elétrico"""
+    try:
+        dados = carregar_cache_mercado()
+        
+        total_clientes = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados)
+        total_consumo = sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados)
+        total_unidades_gd = sum(d.get('geracao_distribuida', {}).get('total_unidades', 0) for d in dados)
+        total_potencia_gd = sum(d.get('geracao_distribuida', {}).get('potencia_total_kw', 0) for d in dados)
+        
+        consumo_medio_anual = (total_consumo * 1000 / total_clientes) if total_clientes > 0 else 0  # kWh
+        consumo_medio_mensal = consumo_medio_anual / 12
+        
+        taxa_penetracao_gd = (total_unidades_gd / total_clientes * 100) if total_clientes > 0 else 0
+        
+        consumo_por_classe = {}
+        for item in dados:
+            perfil = item.get('perfil_consumo', {})
+            for classe, info in perfil.items():
+                if classe not in consumo_por_classe:
+                    consumo_por_classe[classe] = {"consumo": 0, "clientes": 0}
+                consumo_por_classe[classe]["consumo"] += info.get('consumo_anual_mwh', 0)
+                consumo_por_classe[classe]["clientes"] += info.get('qtd_clientes', 0)
+        
+        for classe, dados_classe in consumo_por_classe.items():
+            if dados_classe["clientes"] > 0:
+                consumo_por_classe[classe]["consumo_medio_kwh_ano"] = round(
+                    dados_classe["consumo"] * 1000 / dados_classe["clientes"], 1
+                )
+        
+        return {
+            "total_subestacoes": len(dados),
+            "total_clientes": int(total_clientes),
+            "consumo_total_anual_mwh": round(total_consumo, 2),
+            "consumo_medio_cliente_kwh_mes": round(consumo_medio_mensal, 1),
+            "taxa_penetracao_gd_percentual": round(taxa_penetracao_gd, 2),
+            "total_unidades_gd": int(total_unidades_gd),
+            "potencia_total_gd_mw": round(total_potencia_gd / 1000, 2),
+            "consumo_por_classe": consumo_por_classe
+        }
+        
+    except Exception as e:
+        return {"erro": f"Erro ao calcular métricas: {str(e)}"}
+
+
+
+FUNCOES_DISPONIVEIS = {
+    "obter_ranking_subestacoes": obter_ranking_subestacoes,
+    "obter_subestacoes_em_risco": obter_subestacoes_em_risco,
+    "obter_estatisticas_gerais": obter_estatisticas_gerais,
+    "buscar_subestacao_detalhes": buscar_subestacao_detalhes,
+    "obter_distribuicao_consumo_por_classe": obter_distribuicao_consumo_por_classe,
+    # Novas funções avançadas
+    "comparar_subestacoes": comparar_subestacoes,
+    "obter_insights_inteligentes": obter_insights_inteligentes,
+    "analisar_territorio": analisar_territorio,
+    "buscar_subestacoes_proximas": buscar_subestacoes_proximas,
+    "obter_metricas_performance": obter_metricas_performance
+}
+
+
+if __name__ == "__main__":
+    # Testes
+    print("🧪 Testando funções de consulta ao banco...\n")
+    
+    print("1️⃣ Ranking de consumo (top 3):")
+    ranking = obter_ranking_subestacoes("consumo", "desc", 3)
+    for r in ranking:
+        print(f"   {r['nome']}: {r['valor']:.2f} {r['unidade']}")
+    
+    print("\n2️⃣ Subestações em risco (nível MEDIO ou superior):")
+    riscos = obter_subestacoes_em_risco("MEDIO")
+    for r in riscos[:3]:
+        print(f"   {r['nome']}: {r['nivel_risco']} - {r['potencia_gd_kw']:.2f} kW")
+    
+    print("\n3️⃣ Estatísticas gerais:")
+    stats = obter_estatisticas_gerais()
+    print(f"   Subestações: {stats['total_subestacoes']}")
+    print(f"   Consumidores: {stats['total_consumidores']}")
+    print(f"   Unidades GD: {stats['total_unidades_gd']}")
+    
+    print("\n4️⃣ Distribuição por classe:")
+    dist = obter_distribuicao_consumo_por_classe()
+    for classe, dados in dist.get('distribuicao', {}).items():
+        print(f"   {classe}: {dados['percentual']:.1f}% ({dados['consumo_anual_mwh']:.2f} MWh)")
+    
+    print("\n✅ Testes concluídos!")

@@ -42,7 +42,6 @@ def render_view():
     }
 
     def formatar_br(valor):
-        """Formata números para o padrão brasileiro."""
         if isinstance(valor, str): return valor
         try:
             return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -50,7 +49,6 @@ def render_view():
             return str(valor)
 
     def converter_para_dict(dado):
-        """Converte string para dicionário se necessário."""
         if isinstance(dado, dict):
             return dado
         if isinstance(dado, str):
@@ -62,7 +60,6 @@ def render_view():
 
     @st.cache_data
     def obter_dados_dashboard():
-        """Carrega dados geoespaciais e de mercado (cacheado)."""
         try:
             gdf, dados_lista = carregar_dados_cache()
             if gdf is None or not dados_lista:
@@ -77,6 +74,8 @@ def render_view():
     if gdf is None or df_mercado is None:
         st.error("❌ Falha crítica: Dados não carregados. Verifique se o ETL rodou.")
         st.stop()
+    gdf = gdf.loc[:, ~gdf.columns.duplicated()]
+
 
     mapa_opcoes = {}
     if 'subestacao' in df_mercado.columns:
@@ -133,8 +132,26 @@ def render_view():
     dados_gd = converter_para_dict(dados_raw.get("geracao_distribuida", {}))
     perfil = converter_para_dict(dados_raw.get("perfil_consumo", {}))
 
+    # --- CÁLCULO DE CRITICIDADE (MOVIDO PARA O TOPO) ---
+    potencia_kw_calc = limpar_float(dados_gd.get('potencia_total_kw', 0))
+    consumo_mwh_calc = limpar_float(metricas.get('consumo_anual_mwh', 1))
+    if consumo_mwh_calc == 0: consumo_mwh_calc = 1
+    
+    geracao_est_mwh_calc = (potencia_kw_calc * 4.5 * 365) / 1000
+    penetracao_calc = (geracao_est_mwh_calc / consumo_mwh_calc) * 100
+
+    # --- RENDERIZAÇÃO ---
     st.title(f"Monitoramento: {subestacao_obj['nome']}")
     st.caption(f"ID Técnico: {id_escolhido}")
+    
+    # Exibe Banner de Status baseado na penetração
+    if penetracao_calc > 25:
+        st.error(f"🚨 **CRITICIDADE ALTA: RISCO DE INVERSÃO DE FLUXO** | Penetração GD: {penetracao_calc:.1f}%")
+    elif penetracao_calc > 15:
+        st.warning(f"⚠️ **ATENÇÃO: NÍVEL DE ALERTA** | Penetração GD: {penetracao_calc:.1f}%")
+    else:
+        st.success(f"✅ **OPERACIONAL: REDE ESTÁVEL** | Penetração GD: {penetracao_calc:.1f}%")
+
     st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
     st.header("Infraestrutura de Rede")
@@ -150,7 +167,7 @@ def render_view():
 
     st.divider()
 
-    tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral & Perfil", "🧠 Inteligência Artificial & Simulação"])
+    tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral", "🧠 Simulação Duck Curve (IA)"])
 
     with tab_visao_geral:
         st.subheader("Potência da GD Instalada por Classe")
@@ -202,8 +219,8 @@ def render_view():
                         'fillOpacity': 0.7 if is_sel else 0.3}
 
             folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                    aliases=["Subestação:",
-                                                                                            "ID:"])).add_to(m)
+                                                                                            aliases=["Subestação:",
+                                                                                                     "ID:"])).add_to(m)
             st_folium(m, use_container_width=True, height=400)
         else:
             st.warning("⚠️ Geometria não encontrada para este ID.")
@@ -245,7 +262,7 @@ def render_view():
                 st.info("Sem dados de Clientes.")
 
         with col_graf2:
-            st.markdown("**Carga por Classe (Consumo MWh)**")
+            st.markdown("**Consumo Anual por Classe (MWh)**")
             dados_carga = []
             if perfil:
                 for k, v in perfil.items():
@@ -303,15 +320,10 @@ def render_view():
 
         with col_actions:
             st.subheader("Diagnóstico")
-            potencia_kw = limpar_float(dados_gd.get('potencia_total_kw', 0))
-            consumo_mwh = limpar_float(metricas.get('consumo_anual_mwh', 1))
-            if consumo_mwh == 0: consumo_mwh = 1
+            # Usa os valores já calculados no início para exibir
+            st.write(f"**Penetração GD:** {penetracao_calc:.1f}%")
             
-            geracao_est_mwh = (potencia_kw * 4.5 * 365) / 1000
-            penetracao = (geracao_est_mwh / consumo_mwh) * 100
-            
-            st.write(f"**Penetração GD:** {penetracao:.1f}%")
-            if penetracao > 25:
+            if penetracao_calc > 25:
                 st.warning("⚠️ Risco de inversão de fluxo.")
             else:
                 st.success("✅ **Rede Estável:** Capacidade disponível.")
@@ -319,6 +331,9 @@ def render_view():
 
                 
     with tab_ia_render:
-        tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
+        if tab_ia:
+            tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
+        else:
+            st.error("Módulo de IA não carregado.")
 
     st.caption(f"GridScope v4.9 Enterprise | Dados atualizados em: {date.today().strftime('%d/%m/%Y')}")
