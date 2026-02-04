@@ -219,29 +219,15 @@ def enviar_mensagem(request: ChatRequest):
         
         
         
-        # Debug completo do response
-        print(f"🔍 DEBUG - Tipo do response: {type(response)}")
-        print(f"🔍 DEBUG - Tem candidates? {hasattr(response, 'candidates') and len(response.candidates) > 0 if hasattr(response, 'candidates') else 'Não'}")
         
         if hasattr(response, 'candidates') and response.candidates:
-            print(f"🔍 DEBUG - Número de candidates: {len(response.candidates)}")
             if len(response.candidates) > 0:
                 first_candidate = response.candidates[0]
-                print(f"🔍 DEBUG - Tem content? {hasattr(first_candidate, 'content')}")
                 if hasattr(first_candidate, 'content') and first_candidate.content:
-                    print(f"🔍 DEBUG - Número de parts: {len(first_candidate.content.parts) if hasattr(first_candidate.content, 'parts') else 0}")
                     if hasattr(first_candidate.content, 'parts') and first_candidate.content.parts:
                         for idx, part in enumerate(first_candidate.content.parts):
-                            print(f"🔍 DEBUG - Part {idx}: {dir(part)[:5]}")  # Primeiros 5 atributos
-        
-        resposta_final = response.text
-        
-        # Debug: verificar se resposta está vazia
-        print(f"🔍 DEBUG - response.text: '{resposta_final[:100] if resposta_final else 'VAZIO'}'")
-        
-        # Fallback: tentar extrair de candidates se text estiver vazio
+                            resposta_final = response.text
         if not resposta_final or resposta_final.strip() == "":
-            print(f"⚠️ response.text vazio! Tentando extrair de candidates...")
             try:
                 if hasattr(response, 'candidates') and response.candidates:
                     parts = response.candidates[0].content.parts
@@ -251,7 +237,6 @@ def enviar_mensagem(request: ChatRequest):
             except Exception as ex:
                 print(f"❌ Erro ao extrair: {ex}")
         
-        # Se ainda vazio, mensagem de erro
         if not resposta_final or resposta_final.strip() == "":
             resposta_final = "⚠️ O modelo processou a requisição mas não retornou texto. Os dados foram consultados com sucesso no banco."
         

@@ -114,9 +114,6 @@ def render_view():
         
         resposta_ia = resultado.get("resposta", "Erro ao processar resposta")
         
-        # DEBUG: Verificar resposta
-        print(f"🔍 DEBUG - Resposta recebida: {resposta_ia[:200] if resposta_ia else 'VAZIA'}")
-        
         if not resposta_ia or resposta_ia.strip() == "":
             resposta_ia = "⚠️ Recebi uma resposta vazia da API. Tente novamente."
         
