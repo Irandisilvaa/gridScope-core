@@ -16,10 +16,15 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import get_engine, carregar_cache_mercado, carregar_voronoi
 from jinja2 import Environment, FileSystemLoader
 
+import google.generativeai as genai
+from config import CHAT_API_KEY, CHAT_MODEL
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PDFReport")
 
-# Constantes
+if CHAT_API_KEY:
+    genai.configure(api_key=CHAT_API_KEY)
+
 CLASSES_DISPONIVEIS = [
     "Residencial", "Comercial", "Industrial", 
     "Rural", "Poder Público"
@@ -149,6 +154,57 @@ def _get_neighborhood_from_coords(substation_id: str) -> str:
     except Exception as e:
         logger.warning(f"Erro na geocodificação: {e}")
         return "Aracaju - SE"
+
+
+def _generate_diagnostic_text(data: Dict) -> str:
+    """
+    Gera um diagnóstico textual usando Gemini com base nos dados do relatório.
+    """
+    if not CHAT_API_KEY:
+        return "Chave de API da IA não configurada para gerar diagnósticos automáticos."
+        
+    try:
+        header = data.get('header', {})
+        resumo = f"""
+        Subestação: {header.get('substation_name')} ({header.get('feeder_id')})
+        Bairro: {header.get('neighborhood')}
+        Clientes: {header.get('total_clientes')}
+        """
+        
+        resumo += "\nIndicadores:\n"
+        for ind in data.get('indicators', []):
+            resumo += f"- {ind.get('indicador')}: {ind.get('subestacao')} (Média cidade: {ind.get('media_cidade')})\n"
+            
+        resumo += "\nRanking Criticidade:\n"
+        for item in data.get('ranking', [])[:3]:
+            resumo += f"- {item.get('nome')}: {item.get('criticidade')} (MMGD: {item.get('mmgd')})\n"
+
+        prompt = f"""
+        Atue como um especialista em distribuição de energia. Analise os dados desta subestação e escreva um diagnóstico TÉCNICO e CONCISO (máximo 4 a 5 linhas) para um relatório executivo.
+        
+        Dados:
+        {resumo}
+        
+        Foque em:
+        1. Comparação volumétrica com a média da cidade (se está acima/abaixo)
+        2. Impacto da Geração Distribuída (GD)
+        3. Nível de criticidade e riscos operacionais
+        
+        Não use markdown, apenas texto puro. Não use saudações. Seja direto.
+        """
+        
+        model = genai.GenerativeModel(CHAT_MODEL)
+        response = model.generate_content(prompt)
+        
+        if response and response.text:
+            return response.text.strip()
+            
+        return "Não foi possível gerar o diagnóstico automático."
+        
+    except Exception as e:
+        logger.error(f"Erro na chamada Gemini: {e}")
+        return "Erro ao processar diagnóstico inteligente."
+
 
 
 def get_bulk_data() -> pd.DataFrame:
@@ -598,7 +654,19 @@ def generate_pdf(
         secoes = ["consumo", "gd", "comparacao", "ranking"]
     
     # Busca dados
-    data = get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
+    data_raw = get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
+    
+    # Gera diagnóstico com IA (se configurada)
+    if "diagnostico" in secoes:
+        try:
+            logger.info("Gerando diagnóstico com IA...")
+            diagnostico_texto = _generate_diagnostic_text(data_raw['pdf_data'])
+            data_raw['pdf_data']['diagnostico'] = diagnostico_texto
+        except Exception as e:
+            logger.warning(f"Falha ao gerar diagnóstico IA: {e}")
+            data_raw['pdf_data']['diagnostico'] = "Diagnóstico indisponível no momento."
+    
+    data = data_raw
     
     # Adiciona controle de seções
     data['secoes'] = {
