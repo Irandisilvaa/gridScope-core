@@ -79,23 +79,62 @@ def start_api_process(module_name, port, log_filename, description):
     return processo
 
 
+def verificar_banco_populado():
+    from sqlalchemy import create_engine, text
+    
+    try:
+        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5433/gridscope_local")
+        engine = create_engine(db_url)
+        
+        with engine.connect() as conn:
+            tabelas = ['subestacoes', 'consumidores', 'cache_mercado']
+            
+            for tabela in tabelas:
+                try:
+                    result = conn.execute(text(f"SELECT COUNT(*) FROM {tabela}"))
+                    count = result.scalar()
+                    
+                    if count == 0:
+                        return False  
+                except:
+                    return False  
+            
+            return True  
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao verificar banco: {e}")
+        return False
+
+
 def run_pipeline():
-    # Passo 0: Verificar atualizações na ANEEL (Monitor)
     logger.info("📡 Verificando atualizações na ANEEL...")
-    run_script(os.path.join(DIR_SRC, "etl", "monitor_aneel.py"), "Monitor ANEEL")
+    resultado_monitor = run_script(os.path.join(DIR_SRC, "etl", "monitor_aneel.py"), "Monitor ANEEL")
+    
+    banco_populado = verificar_banco_populado()
+    
+    if banco_populado:
+        logger.info("✅ Banco de dados já populado. Pulando migração e usando cache existente.")
+        precisa_migrar = False
+    else:
+        logger.info("📦 Banco vazio ou incompleto. Iniciando migração...")
+        precisa_migrar = True
+    
+    # Só migra se realmente precisa
+    if precisa_migrar:
+        logger.info("📦 Migrando dados do GDB para PostgreSQL...")
+        if not run_script(os.path.join(DIR_SRC, "etl", "migracao_db.py"), "Migração Database (GDB -> SQL)"):
+            logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
+            sys.exit(1)
 
-    logger.info("📦 Migrando dados do GDB para PostgreSQL...")
-    if not run_script(os.path.join(DIR_SRC, "etl", "migracao_db.py"), "Migração Database (GDB -> SQL)"):
-        logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
-        sys.exit(1)
+        run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
 
-    run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
-
-    run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
-
+        run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
 
     logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
     run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest")
+
+
+
 
 
 if __name__ == "__main__":
@@ -110,13 +149,15 @@ if __name__ == "__main__":
 
         api_ai_proc = start_api_process("src.ai.ai_service:app", 8001, "api_ai.log", "API Inteligência Artificial")
 
+        api_chat_proc = start_api_process("src.ai.chat_service:app", 8002, "api_chat.log", "API Chat IA (Gemini)")
+
         logger.info("⏳ Aguardando 12 segundos para carga completa dos modelos de IA...")
         time.sleep(12)
 
         logger.info("📊 Abrindo Dashboard...")
         dash_proc = subprocess.Popen(
             [PYTHON_EXEC, "-m", "streamlit", "run", os.path.join(DIR_SRC, "dashboard.py"), "--server.runOnSave",
-             "false"],
+            "false"],
             cwd=DIR_RAIZ,
             env=get_env_with_src()
         )
@@ -134,6 +175,9 @@ if __name__ == "__main__":
                 logger.error(
                     "⚠️ CRITICAL: API IA (8001) morreu! O Duck Curve não vai funcionar. Verifique logs/api_ai.log")
                 break
+            if api_chat_proc.poll() is not None:
+                logger.warning("⚠️ API Chat (8002) morreu! O Chat IA não vai funcionar. Verifique logs/api_chat.log")
+                break
             if dash_proc.poll() is not None:
                 logger.warning("ℹ️ Dashboard fechado pelo usuário.")
                 break
@@ -143,6 +187,7 @@ if __name__ == "__main__":
         try:
             api_proc.terminate()
             api_ai_proc.terminate()
+            api_chat_proc.terminate()
             dash_proc.terminate()
         except:
             pass
