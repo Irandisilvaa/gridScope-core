@@ -73,7 +73,7 @@ def render_tab_ia(subestacao_obj, data_analise, dados_gd):
     """
     Renderiza todo o conteúdo da aba de Inteligência Artificial.
     """
-    st.subheader(f"☀️ Simulação VPP & Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
+    st.subheader(f"☀️ Simulação Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
 
     identificador = (subestacao_obj.get("NOME") or 
                      subestacao_obj.get("nome") or 
@@ -82,28 +82,6 @@ def render_tab_ia(subestacao_obj, data_analise, dados_gd):
                      subestacao_obj.get("id"))
     
     dados_sim, erro_sim = consultar_simulacao(identificador, data_analise)
-    
-    with st.container():
-        c1, c2, c3, c4 = st.columns(4)
-        if dados_sim:
-            c1.metric("Clima", dados_sim.get('condicao_tempo', '--'))
-            c2.metric("Irradiação", f"{dados_sim.get('irradiacao_solar_kwh_m2', 0)} kWh/m²")
-            c3.metric("Temp. Máx", f"{dados_sim.get('temperatura_max_c', 0)}°C")
-            c4.metric("Perda Térmica", f"{dados_sim.get('fator_perda_termica', 0)}%")
-            impacto = str(dados_sim.get("impacto_na_rede", "NORMAL")).upper()
-            if "CRITICO" in impacto or "ALTA" in impacto:
-                st.error(f"🚨 Previsão de Impacto na Rede: {impacto}")
-            else:
-                st.success(f"✅ Previsão de Impacto na Rede: {impacto}")
-        else:
-            c1.metric("Clima", "--"); c2.metric("Irradiação", "--")
-            c3.metric("Temp. Máx", "--"); c4.metric("Perda Térmica", "--")
-            if erro_sim:
-                st.warning(f"⚠️ VPP Offline ou erro na API (Porta 8000). Detalhe: {erro_sim}")
-
-    st.divider()
-
-    st.header("🧠 Análise Preditiva (AI Duck Curve)")
 
     dna_atual = dados_gd.get("dna_perfil", {})
     if not isinstance(dna_atual, dict): dna_atual = {}

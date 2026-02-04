@@ -132,8 +132,26 @@ def render_view():
     dados_gd = converter_para_dict(dados_raw.get("geracao_distribuida", {}))
     perfil = converter_para_dict(dados_raw.get("perfil_consumo", {}))
 
+    # --- CÁLCULO DE CRITICIDADE (MOVIDO PARA O TOPO) ---
+    potencia_kw_calc = limpar_float(dados_gd.get('potencia_total_kw', 0))
+    consumo_mwh_calc = limpar_float(metricas.get('consumo_anual_mwh', 1))
+    if consumo_mwh_calc == 0: consumo_mwh_calc = 1
+    
+    geracao_est_mwh_calc = (potencia_kw_calc * 4.5 * 365) / 1000
+    penetracao_calc = (geracao_est_mwh_calc / consumo_mwh_calc) * 100
+
+    # --- RENDERIZAÇÃO ---
     st.title(f"Monitoramento: {subestacao_obj['nome']}")
     st.caption(f"ID Técnico: {id_escolhido}")
+    
+    # Exibe Banner de Status baseado na penetração
+    if penetracao_calc > 25:
+        st.error(f"🚨 **CRITICIDADE ALTA: RISCO DE INVERSÃO DE FLUXO** | Penetração GD: {penetracao_calc:.1f}%")
+    elif penetracao_calc > 15:
+        st.warning(f"⚠️ **ATENÇÃO: NÍVEL DE ALERTA** | Penetração GD: {penetracao_calc:.1f}%")
+    else:
+        st.success(f"✅ **OPERACIONAL: REDE ESTÁVEL** | Penetração GD: {penetracao_calc:.1f}%")
+
     st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
 
     st.header("Infraestrutura de Rede")
@@ -149,20 +167,28 @@ def render_view():
 
     st.divider()
 
-    tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral & Perfil", "🧠 Inteligência Artificial & Simulação"])
+    tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral", "🧠 Simulação Duck Curve (IA)"])
 
     with tab_visao_geral:
         st.subheader("Potência da GD Instalada por Classe")
 
         detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
+        
+        # Garante que todas as categorias alvo apareçam, mesmo com valor 0
         detalhe_gd = {}
         for categoria in CATEGORIAS_ALVO:
             valor = detalhe_raw.get(categoria, 0.0)
             detalhe_gd[categoria] = valor
+        
+        # Ordenação
         detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
+        
         chaves = list(detalhe_gd.keys())
         valores = list(detalhe_gd.values())
+        
+        # Atribui cores corretamente
         lista_cores = [CORES_MAPA.get(k, '#1f77b4') for k in chaves]
+
         fig_barras = go.Figure(data=[go.Bar(
             x=chaves,
             y=valores,
@@ -177,6 +203,7 @@ def render_view():
             yaxis_title="kW"
         )
         st.plotly_chart(fig_barras, use_container_width=True)
+
         st.divider()
 
         st.subheader("📍 Área de Cobertura Geográfica")
@@ -191,8 +218,8 @@ def render_view():
                         'fillOpacity': 0.7 if is_sel else 0.3}
 
             folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                        aliases=["Subestação:",
-                                                                                                 "ID:"])).add_to(m)
+                                                                                            aliases=["Subestação:",
+                                                                                                     "ID:"])).add_to(m)
             st_folium(m, use_container_width=True, height=400)
         else:
             st.warning("⚠️ Geometria não encontrada para este ID.")
@@ -292,15 +319,10 @@ def render_view():
 
         with col_actions:
             st.subheader("Diagnóstico")
-            potencia_kw = limpar_float(dados_gd.get('potencia_total_kw', 0))
-            consumo_mwh = limpar_float(metricas.get('consumo_anual_mwh', 1))
-            if consumo_mwh == 0: consumo_mwh = 1
+            # Usa os valores já calculados no início para exibir
+            st.write(f"**Penetração GD:** {penetracao_calc:.1f}%")
             
-            geracao_est_mwh = (potencia_kw * 4.5 * 365) / 1000
-            penetracao = (geracao_est_mwh / consumo_mwh) * 100
-            
-            st.write(f"**Penetração GD:** {penetracao:.1f}%")
-            if penetracao > 25:
+            if penetracao_calc > 25:
                 st.warning("⚠️ Risco de inversão de fluxo.")
             else:
                 st.success("✅ **Rede Estável:** Capacidade disponível.")
