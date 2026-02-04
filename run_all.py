@@ -30,7 +30,6 @@ logger = logging.getLogger("GridScope")
 
 
 def get_env_with_src():
-    """Configura variáveis de ambiente adicionando src ao PYTHONPATH."""
     env = os.environ.copy()
     original_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{DIR_SRC}{os.pathsep}{original_path}"
@@ -38,7 +37,6 @@ def get_env_with_src():
 
 
 def run_script(script_path, description):
-    """Função genérica para rodar scripts."""
     if not os.path.exists(script_path):
         logger.error(f"❌ ARQUIVO NÃO ENCONTRADO: {script_path}")
         return False
@@ -58,7 +56,6 @@ def run_script(script_path, description):
 
 
 def start_api_process(module_name, port, log_filename, description):
-    """Inicia um processo de API em background."""
     logger.info(f"🚀 SUBINDO {description} na porta {port}...")
 
     log_file = open(os.path.join(DIR_LOGS, log_filename), "w", encoding="utf-8")
@@ -119,7 +116,6 @@ def run_pipeline():
         logger.info("📦 Banco vazio ou incompleto. Iniciando migração...")
         precisa_migrar = True
     
-    # Só migra se realmente precisa
     if precisa_migrar:
         logger.info("📦 Migrando dados do GDB para PostgreSQL...")
         if not run_script(os.path.join(DIR_SRC, "etl", "migracao_db.py"), "Migração Database (GDB -> SQL)"):
