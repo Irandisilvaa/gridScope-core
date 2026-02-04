@@ -57,6 +57,16 @@ Classes de consumo:
 - Poder Público: Órgãos governamentais
 
 Seja objetivo e use dados reais das funções.
+
+DIRETRIZES PARA GRÁFICOS (MUITO IMPORTANTE):
+1. NUNCA desenhe gráficos usando texto ou caracteres (como [###...]).
+2. SEMPRE que o usuário pedir um gráfico, visualização ou comparação visual, USE AS FUNÇÕES DE GRÁFICO disponíveis (`gerar_grafico_*`).
+3. Se não houver uma função de gráfico específica para o que foi pedido, explique que não pode gerar o gráfico, mas apresente os dados em tabela.
+4. Gráficos disponíveis:
+   - Consumo por classe -> `gerar_grafico_consumo_por_classe`
+   - Ranking/Top subestações -> `gerar_grafico_ranking_subestacoes`
+   - Distribuição de GD -> `gerar_grafico_distribuicao_gd`
+   - Criticidade vs Consumo -> `gerar_grafico_criticidade_vs_consumo`
 """
 
 @retry(
@@ -205,6 +215,49 @@ tools = [
                     "type": "object",
                     "properties": {}
                 }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_consumo_por_classe",
+                description=" Gera o gráfico visual de pizza. OBRIGATÓRIO usar esta função para mostrar a distribuição de consumo.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_ranking_subestacoes",
+                description="Gera o gráfico visual de barras. OBRIGATÓRIO usar esta função para mostrar rankings de subestações.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "criterio": {
+                            "type": "string",
+                            "enum": ["consumo", "geracao"],
+                            "description": "Critério de ordenação: 'consumo' (MWh/ano) ou 'geracao' (kW de GD)"
+                        },
+                        "limite": {
+                            "type": "integer",
+                            "description": "Número de subestações no ranking (padrão: 10)"
+                        }
+                    },
+                    "required": ["criterio"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_distribuicao_gd",
+                description="Gera o gráfico visual de distribuição de GD. OBRIGATÓRIO usar esta função para mostrar dados de GD.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_criticidade_vs_consumo",
+                description="Gera o gráfico visual de scatter plot. OBRIGATÓRIO usar esta função para análises de criticidade.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
             )
         ]
     )
@@ -220,6 +273,7 @@ class ChatResponse(BaseModel):
     resposta: str
     historico_atualizado: List[Dict[str, str]]
     conversa_id: Optional[int] = None
+    graficos: Optional[List[Dict[str, Any]]] = None
 
 class FeedbackRequest(BaseModel):
     pergunta: str
@@ -276,6 +330,7 @@ def enviar_mensagem(request: ChatRequest):
         
         max_iterations = 10
         iteration = 0
+        graficos_gerados = []  # Lista para coletar gráficos
         
         while iteration < max_iterations:
             iteration += 1
@@ -303,7 +358,20 @@ def enviar_mensagem(request: ChatRequest):
             print(f"🔧 Chamando função: {function_name} com args: {function_args}")
             
             if function_name in FUNCOES_DISPONIVEIS:
-                resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
+                try:
+                    resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
+                    print(f"✅ Função {function_name} executada com sucesso")
+                except Exception as e:
+                    print(f"❌ Erro ao executar função {function_name}: {e}")
+                    resultado = {"erro": str(e)}
+                
+                if function_name.startswith("gerar_grafico_"):
+                    if isinstance(resultado, dict) and "spec" in resultado and "tipo" in resultado:
+                        graficos_gerados.append(resultado)
+                        print(f"📊 Gráfico capturado: {resultado.get('titulo', 'Sem título')}")
+                    else:
+                        print(f"⚠️ A função {function_name} não retornou um gráfico válido:Keys={resultado.keys() if isinstance(resultado, dict) else 'Not Dict'}")
+
             else:
                 resultado = {"erro": f"Função {function_name} não encontrada"}
             
@@ -398,6 +466,12 @@ def enviar_mensagem(request: ChatRequest):
         if not resposta_final or resposta_final.strip() == "":
             resposta_final = "⚠️ O modelo processou a requisição mas não retornou texto. Os dados foram consultados com sucesso no banco."
         
+        if "{" in resposta_final and '"tipo": "plotly"' in resposta_final:
+            import re
+            padrao = r'\{.*?"tipo":\s*"plotly".*?\}'
+            resposta_final = re.sub(padrao, '', resposta_final, flags=re.DOTALL)
+            resposta_final = re.sub(r'\n\s*\n', '\n\n', resposta_final).strip()
+
         historico_atual.append({"role": "assistant", "content": resposta_final})
 
         if conversa_id:
@@ -407,7 +481,8 @@ def enviar_mensagem(request: ChatRequest):
         return ChatResponse(
             resposta=resposta_final,
             historico_atualizado=historico_atual,
-            conversa_id=conversa_id
+            conversa_id=conversa_id,
+            graficos=graficos_gerados if graficos_gerados else None
         )
         
     except Exception as e:

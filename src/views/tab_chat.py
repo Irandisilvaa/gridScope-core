@@ -2,6 +2,8 @@ import streamlit as st
 import requests
 import time
 import socket
+import plotly.graph_objects as go
+import json
 
 CHAT_API_URL = "http://127.0.0.1:8002"
 
@@ -155,6 +157,18 @@ def tab_chat():
             else:
                 with st.chat_message("assistant"):
                     st.markdown(msg["content"])
+                    
+                    graficos = msg.get("graficos", [])
+                    if graficos:
+                         for i, grafico in enumerate(graficos):
+                            if grafico.get("tipo") == "plotly" and grafico.get("spec"):
+                                try:
+                                    fig_dict = json.loads(grafico["spec"])
+                                    fig = go.Figure(fig_dict)
+                                    unique_key = f"hist_{hash(msg['content'])}_{i}"
+                                    st.plotly_chart(fig, use_container_width=True, key=unique_key)
+                                except Exception as e:
+                                    st.error(f"Erro ao renderizar gráfico histórico: {str(e)}")
     
     pergunta_input = st.chat_input("Digite sua pergunta sobre os dados...")
     
@@ -185,10 +199,13 @@ def tab_chat():
         if not resposta_ia or resposta_ia.strip() == "":
             resposta_ia = "⚠️ Recebi uma resposta vazia da API. Tente novamente."
         
-        st.session_state.chat_mensagens.append({
+        nova_mensagem = {
             "role": "assistant",
-            "content": resposta_ia
-        })
+            "content": resposta_ia,
+            "graficos": resultado.get("graficos", [])
+        }
+        
+        st.session_state.chat_mensagens.append(nova_mensagem)
         
         st.session_state.chat_historico = resultado.get("historico_atualizado", [])
         
@@ -199,9 +216,24 @@ def tab_chat():
             with st.chat_message("assistant"):
                 st.markdown(resposta_ia)
                 
+                graficos = nova_mensagem.get("graficos", [])
+                if graficos:
+                    for i, grafico in enumerate(graficos):
+                        if grafico.get("tipo") == "plotly" and grafico.get("spec"):
+                            try:
+                                fig_dict = json.loads(grafico["spec"])
+                                fig = go.Figure(fig_dict)
+                                st.plotly_chart(
+                                    fig, 
+                                    use_container_width=True, 
+                                    key=f"grafico_live_{len(st.session_state.chat_mensagens)}_{i}"
+                                )
+                            except Exception as e:
+                                st.error(f"Erro ao renderizar gráfico: {str(e)}")
+                
                 col1, col2, col3 = st.columns([1, 1, 8])
                 with col1:
-                    if st.button("👍 Útil", key=f"like_{len(st.session_state.chat_mensagens)}"):
+                    if st.button("👍 Útil", key=f"like_new_{len(st.session_state.chat_mensagens)}"):
                         try:
                             requests.post(f"{CHAT_API_URL}/chat/feedback", json={
                                 "pergunta": pergunta_input,
