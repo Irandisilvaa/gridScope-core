@@ -39,9 +39,7 @@ def consultar_chat(mensagem: str, historico: list) -> dict:
         }
 
 
-def tab_chat():
-    st.header("☀️ Helios IA - Assistente GridScope")
-    
+def tab_chat():   
     if "chat_mensagens" not in st.session_state:
         st.session_state.chat_mensagens = []
     
