@@ -42,7 +42,6 @@ def render_view():
     }
 
     def formatar_br(valor):
-        """Formata números para o padrão brasileiro."""
         if isinstance(valor, str): return valor
         try:
             return f"{float(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -50,7 +49,6 @@ def render_view():
             return str(valor)
 
     def converter_para_dict(dado):
-        """Converte string para dicionário se necessário."""
         if isinstance(dado, dict):
             return dado
         if isinstance(dado, str):
@@ -62,7 +60,6 @@ def render_view():
 
     @st.cache_data
     def obter_dados_dashboard():
-        """Carrega dados geoespaciais e de mercado (cacheado)."""
         try:
             gdf, dados_lista = carregar_dados_cache()
             if gdf is None or not dados_lista:
@@ -77,6 +74,8 @@ def render_view():
     if gdf is None or df_mercado is None:
         st.error("❌ Falha crítica: Dados não carregados. Verifique se o ETL rodou.")
         st.stop()
+    gdf = gdf.loc[:, ~gdf.columns.duplicated()]
+
 
     mapa_opcoes = {}
     if 'subestacao' in df_mercado.columns:
@@ -156,26 +155,28 @@ def render_view():
         st.subheader("Potência da GD Instalada por Classe")
 
         detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
-        detalhe_gd = {k: v for k, v in detalhe_raw.items() if k in CATEGORIAS_ALVO and v > 0}
-
-        if detalhe_gd:
-            detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
-            lista_cores = [CORES_MAPA.get(k, '#1f77b4') for k in detalhe_gd.keys()]
-
-            fig_barras = go.Figure(data=[go.Bar(
-                x=list(detalhe_gd.keys()),
-                y=list(detalhe_gd.values()),
-                marker_color='#1f77b4',
-                text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
-                    detalhe_gd.values()],
-                textposition='auto'
-            )])
-            
-            fig_barras.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="kW")
-            st.plotly_chart(fig_barras, use_container_width=True)
-        else:
-            st.info("Sem dados de GD para as categorias selecionadas.")
-
+        detalhe_gd = {}
+        for categoria in CATEGORIAS_ALVO:
+            valor = detalhe_raw.get(categoria, 0.0)
+            detalhe_gd[categoria] = valor
+        detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
+        chaves = list(detalhe_gd.keys())
+        valores = list(detalhe_gd.values())
+        lista_cores = [CORES_MAPA.get(k, '#1f77b4') for k in chaves]
+        fig_barras = go.Figure(data=[go.Bar(
+            x=chaves,
+            y=valores,
+            marker_color=lista_cores,
+            text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") if v > 0 else "" for v in valores],
+            textposition='auto'
+        )])
+        
+        fig_barras.update_layout(
+            height=250, 
+            margin=dict(l=10, r=10, t=10, b=10), 
+            yaxis_title="kW"
+        )
+        st.plotly_chart(fig_barras, use_container_width=True)
         st.divider()
 
         st.subheader("📍 Área de Cobertura Geográfica")
@@ -190,8 +191,8 @@ def render_view():
                         'fillOpacity': 0.7 if is_sel else 0.3}
 
             folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                    aliases=["Subestação:",
-                                                                                            "ID:"])).add_to(m)
+                                                                                        aliases=["Subestação:",
+                                                                                                 "ID:"])).add_to(m)
             st_folium(m, use_container_width=True, height=400)
         else:
             st.warning("⚠️ Geometria não encontrada para este ID.")
@@ -233,7 +234,7 @@ def render_view():
                 st.info("Sem dados de Clientes.")
 
         with col_graf2:
-            st.markdown("**Carga por Classe (Consumo MWh)**")
+            st.markdown("**Consumo Anual por Classe (MWh)**")
             dados_carga = []
             if perfil:
                 for k, v in perfil.items():
@@ -309,6 +310,9 @@ def render_view():
                             mime="text/csv", use_container_width=True)
 
     with tab_ia_render:
-        tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
+        if tab_ia:
+            tab_ia.render_tab_ia(subestacao_obj, data_analise, dados_gd)
+        else:
+            st.error("Módulo de IA não carregado.")
 
     st.caption(f"GridScope v4.9 Enterprise | Dados atualizados em: {date.today().strftime('%d/%m/%Y')}")

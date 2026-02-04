@@ -4,394 +4,346 @@ import os
 import json
 import warnings
 import sys
-import fiona
-import gc  # Garbage Collector para gerenciamento de memória
-from sqlalchemy import create_engine
+import gc
 from shapely.geometry import mapping
 
-# --- CONFIGURAÇÕES ---
 warnings.filterwarnings('ignore')
 
-# Adiciona o diretório raiz ao path
+# garante que os módulos do projeto sejam encontrados
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Tenta pegar a URL do banco do config.py
-try:
-    from config import DATABASE_URL
-except ImportError:
-    DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/gridscope_db"
-
 from database import (
-    carregar_voronoi, 
-    carregar_transformadores, 
-    carregar_consumidores, 
-    carregar_geracao_gd, 
-    salvar_cache_mercado
+    carregar_voronoi,
+    carregar_transformadores,
+    carregar_consumidores,
+    carregar_geracao_gd,
+    salvar_cache_mercado,
 )
 
-# Nomes de arquivos
-NOME_ARQUIVO_VORONOI = "subestacoes_logicas_aracaju.geojson"
-NOME_ARQUIVO_SAIDA = "perfil_mercado_aracaju.json"
-CACHE_FILE_TRAFOS = "cache_mapeamento_trafos.parquet"
+NOME_ARQUIVO_VORONOI = "subestacoes_logicas.geojson"
+NOME_ARQUIVO_SAIDA = "perfil_mercado.json"
 
-# --- FUNÇÃO DE UTILIDADE: IMPORTAÇÃO INTELIGENTE ---
-def importar_arquivo_imediato(nome_tabela, motivo, tem_geometria=False):
-    """Pede um arquivo ao usuário, suporta CSV, SHP e GDB."""
-    print(f"\n⚠️  PROBLEMA EM '{nome_tabela}': {motivo}")
-    print(f"👉 Cole o CAMINHO COMPLETO do arquivo (CSV/SHP/GDB) para '{nome_tabela}'")
-    path_arquivo = input("   (ou pressione ENTER para seguir sem esses dados): ").strip('"').strip("'")
-    
-    if not path_arquivo or not os.path.exists(path_arquivo):
-        print("   ⏭️  Pulando importação...")
-        return pd.DataFrame()
+MAPA_CLASSES = {
+    'RE': 'Residencial', 'RESIDENCIAL': 'Residencial', 'B1': 'Residencial',
+    'CO': 'Comercial', 'COMERCIAL': 'Comercial', 'B3': 'Comercial',
+    'IN': 'Industrial', 'INDUSTRIAL': 'Industrial', 'A4': 'Industrial',
+    'RU': 'Rural', 'RURAL': 'Rural', 'B2': 'Rural',
+    'PP': 'Poder Público', 'SP': 'Poder Público', 'PO': 'Poder Público'
+}
 
-    print(f"   📂 Lendo: {os.path.basename(path_arquivo)}...")
-    df = pd.DataFrame()
-
-    try:
-        if path_arquivo.lower().endswith('.gdb'):
-            try:
-                layers = fiona.listlayers(path_arquivo)
-                sugestao = layers[0]
-                if 'consumidor' in nome_tabela:
-                    sugestao = next((l for l in layers if 'UCBT' in l or 'CONSUMIDOR' in l), layers[0])
-                elif 'transformador' in nome_tabela:
-                    sugestao = next((l for l in layers if 'UNTR' in l or 'TRAFO' in l), layers[0])
-                
-                print(f"   📂 Camadas: {layers}")
-                layer_name = input(f"   👉 Nome da camada (Enter para '{sugestao}'): ").strip()
-                if not layer_name: layer_name = sugestao
-                df = gpd.read_file(path_arquivo, layer=layer_name)
-            except Exception as e:
-                print(f"   ❌ Erro GDB: {e}")
-                return pd.DataFrame()
-        elif path_arquivo.lower().endswith('.csv'):
-            try:
-                df = pd.read_csv(path_arquivo, encoding='utf-8', sep=';')
-            except:
-                df = pd.read_csv(path_arquivo, encoding='latin1', sep=';')
-        else:
-            df = gpd.read_file(path_arquivo)
-
-        if not tem_geometria and hasattr(df, 'geometry'):
-            df = pd.DataFrame(df.drop(columns=['geometry']))
-
-        df.columns = [c.strip().upper() for c in df.columns]
-        df = df.loc[:, ~df.columns.duplicated()]
-
-        engine = create_engine(DATABASE_URL)
-        print(f"   💾 Salvando '{nome_tabela}' no Banco de Dados...")
-        if isinstance(df, gpd.GeoDataFrame) and tem_geometria:
-            df.to_postgis(nome_tabela, engine, if_exists='replace', index=False)
-        else:
-            df.to_sql(nome_tabela, engine, if_exists='replace', index=False)
-        
-        print(f"   ✅ Importado: {len(df)} registros.")
-        return df
-
-    except Exception as e:
-        print(f"   ❌ Erro ao importar: {e}")
-        return pd.DataFrame()
-
-# --- ALGORITMO OTIMIZADO: SOMA DE CONSUMO ---
-def calcular_consumo_anual_otimizado(df):
+def limpar_id(valor):
     """
-    Soma as colunas ENE_01 a ENE_12 de forma vetorizada.
-    Se não encontrar, tenta CONSUMO ou ENE_FORN.
+    Normaliza IDs removendo decimais (.0), espaços e garantindo string.
+    Essencial para garantir o 'match' entre tabelas.
     """
-    # Lista padrão de colunas de energia (ENE_01 ... ENE_12)
+    if pd.isna(valor) or valor == '':
+        return None
+    s = str(valor).strip()
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+def calcular_consumo_real(df):
+    """Soma ENE_01 a ENE_12 convertendo erros para 0."""
     cols_energia = [f'ENE_{i:02d}' for i in range(1, 13)]
-    
-    # Verifica quais dessas existem no DataFrame
     cols_existentes = [c for c in cols_energia if c in df.columns]
     
-    if len(cols_existentes) > 0:
-        print(f"   ⚡ Somando colunas mensais: {cols_existentes[0]} ... {cols_existentes[-1]}")
-        # Converte para numérico (coerces errors to NaN) e preenche NaN com 0
-        df_temp = df[cols_existentes].apply(pd.to_numeric, errors='coerce').fillna(0)
-        return df_temp.sum(axis=1)
-    
-    # Se não tiver ENE_XX, tenta coluna única
-    col_unica = next((c for c in ['CONSUMO', 'CONS_KWH', 'ENE_FORN', 'CONSUMO_ANUAL'] if c in df.columns), None)
-    if col_unica:
-        print(f"   ⚡ Usando coluna única de consumo: {col_unica}")
-        return pd.to_numeric(df[col_unica], errors='coerce').fillna(0)
-    
-    return 0.0
+    if not cols_existentes:
+        df['CONSUMO_ANUAL'] = 0.0
+        return df
 
-# --- LOOP PRINCIPAL ---
+    # Converte para numérico e preenche NaN com 0
+    df[cols_existentes] = df[cols_existentes].apply(pd.to_numeric, errors='coerce').fillna(0.0)
+    
+    df['CONSUMO_ANUAL'] = df[cols_existentes].sum(axis=1)
+    return df
+
 def analisar_mercado():
-    print("INICIANDO ANÁLISE DE MERCADO (MODO OTIMIZADO)...")
+    print("INICIANDO ANALISE DETALHADA E LIMPEZA DE DADOS...")
     
     dir_script = os.path.dirname(os.path.abspath(__file__))
     dir_raiz = os.path.dirname(os.path.dirname(dir_script))
-    path_voronoi_file = os.path.join(dir_raiz, NOME_ARQUIVO_VORONOI)
+    
     path_saida = os.path.join(dir_raiz, NOME_ARQUIVO_SAIDA)
-
-    # =========================================================
-    # 1. VORONOI (Territórios das Subestações)
-    # =========================================================
-    print("1. Carregando Territórios (Voronoi)...")
-    gdf_voronoi = pd.DataFrame()
+    print("1. Carregando e Normalizando Territórios...")
     try:
         gdf_voronoi = carregar_voronoi()
-    except:
-        pass 
-    
-    if gdf_voronoi.empty:
-        if os.path.exists(path_voronoi_file):
-            gdf_voronoi = gpd.read_file(path_voronoi_file)
-        else:
-            print(f"   ❌ ARQUIVO NÃO ENCONTRADO: {path_voronoi_file}")
+        # Reprojeção para metros para cálculos se necessário, mas aqui vamos manter controle
+        gdf_voronoi = gdf_voronoi.to_crs(epsg=31984) 
+
+        if 'COD_ID' not in gdf_voronoi.columns:
+            print("ERRO CRÍTICO: Voronoi sem coluna COD_ID.")
             return
 
-    if gdf_voronoi.crs is None:
-        gdf_voronoi.set_crs("EPSG:4326", inplace=True)
-    gdf_voronoi = gdf_voronoi.to_crs(epsg=31984)
-    gdf_voronoi = gdf_voronoi.loc[:, ~gdf_voronoi.columns.duplicated()]
-
-    # Padronização ID/Nome
-    if 'COD_ID' not in gdf_voronoi.columns:
-        gdf_voronoi['COD_ID'] = gdf_voronoi['ID'] if 'ID' in gdf_voronoi.columns else gdf_voronoi.index.astype(str)
-    
-    if 'NOM' not in gdf_voronoi.columns:
-        col_nome = next((c for c in ['NOME', 'SUB', 'NO_SUB', 'NOM_SUB'] if c in gdf_voronoi.columns), None)
-        gdf_voronoi['NOM'] = gdf_voronoi[col_nome] if col_nome else "Subestação " + gdf_voronoi['COD_ID'].astype(str)
-
-    gdf_voronoi = gdf_voronoi[['COD_ID', 'NOM', 'geometry']]
-    print(f"   > {len(gdf_voronoi)} territórios carregados.")
-
-    # =========================================================
-    # 2. TRANSFORMADORES E CRIAÇÃO DE HASH MAP
-    # =========================================================
-    print("2. Mapeando Transformadores...")
-    ref_trafos = None
-
-    # Tenta carregar cache
-    if os.path.exists(CACHE_FILE_TRAFOS):
-        print(f"   ⚡ Cache encontrado! Carregando '{CACHE_FILE_TRAFOS}'...")
-        try:
-            ref_trafos = pd.read_parquet(CACHE_FILE_TRAFOS)
-            print(f"   > {len(ref_trafos)} transformadores carregados do cache.")
-        except Exception as e:
-            print(f"   ⚠️ Cache corrompido, refazendo... ({e})")
-            os.remove(CACHE_FILE_TRAFOS)
-
-    # Se não tem cache, calcula
-    if ref_trafos is None:
-        gdf_trafos = carregar_transformadores()
-        if gdf_trafos.empty:
-            gdf_trafos = importar_arquivo_imediato("transformadores", "Tabela vazia", tem_geometria=True)
-            if gdf_trafos.empty: return
-
-        gdf_trafos.columns = [c.upper().strip() for c in gdf_trafos.columns]
+        # Normalização de Nomes
+        if 'NOM' not in gdf_voronoi.columns and 'NOME' in gdf_voronoi.columns:
+            gdf_voronoi = gdf_voronoi.rename(columns={'NOME': 'NOM'})
         
-        # Geometria e Projeção
-        col_geom = next((c for c in ['GEOMETRY', 'GEOM'] if c in gdf_trafos.columns), None)
-        if col_geom: 
-            gdf_trafos = gdf_trafos.set_geometry(col_geom)
-            if gdf_trafos.crs is None: gdf_trafos.set_crs(gdf_voronoi.crs, allow_override=True)
-            else: gdf_trafos = gdf_trafos.to_crs(gdf_voronoi.crs)
-        else:
-            print("   ❌ Erro: Transformadores sem geometria.")
-            return
+        # LIMPEZA PROFUNDA DO ID
+        gdf_voronoi['COD_ID_CLEAN'] = gdf_voronoi['COD_ID'].apply(limpar_id)
+        
+        # Remove Voronois sem ID válido
+        gdf_voronoi = gdf_voronoi.dropna(subset=['COD_ID_CLEAN'])
+        
+        print(f"   -> {len(gdf_voronoi)} territórios válidos carregados.")
+    except Exception as e:
+        print(f"Erro Voronoi: {e}")
+        return
+    print("2. Mapeando Transformadores (Spatial Join)...")
+    try:
+        gdf_trafos = carregar_transformadores().to_crs(epsg=31984)
 
-        # Cruzamento Espacial
-        print("   ⚙️ Executando sjoin (cruzamento espacial)...")
-        try:
-            trafos_mapped = gpd.sjoin(
-                gdf_trafos, 
-                gdf_voronoi[['COD_ID', 'NOM', 'geometry']], 
-                how="inner", predicate='intersects', lsuffix='_trafo', rsuffix='_sub'
+        # Join Espacial: Trafo -> Voronoi
+        trafos_join = gpd.sjoin(
+            gdf_trafos, 
+            gdf_voronoi[['NOM', 'COD_ID_CLEAN', 'geometry']], 
+            predicate="intersects", 
+            how="inner"
+        )
+
+        # Identificação das colunas corretas após o join
+        col_id_sub = 'COD_ID_CLEAN' # Coluna que veio do Voronoi (já limpa)
+        if 'COD_ID_CLEAN_right' in trafos_join.columns:
+            col_id_sub = 'COD_ID_CLEAN_right'
+            
+        # Coluna do ID do Trafo (geralmente COD_ID ou COD_ID_left)
+        col_id_trafo = 'COD_ID'
+        if 'COD_ID_left' in trafos_join.columns:
+            col_id_trafo = 'COD_ID_left'
+
+        # Cria tabela de referência limpa
+        ref_trafos = pd.DataFrame()
+        ref_trafos['ID_TRAFO'] = trafos_join[col_id_trafo].apply(limpar_id)
+        ref_trafos['ID_SUBESTACAO'] = trafos_join[col_id_sub].apply(limpar_id) # Já deve vir limpo, mas garante
+        
+        # Remove duplicatas (trafo na borda pode pegar 2 voronois, pegamos o primeiro)
+        ref_trafos = ref_trafos.drop_duplicates(subset=['ID_TRAFO'])
+        
+        print(f"   -> {len(ref_trafos)} transformadores vinculados a subestações.")
+    except Exception as e:
+        print(f"Erro Crítico em Transformadores: {e}")
+        return
+    print("3. Processando Consumidores (Vínculo Rigoroso)...")
+    df_cons_final = pd.DataFrame()
+    mapa_pn_classe = {}
+    
+    try:
+        cols_ene = [f'ENE_{i:02d}' for i in range(1, 13)]
+        cols_leitura = ['UNI_TR_MT', 'CLAS_SUB', 'PN_CON'] + cols_ene
+        
+        # Ignora geometria para economizar memória e evitar erros
+        df_uc = carregar_consumidores(colunas=cols_leitura, ignore_geometry=True)
+
+        if df_uc is None or df_uc.empty:
+            print("   ⚠️ Aviso: Tabela de consumidores vazia.")
+        else:
+            df_uc = calcular_consumo_real(df_uc)
+            
+            # LIMPEZA DO ID DE LIGAÇÃO
+            df_uc['TRAFO_LINK'] = df_uc['UNI_TR_MT'].apply(limpar_id)
+            
+            # MERGE: Consumidor -> Trafo (que já tem a Subestação)
+            df_cons_final = pd.merge(
+                df_uc, 
+                ref_trafos, 
+                left_on='TRAFO_LINK', 
+                right_on='ID_TRAFO', 
+                how='inner'
             )
-        except Exception as e:
-            print(f"   ❌ Erro sjoin: {e}")
-            return
-
-        # Resolução de Colunas
-        cols = trafos_mapped.columns.tolist()
-        col_id_sub = next((c for c in ['COD_ID__sub', 'COD_ID_sub', 'COD_ID_right', 'COD_ID_SUB', 'COD_ID'] if c in cols), None)
-        col_id_trafo = next((c for c in ['CTMT', 'COD_ID__trafo', 'COD_ID_trafo', 'UNI_TR_MT', 'TRANSF_ID', 'COD_ID'] if c in cols), None)
-        
-        if not col_id_trafo and 'COD_ID' in cols and col_id_sub != 'COD_ID': col_id_trafo = 'COD_ID'
-        if not col_id_trafo:
-            trafos_mapped['ID_GERADO_AUTO'] = trafos_mapped.index.astype(str)
-            col_id_trafo = 'ID_GERADO_AUTO'
-
-        if col_id_sub:
-            ref_trafos = trafos_mapped[[col_id_trafo, col_id_sub]].copy()
-            ref_trafos.columns = ['ID_TRAFO', 'ID_SUBESTACAO']
-            # Limpeza e Remoção de Duplicatas (Essencial)
-            ref_trafos['ID_TRAFO'] = ref_trafos['ID_TRAFO'].astype(str).str.replace(r'\.0$', '', regex=True)
-            ref_trafos['ID_SUBESTACAO'] = ref_trafos['ID_SUBESTACAO'].astype(str).str.replace(r'\.0$', '', regex=True)
             
-            # Remove duplicatas para garantir mapeamento 1:1
-            ref_trafos = ref_trafos.drop_duplicates(subset=['ID_TRAFO'])
+            # Mapeamento de Classes
+            df_cons_final['TIPO'] = df_cons_final['CLAS_SUB'].astype(str).str[:2].map(MAPA_CLASSES).fillna('Outros')
+
+            # Cache para usar na GD
+            if 'PN_CON' in df_cons_final.columns:
+                mapa_pn_classe = df_cons_final[['PN_CON', 'TIPO']].drop_duplicates(subset='PN_CON').set_index('PN_CON')['TIPO']
             
-            print(f"   💾 Salvando cache para próxima vez...")
-            ref_trafos.to_parquet(CACHE_FILE_TRAFOS)
-        else:
-            print("   ❌ Erro: Não foi possível identificar ID da Subestação.")
-            return
+            total_ucs = len(df_uc)
+            total_match = len(df_cons_final)
+            print(f"   -> {total_match} consumidores vinculados (de um total de {total_ucs}).")
+            if total_match == 0:
+                print("   ❌ ATENÇÃO: Nenhum consumidor foi vinculado. Verifique se os IDs dos transformadores batem com 'UNI_TR_MT'.")
 
-    # --- CRIAÇÃO DO HASH MAP (DICIONÁRIO) ---
-    # Isso é MUITO mais rápido e leve que um DataFrame merge
-    print("   🗺️  Criando índice de mapeamento em memória (Hash Map)...")
-    mapa_trafo_sub = pd.Series(
-        ref_trafos.ID_SUBESTACAO.values, 
-        index=ref_trafos.ID_TRAFO
-    ).to_dict()
-    
-    # Libera memória do DataFrame antigo
-    del ref_trafos
-    gc.collect()
+            del df_uc
+            gc.collect()
 
-    # =========================================================
-    # 3. CONSUMIDORES (ALGORITMO EFICIENTE)
-    # =========================================================
-    print("3. Processando Consumidores...")
-    metrics_df = pd.DataFrame()
-    
-    if mapa_trafo_sub:
-        gdf_ucs = carregar_consumidores()
-        
-        if not gdf_ucs.empty:
-            # Descarta geometria
-            if hasattr(gdf_ucs, 'geometry'):
-                gdf_ucs = pd.DataFrame(gdf_ucs.drop(columns=['geometry']))
-            
-            gdf_ucs.columns = [c.upper().strip() for c in gdf_ucs.columns]
-            
-            # Identifica ID do Trafo
-            col_trafo_uc = next((c for c in ['CTMT', 'UNI_TR_SD', 'UNI_TR_MT', 'TRANSF_ID', 'ID_TRAFO'] if c in gdf_ucs.columns), None)
-            
-            if col_trafo_uc:
-                print("   ⚡ Calculando consumo anual e mapeando subestações...")
-                
-                # 1. Limpeza do ID do Trafo
-                gdf_ucs['clean_trafo_id'] = gdf_ucs[col_trafo_uc].astype(str).str.replace(r'\.0$', '', regex=True)
-                
-                # 2. Mapeamento Direto (Lookup O(1)) - Sem Merge pesado
-                # Cria coluna 'ID_SUBESTACAO' usando o dicionário
-                gdf_ucs['ID_SUBESTACAO'] = gdf_ucs['clean_trafo_id'].map(mapa_trafo_sub)
-                
-                # Filtra apenas os que foram encontrados (Remove orfãos para economizar processamento)
-                ucs_mapped = gdf_ucs.dropna(subset=['ID_SUBESTACAO'])
-                print(f"   > {len(ucs_mapped)} clientes vinculados a subestações (de {len(gdf_ucs)} totais).")
-
-                # 3. Cálculo do Consumo Anual (Soma ENE_01 a ENE_12)
-                ucs_mapped['CONSUMO_TOTAL_ANO'] = calcular_consumo_anual_otimizado(ucs_mapped)
-                
-                # 4. Agregação Final
-                metrics_df = ucs_mapped.groupby('ID_SUBESTACAO').agg(
-                    total_clientes=('clean_trafo_id', 'count'),
-                    consumo_anual_mwh=('CONSUMO_TOTAL_ANO', lambda x: x.sum() / 1000) # Soma KWh e vira MWh
-                ).reset_index()
-
-                # Limpeza
-                del gdf_ucs, ucs_mapped
-                gc.collect()
-            else:
-                print("   ⚠️ Coluna de vínculo com Trafo não encontrada nos consumidores.")
-
-    # =========================================================
-    # 4. GERAÇÃO DISTRIBUÍDA (GD)
-    # =========================================================
+    except Exception as e:
+        print(f"Erro Consumidores: {e}")
     print("4. Processando GD...")
-    gd_summary = pd.DataFrame()
-
-    if mapa_trafo_sub:
-        gdf_gd = carregar_geracao_gd()
-        if not gdf_gd.empty:
-            gdf_gd.columns = [c.upper().strip() for c in gdf_gd.columns]
+    df_gd_final = pd.DataFrame()
+    try:
+        df_gd = carregar_geracao_gd(colunas=['UNI_TR_MT', 'POT_INST', 'PN_CON'], ignore_geometry=True)
+        
+        if df_gd is not None and not df_gd.empty:
+            df_gd['POT_INST'] = pd.to_numeric(df_gd['POT_INST'], errors='coerce').fillna(0.0)
             
-            col_trafo_gd = next((c for c in ['CTMT', 'UNI_TR_MT', 'COD_ID_TRAFO'] if c in gdf_gd.columns), None)
+            # LIMPEZA ID
+            df_gd['TRAFO_LINK'] = df_gd['UNI_TR_MT'].apply(limpar_id)
+
+            # MERGE
+            df_gd_final = pd.merge(
+                df_gd, 
+                ref_trafos, 
+                left_on='TRAFO_LINK', 
+                right_on='ID_TRAFO', 
+                how='inner'
+            )
             
-            if col_trafo_gd:
-                # Mesmo processo: Limpeza -> Map -> Agregação
-                gdf_gd['clean_trafo_id'] = gdf_gd[col_trafo_gd].astype(str).str.replace(r'\.0$', '', regex=True)
-                gdf_gd['ID_SUBESTACAO'] = gdf_gd['clean_trafo_id'].map(mapa_trafo_sub)
-                
-                gd_mapped = gdf_gd.dropna(subset=['ID_SUBESTACAO'])
-                print(f"   > {len(gd_mapped)} usinas GD vinculadas.")
+            if not mapa_pn_classe.empty:
+                df_gd_final['TIPO'] = df_gd_final['PN_CON'].map(mapa_pn_classe).fillna('Outros')
+            else:
+                df_gd_final['TIPO'] = 'Outros'
 
-                col_pot = next((c for c in ['POT_KW', 'MDA_POT_INST', 'POTENCIA'] if c in gd_mapped.columns), None)
-                gd_mapped['POT_CALC'] = pd.to_numeric(gd_mapped[col_pot], errors='coerce').fillna(0) if col_pot else 0
+            print(f"   -> {len(df_gd_final)} unidades de GD vinculadas.")
+            del df_gd
+            gc.collect()
+    except Exception as e:
+        print(f"Aviso GD: {e}")
 
-                gd_summary = gd_mapped.groupby('ID_SUBESTACAO').agg(
-                    total_unidades=('clean_trafo_id', 'count'),
-                    potencia_total_kw=('POT_CALC', 'sum')
-                ).reset_index()
-                
-                del gdf_gd, gd_mapped
-                gc.collect()
-
-    # =========================================================
-    # 5. GERAR RELATÓRIO JSON
-    # =========================================================
-    print("5. Gerando Relatório Final...")
+    print("5. Construindo JSON de saída...")
     relatorio = []
 
-    # Indexação para busca rápida
-    if not metrics_df.empty:
-        metrics_df.set_index('ID_SUBESTACAO', inplace=True)
-    if not gd_summary.empty:
-        gd_summary.set_index('ID_SUBESTACAO', inplace=True)
+    # Prepara geometria WGS84 para exportação
+    try:
+        gdf_voronoi_wgs = gdf_voronoi.to_crs(epsg=4326)
+    except:
+        gdf_voronoi_wgs = gdf_voronoi.copy()
 
+    # Otimização: Agrupar dados antes do loop
+    print("   -> Agrupando dados para preenchimento rápido...")
+    
+    # Agrupamento Consumidores
+    grouped_cons = pd.DataFrame()
+    if not df_cons_final.empty:
+        # Por Subestação (Total)
+        cons_por_sub = df_cons_final.groupby('ID_SUBESTACAO').agg(
+            qtd=('TRAFO_LINK', 'count'),
+            consumo=('CONSUMO_ANUAL', 'sum')
+        )
+        # Por Subestação e Classe (Detalhe)
+        cons_por_sub_classe = df_cons_final.groupby(['ID_SUBESTACAO', 'TIPO']).agg(
+            qtd=('TRAFO_LINK', 'count'),
+            consumo=('CONSUMO_ANUAL', 'sum')
+        ).reset_index()
+    
+    # Agrupamento GD
+    grouped_gd = pd.DataFrame()
+    if not df_gd_final.empty:
+        gd_por_sub = df_gd_final.groupby('ID_SUBESTACAO').agg(
+            qtd=('TRAFO_LINK', 'count'),
+            potencia=('POT_INST', 'sum')
+        )
+        gd_por_sub_classe = df_gd_final.groupby(['ID_SUBESTACAO', 'TIPO'])['POT_INST'].sum().reset_index()
+
+    # Loop Principal
     for idx, row in gdf_voronoi.iterrows():
-        sub_id = str(row['COD_ID']).replace('.0', '')
+        # Usa o ID Limpo
+        sub_id = row['COD_ID_CLEAN']
         nome = row.get('NOM', f'Subestação {sub_id}')
 
-        # Busca dados (Lookup no índice é O(1))
-        clientes = 0
-        consumo = 0.0
-        if sub_id in metrics_df.index:
-            clientes = int(metrics_df.loc[sub_id, 'total_clientes'])
-            consumo = float(metrics_df.loc[sub_id, 'consumo_anual_mwh'])
+        # 1. Recupera Dados Totais
+        total_cli = 0
+        total_cons = 0.0
+        if not df_cons_final.empty and sub_id in cons_por_sub.index:
+            total_cli = int(cons_por_sub.loc[sub_id, 'qtd'])
+            total_cons = float(cons_por_sub.loc[sub_id, 'consumo'])
 
-        gd_qtd = 0
-        gd_pot = 0.0
-        if sub_id in gd_summary.index:
-            gd_qtd = int(gd_summary.loc[sub_id, 'total_unidades'])
-            gd_pot = float(gd_summary.loc[sub_id, 'potencia_total_kw'])
+        total_gd_qtd = 0
+        total_gd_pot = 0.0
+        if not df_gd_final.empty and sub_id in gd_por_sub.index:
+            total_gd_qtd = int(gd_por_sub.loc[sub_id, 'qtd'])
+            total_gd_pot = float(gd_por_sub.loc[sub_id, 'potencia'])
 
-        # Classificação
-        nivel = "BAIXO"
-        if gd_pot > 1000: nivel = "MEDIO"
-        if gd_pot > 5000: nivel = "ALTO"
-
+        # 2. Recupera Geometria Segura
         geom_dict = None
-        if hasattr(row, 'geometry') and row.geometry:
-            try: geom_dict = mapping(row.geometry)
-            except: pass
+        try:
+            geom_wgs = gdf_voronoi_wgs.loc[idx, 'geometry']
+            if geom_wgs and not geom_wgs.is_empty:
+                geom_dict = mapping(geom_wgs)
+        except: pass
 
+        # 3. Definição Nível
+        nivel = "BAIXO"
+        if total_gd_pot > 1000: nivel = "MEDIO"
+        if total_gd_pot > 5000: nivel = "ALTO"
+
+        # 4. Estrutura Base
         stats = {
             "subestacao": f"{nome} (ID: {sub_id})",
             "id_tecnico": str(sub_id),
             "metricas_rede": {
-                "total_clientes": clientes,
-                "consumo_anual_mwh": round(consumo, 2),
+                "total_clientes": total_cli,
+                "consumo_anual_mwh": float(round(total_cons/1000, 2)),
                 "nivel_criticidade_gd": nivel
             },
             "geracao_distribuida": {
-                "total_unidades": gd_qtd,
-                "potencia_total_kw": round(gd_pot, 2),
+                "total_unidades": total_gd_qtd,
+                "potencia_total_kw": float(round(total_gd_pot, 2)),
                 "detalhe_por_classe": {}
             },
             "perfil_consumo": {},
             "geometry": geom_dict
         }
+        
+        # 5. Preenche Perfil Detalhado (Usando os dados agrupados)
+        classes_interesse = ['Residencial', 'Comercial', 'Industrial', 'Rural', 'Poder Público']
+        
+        if total_cli > 0 and not df_cons_final.empty:
+            # Filtra o dataframe agrupado (muito mais rápido que filtrar o dataframe gigante)
+            dados_cls = cons_por_sub_classe[cons_por_sub_classe['ID_SUBESTACAO'] == sub_id]
+            
+            for cls in classes_interesse:
+                # Busca segura
+                linha_cls = dados_cls[dados_cls['TIPO'] == cls]
+                
+                qtd_cls = 0
+                cons_cls = 0.0
+                
+                if not linha_cls.empty:
+                    qtd_cls = int(linha_cls['qtd'].values[0])
+                    cons_cls = float(linha_cls['consumo'].values[0])
+                
+                pct = round((cons_cls/total_cons*100), 1) if total_cons > 0 else 0
+                
+                stats["perfil_consumo"][cls] = {
+                    "qtd_clientes": qtd_cls,
+                    "pct": pct,
+                    "consumo_anual_mwh": float(round(cons_cls/1000, 2))
+                }
+
+        # 6. Preenche GD Detalhada
+        if total_gd_pot > 0 and not df_gd_final.empty:
+             dados_gd_cls = gd_por_sub_classe[gd_por_sub_classe['ID_SUBESTACAO'] == sub_id]
+             for cls in classes_interesse:
+                 linha_gd = dados_gd_cls[dados_gd_cls['TIPO'] == cls]
+                 if not linha_gd.empty:
+                     pot_cls = float(linha_gd['POT_INST'].values[0])
+                     if pot_cls > 0:
+                        stats["geracao_distribuida"]["detalhe_por_classe"][cls] = float(round(pot_cls, 2))
+        
         relatorio.append(stats)
 
-    # Salva
+    print("6. Salvando resultados...")
     try:
         with open(path_saida, 'w', encoding='utf-8') as f:
             json.dump(relatorio, f, indent=4, ensure_ascii=False)
-        print(f"✅ Arquivo JSON gerado: {path_saida}")
-        salvar_cache_mercado(relatorio)
-        print("✅ Dados salvos no cache do banco.")
+        print(f"✅ Arquivo JSON salvo em {path_saida}")
     except Exception as e:
-        print(f"❌ Erro ao salvar final: {e}")
+        print(f"Erro ao salvar JSON local: {e}")
+
+    try:
+        salvar_cache_mercado(relatorio)
+        print("✅ Cache salvo no banco de dados PostgreSQL")
+    except Exception as e:
+        print(f"⚠️ Aviso: Não foi possível salvar cache no banco: {e}")
+
+def garantir_mercado_atualizado():
+    dir_script = os.path.dirname(os.path.abspath(__file__))
+    dir_raiz = os.path.dirname(os.path.dirname(dir_script))
+    path_saida = os.path.join(dir_raiz, NOME_ARQUIVO_SAIDA)
+
+    if not os.path.exists(path_saida):
+        analisar_mercado()
+    return path_saida
 
 if __name__ == "__main__":
     analisar_mercado()
