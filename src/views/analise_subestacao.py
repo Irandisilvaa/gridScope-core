@@ -175,9 +175,7 @@ def render_view():
         detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
         
         detalhe_gd = {}
-        for k, v in detalhe_raw.items():
-            if k not in CATEGORIAS_ALVO: continue
-            
+        for k, v in detalhe_raw.items():     
             potencia = 0
             if isinstance(v, dict):
                 potencia = v.get('potencia_kw', 0)
@@ -189,12 +187,12 @@ def render_view():
 
         if detalhe_gd:
             detalhe_gd = dict(sorted(detalhe_gd.items(), key=lambda item: item[1], reverse=True))
-            lista_cores = [CORES_MAPA.get(k, '#1f77b4') for k in detalhe_gd.keys()]
+            lista_cores = [CORES_MAPA.get(k, '#6c757d') for k in detalhe_gd.keys()]
 
             fig_barras = go.Figure(data=[go.Bar(
                 x=list(detalhe_gd.keys()),
                 y=list(detalhe_gd.values()),
-                marker_color='#1f77b4',
+                marker_color=lista_cores, 
                 text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
                     detalhe_gd.values()],
                 textposition='auto'
@@ -203,7 +201,7 @@ def render_view():
             fig_barras.update_layout(height=250, margin=dict(l=10, r=10, t=10, b=10), yaxis_title="kW")
             st.plotly_chart(fig_barras, use_container_width=True)
         else:
-            st.info("Sem dados de GD para as categorias selecionadas.")
+            st.info("Sem dados de GD para exibir.")
 
         st.divider()
 

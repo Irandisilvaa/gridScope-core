@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import os
 
+# --- Configuração Inicial ---
 st.set_page_config(
     page_title="GridScope - Inteligência Energética",
     page_icon="⚡",
@@ -9,25 +10,28 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-try:
-    from views import analise_subestacao, visao_geral, relatorios
+# Inicialização do Estado
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
 
+# Configuração de Caminho
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+# --- Importação das Views com Tratamento de Erro ---
 try:
-    from views import analise_subestacao, visao_geral, tab_chat
+    from views import analise_subestacao, visao_geral, tab_chat, relatorios
 except ImportError as e:
-    st.error(f"Aviso: {e}. Certifique-se que a pasta 'views' existe.")
+    # Cria mocks para não quebrar a aplicação se faltar arquivo
+    st.error(f"Aviso: {e}. Certifique-se que a pasta 'views' existe e contém os arquivos.")
     class MockView:
-        def render_view(self): st.write("View carregada")
+        def render_view(self): st.info("Funcionalidade em desenvolvimento ou arquivo não encontrado.")
+    
     if 'analise_subestacao' not in locals(): analise_subestacao = MockView()
     if 'visao_geral' not in locals(): visao_geral = MockView()
     if 'tab_chat' not in locals(): tab_chat = MockView()
-    
+    if 'relatorios' not in locals(): relatorios = MockView()
+
+# --- CSS Personalizado ---
 st.markdown("""
     <style>
         .stApp { background-color: #0e1117; }
@@ -57,11 +61,11 @@ st.markdown("""
             margin-bottom: 10px;
             transition: transform 0.3s ease;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            overflow: hidden; 
+            overflow: hidden; /* Garante que o zoom não vaze */
         }
         
         .avatar-frame:hover {
-            transform: scale(1.0);
+            transform: scale(1.05);
             cursor: pointer;
         }
 
@@ -70,11 +74,12 @@ st.markdown("""
             height: 100%;
             border-radius: 50%;
             object-fit: cover; 
-            object-position: center ; 
+            object-position: center; 
             
-            /* AQUI ESTÁ O TRUQUE DO ZOOM */
+            /* TRUQUE DO ZOOM */
             transform: scale(2.1);
             display: block;
+            border: none;
         }
         
         .profile-name {
@@ -113,8 +118,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# URL da imagem (se o link estiver quebrado, substitua por outro)
 url_avatar = "https://i.ibb.co/8Lm3gSKk/Gemini-Generated-Image-dmdcrpdmdcrpdmdc.png"
 
+# --- Sidebar ---
 st.sidebar.markdown(f"""
     <div class="profile-container">
         <div class="avatar-frame">
@@ -130,38 +137,37 @@ if st.sidebar.button("✨ Conversar com Helios"):
 
 st.sidebar.markdown("---")
 
+# Menu de Navegação
 opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
+
 try:
     index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
 except ValueError:
     index_atual = 0 
+
 navegacao = st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
     key="nav_radio"
 )
+
+# Atualiza estado se mudou no menu
 if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
     st.session_state['pagina_atual'] = navegacao
     st.rerun()
 
-if navegacao == "🔍 Análise por Subestação":
-    analise_subestacao.render_view()
-elif navegacao == "📊 Visão Geral":
-    visao_geral.render_view()
-elif navegacao == "📄 Relatórios":
-    relatorios.render_view()
-
 st.sidebar.markdown("---")
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
+# --- Lógica de Renderização Principal ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        
-        st.markdown(f'<img src="{url_avatar}" style="width:70px; border-radius:70%;">', unsafe_allow_html=True)
+        # Miniatura redonda no título do chat
+        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{url_avatar}" style="width:100%; height:100%; object-fit:cover; transform:scale(2.1);"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
         
@@ -187,7 +193,7 @@ elif pagina == "📊 Visão Geral":
     except Exception as e:
         st.error(f"Erro ao carregar módulo de Visão Geral: {e}")
 
-elif navegacao == "📄 Relatórios":
+elif pagina == "📄 Relatórios":
     try:
         if hasattr(relatorios, 'render_view'):
             relatorios.render_view()
