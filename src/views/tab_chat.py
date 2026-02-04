@@ -6,11 +6,13 @@ import socket
 CHAT_API_URL = "http://127.0.0.1:8002"
 
 
-def consultar_chat(mensagem: str, historico: list) -> dict:
+def consultar_chat(mensagem: str, historico: list, conversa_id: int = None, usuario_id: str = None) -> dict:
     try:
         payload = {
             "mensagem": mensagem,
-            "historico": historico
+            "historico": historico,
+            "conversa_id": conversa_id,
+            "usuario_id": usuario_id
         }
         
         response = requests.post(
@@ -24,18 +26,21 @@ def consultar_chat(mensagem: str, historico: list) -> dict:
         else:
             return {
                 "resposta": f"❌ Erro na API: {response.status_code}",
-                "historico_atualizado": historico
+                "historico_atualizado": historico,
+                "conversa_id": conversa_id
             }
             
     except requests.exceptions.ConnectionError:
         return {
             "resposta": "❌ Não foi possível conectar à API de chat. Certifique-se de que o serviço está rodando (python src/ai/chat_service.py)",
-            "historico_atualizado": historico
+            "historico_atualizado": historico,
+            "conversa_id": conversa_id
         }
     except Exception as e:
         return {
             "resposta": f"❌ Erro: {str(e)}",
-            "historico_atualizado": historico
+            "historico_atualizado": historico,
+            "conversa_id": conversa_id
         }
 
 
@@ -96,12 +101,15 @@ def tab_chat():
                                     ]
                                     st.session_state.conversa_id = conv["id"]
                                     st.rerun()
-                            except:
-                                st.error("Erro ao carregar conversa")
+                                else:
+                                    st.error(f"Erro ao carregar conversa: Status {msg_response.status_code}")
+                            except Exception as e:
+                                st.error(f"Erro ao carregar conversa: {str(e)}")
                 else:
                     st.caption("_Nenhuma conversa ainda_")
-        except:
-            st.caption("⚠️ API offline")
+        except Exception as e:
+            st.caption(f"⚠️ Erro ao carregar histórico: {str(e)}")
+            print(f"DEBUG - Erro ao carregar conversas: {str(e)}")
     
     st.markdown("### 💡 Perguntas Sugeridas")
     
@@ -165,7 +173,12 @@ def tab_chat():
                 st.markdown(pergunta_input)
         
         with st.spinner("🔍 Consultando dados do sistema e processando resposta..."):
-            resultado = consultar_chat(pergunta_input, st.session_state.chat_historico)
+            resultado = consultar_chat(
+                pergunta_input, 
+                st.session_state.chat_historico,
+                st.session_state.conversa_id,
+                st.session_state.usuario_id
+            )
         
         resposta_ia = resultado.get("resposta", "Erro ao processar resposta")
         
@@ -178,6 +191,9 @@ def tab_chat():
         })
         
         st.session_state.chat_historico = resultado.get("historico_atualizado", [])
+        
+        if resultado.get("conversa_id"):
+            st.session_state.conversa_id = resultado.get("conversa_id")
         
         with chat_container:
             with st.chat_message("assistant"):

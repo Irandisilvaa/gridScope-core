@@ -3,7 +3,7 @@ import sys
 import json
 import traceback
 import hashlib
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
 from google import genai
@@ -213,10 +213,13 @@ tools = [
 class ChatRequest(BaseModel):
     mensagem: str
     historico: List[Dict[str, str]] = []
+    conversa_id: Optional[int] = None
+    usuario_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     resposta: str
     historico_atualizado: List[Dict[str, str]]
+    conversa_id: Optional[int] = None
 
 class FeedbackRequest(BaseModel):
     pergunta: str
@@ -227,6 +230,15 @@ class FeedbackRequest(BaseModel):
 @app.post("/chat/message", response_model=ChatResponse)
 def enviar_mensagem(request: ChatRequest):
     try:
+        conversa_id = request.conversa_id
+        if not conversa_id and request.usuario_id:
+            titulo = request.mensagem[:50] + "..." if len(request.mensagem) > 50 else request.mensagem
+            conversa_id = criar_conversa(request.usuario_id, titulo)
+            print(f"📝 Nova conversa criada: ID {conversa_id}")
+        if conversa_id:
+            salvar_mensagem(conversa_id, "user", request.mensagem)
+            print(f"💾 Mensagem do usuário salva na conversa {conversa_id}")
+        
         contents = [types.Content(role="user", parts=[types.Part(text=CONTEXTO_SISTEMA)])]
         
         for msg in request.historico:
@@ -249,7 +261,8 @@ def enviar_mensagem(request: ChatRequest):
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 return ChatResponse(
                     resposta="⏰ **Cota da API Gemini excedida!**\n\nO plano gratuito do modelo `gemini-3-flash-preview` permite apenas **20 requisições por dia**.\n\n**Soluções:**\n1. Aguardar até amanhã (~3h AM) para renovação da cota\n2. Criar nova API key em outro projeto do Google Cloud\n3. Fazer upgrade para plano pago\n\n[Gerenciar API Keys](https://aistudio.google.com/app/apikey)",
-                    historico_atualizado=request.historico
+                    historico_atualizado=request.historico,
+                    conversa_id=conversa_id
                 )
             raise
         
@@ -387,10 +400,14 @@ def enviar_mensagem(request: ChatRequest):
         
         historico_atual.append({"role": "assistant", "content": resposta_final})
 
+        if conversa_id:
+            salvar_mensagem(conversa_id, "assistant", resposta_final)
+            print(f"💾 Resposta do assistente salva na conversa {conversa_id}")
         
         return ChatResponse(
             resposta=resposta_final,
-            historico_atualizado=historico_atual
+            historico_atualizado=historico_atual,
+            conversa_id=conversa_id
         )
         
     except Exception as e:
