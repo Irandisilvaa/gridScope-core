@@ -21,7 +21,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from views import analise_subestacao, visao_geral, tab_chat, relatorios
 except ImportError as e:
-    # Cria mocks para não quebrar a aplicação se faltar arquivo
     st.error(f"Aviso: {e}. Certifique-se que a pasta 'views' existe e contém os arquivos.")
     class MockView:
         def render_view(self): st.info("Funcionalidade em desenvolvimento ou arquivo não encontrado.")
@@ -43,25 +42,24 @@ st.markdown("""
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding-top: 20px;
+            padding-top: 10px;
             padding-bottom: 10px; 
             margin-bottom: 10px;
         }
         
         .avatar-frame {
-            width: 110px;
-            height: 110px;
+            width: 90px; /* Reduzi levemente para caber melhor embaixo */
+            height: 90px;
             border-radius: 50%;
-            padding: 4px; /* Espessura do anel colorido */
-            /* Gradiente estilo Instagram/Tech */
+            padding: 3px; 
             background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); 
             display: flex;
             justify-content: center;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 5px;
             transition: transform 0.3s ease;
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-            overflow: hidden; /* Garante que o zoom não vaze */
+            overflow: hidden; 
         }
         
         .avatar-frame:hover {
@@ -75,8 +73,6 @@ st.markdown("""
             border-radius: 50%;
             object-fit: cover; 
             object-position: center; 
-            
-            /* TRUQUE DO ZOOM */
             transform: scale(2.1);
             display: block;
             border: none;
@@ -85,7 +81,7 @@ st.markdown("""
         .profile-name {
             color: #ffffff;
             font-weight: bold;
-            font-size: 1.3rem;
+            font-size: 1.1rem;
             margin: 0;
             line-height: 1.2;
             text-align: center;
@@ -93,8 +89,8 @@ st.markdown("""
         
         .profile-status {
             color: #00e676;
-            font-size: 0.85rem;
-            margin-top: 4px;
+            font-size: 0.75rem;
+            margin-top: 2px;
             margin-bottom: 0px;
             text-align: center;
             font-weight: 500;
@@ -118,10 +114,37 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# URL da imagem (se o link estiver quebrado, substitua por outro)
+url_logo = "https://i.ibb.co/PzM7Kbs7/imagem-2026-02-04-150703728-removebg-preview.png" 
 url_avatar = "https://i.ibb.co/8Lm3gSKk/Gemini-Generated-Image-dmdcrpdmdcrpdmdc.png"
 
-# --- Sidebar ---
+
+st.sidebar.image(url_logo, use_container_width=True)
+st.sidebar.markdown("<br>", unsafe_allow_html=True) 
+
+opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
+
+try:
+    if st.session_state['pagina_atual'] in opcoes_menu:
+        index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
+    else:
+        index_atual = 0 
+except ValueError:
+    index_atual = 0 
+
+navegacao = st.sidebar.radio(
+    "Ferramentas:",
+    opcoes_menu,
+    index=index_atual,
+    key="nav_radio"
+)
+
+if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
+    st.session_state['pagina_atual'] = navegacao
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**Assistente Inteligente**")
+
 st.sidebar.markdown(f"""
     <div class="profile-container">
         <div class="avatar-frame">
@@ -134,39 +157,15 @@ st.sidebar.markdown(f"""
 
 if st.sidebar.button("✨ Conversar com Helios"):
     st.session_state['pagina_atual'] = "Chat IA"
-
-st.sidebar.markdown("---")
-
-# Menu de Navegação
-opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
-
-try:
-    index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
-except ValueError:
-    index_atual = 0 
-
-navegacao = st.sidebar.radio(
-    "Ferramentas:",
-    opcoes_menu,
-    index=index_atual,
-    key="nav_radio"
-)
-
-# Atualiza estado se mudou no menu
-if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
-    st.session_state['pagina_atual'] = navegacao
     st.rerun()
 
-st.sidebar.markdown("---")
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
-# --- Lógica de Renderização Principal ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        # Miniatura redonda no título do chat
         st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{url_avatar}" style="width:100%; height:100%; object-fit:cover; transform:scale(2.1);"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
