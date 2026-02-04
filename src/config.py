@@ -21,4 +21,4 @@ DISTRIBUIDORA_ALVO = os.getenv("DISTRIBUIDORA_ALVO", "Energisa SE")
 
 # Chat IA
 CHAT_API_KEY = os.getenv("GEMINI_API_KEY")
-CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-1.5-flash")
+CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-flash-preview")

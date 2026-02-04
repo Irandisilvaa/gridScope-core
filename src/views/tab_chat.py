@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 import time
+import socket
 
 CHAT_API_URL = "http://127.0.0.1:8002"
 
@@ -15,7 +16,7 @@ def consultar_chat(mensagem: str, historico: list) -> dict:
         response = requests.post(
             f"{CHAT_API_URL}/chat/message",
             json=payload,
-            timeout=120
+            timeout=180
         )
         
         if response.status_code == 200:
@@ -38,15 +39,71 @@ def consultar_chat(mensagem: str, historico: list) -> dict:
         }
 
 
-def render_view():
-    st.title("💬 Chat com IA - Consulta de Dados")
-    st.markdown("Faça perguntas sobre os dados do sistema elétrico")
+def tab_chat():
+    st.header("☀️ Helios IA - Assistente GridScope")
+    
+    if "chat_mensagens" not in st.session_state:
+        st.session_state.chat_mensagens = []
     
     if "chat_historico" not in st.session_state:
         st.session_state.chat_historico = []
     
-    if "chat_mensagens" not in st.session_state:
-        st.session_state.chat_mensagens = []
+    if "conversa_id" not in st.session_state:
+        st.session_state.conversa_id = None
+    
+    if "usuario_id" not in st.session_state:
+        st.session_state.usuario_id = socket.gethostname()
+    
+    with st.sidebar:
+        st.subheader("📚 Histórico")
+        
+        if st.button("➕ Nova Conversa", use_container_width=True):
+            st.session_state.chat_mensagens = []
+            st.session_state.chat_historico = []
+            st.session_state.conversa_id = None
+            st.rerun()
+        
+        st.markdown("---")
+        
+        try:
+            response = requests.get(
+                f"{CHAT_API_URL}/chat/conversas",
+                params={"usuario_id": st.session_state.usuario_id},
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                conversas = response.json().get("conversas", [])
+                
+                if conversas:
+                    st.caption("Conversas Recentes:")
+                    for conv in conversas[:5]:
+                        titulo_curto = conv["titulo"][:40] + "..." if len(conv["titulo"]) > 40 else conv["titulo"]
+                        
+                        if st.button(
+                            f"📝 {titulo_curto}",
+                            key=f"conv_{conv['id']}",
+                            use_container_width=True
+                        ):
+                            try:
+                                msg_response = requests.get(
+                                    f"{CHAT_API_URL}/chat/conversa/{conv['id']}",
+                                    timeout=5
+                                )
+                                if msg_response.status_code == 200:
+                                    mensagens = msg_response.json().get("mensagens", [])
+                                    st.session_state.chat_mensagens = mensagens
+                                    st.session_state.chat_historico = [
+                                        {"role": m["role"], "content": m["content"]} for m in mensagens
+                                    ]
+                                    st.session_state.conversa_id = conv["id"]
+                                    st.rerun()
+                            except:
+                                st.error("Erro ao carregar conversa")
+                else:
+                    st.caption("_Nenhuma conversa ainda_")
+        except:
+            st.caption("⚠️ API offline")
     
     st.markdown("### 💡 Perguntas Sugeridas")
     
@@ -109,7 +166,7 @@ def render_view():
             with st.chat_message("user"):
                 st.markdown(pergunta_input)
         
-        with st.spinner("Consultando dados..."):
+        with st.spinner("🔍 Consultando dados do sistema e processando resposta..."):
             resultado = consultar_chat(pergunta_input, st.session_state.chat_historico)
         
         resposta_ia = resultado.get("resposta", "Erro ao processar resposta")
@@ -123,6 +180,34 @@ def render_view():
         })
         
         st.session_state.chat_historico = resultado.get("historico_atualizado", [])
+        
+        with chat_container:
+            with st.chat_message("assistant"):
+                st.markdown(resposta_ia)
+                
+                col1, col2, col3 = st.columns([1, 1, 8])
+                with col1:
+                    if st.button("👍 Útil", key=f"like_{len(st.session_state.chat_mensagens)}"):
+                        try:
+                            requests.post(f"{CHAT_API_URL}/chat/feedback", json={
+                                "pergunta": pergunta_input,
+                                "resposta": resposta_ia,
+                                "feedback": True
+                            })
+                            st.success("Obrigado! ✅")
+                        except:
+                            st.error("Erro ao enviar feedback")
+                with col2:
+                    if st.button("👎 Não útil", key=f"dislike_{len(st.session_state.chat_mensagens)}"):
+                        try:
+                            requests.post(f"{CHAT_API_URL}/chat/feedback", json={
+                                "pergunta": pergunta_input,
+                                "resposta": resposta_ia,
+                                "feedback": False
+                            })
+                            st.success("Obrigado pelo feedback! ✅")
+                        except:
+                            st.error("Erro ao enviar feedback")
         
         st.rerun()
     
@@ -139,10 +224,6 @@ def render_view():
         health = requests.get(f"{CHAT_API_URL}/health", timeout=2)
         if health.status_code == 200:
             info = health.json()
-            if info.get("api_configured"):
-                st.success(f"✅ Chat IA Online - Modelo: {info.get('model')}")
-            else:
-                st.warning("⚠️ API Key do Gemini não configurada! Adicione GEMINI_API_KEY no arquivo .env")
         else:
             st.error("❌ API de Chat não está respondendo corretamente")
     except:
@@ -150,4 +231,6 @@ def render_view():
 
 
 if __name__ == "__main__":
-    render_view()
+    tab_chat()
+
+render_view = tab_chat

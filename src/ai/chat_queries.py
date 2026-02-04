@@ -8,13 +8,21 @@ from sqlalchemy import text
 from typing import List, Dict, Any, Optional
 
 
+def _carregar_dados_filtrados() -> List[Dict[str, Any]]:
+    dados = carregar_cache_mercado()
+    return [
+        d for d in dados 
+        if d.get('metricas_rede', {}).get('total_clientes', 0) > 10
+        and d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) > 0
+    ]
+
 def obter_ranking_subestacoes(
     criterio: str = "consumo", 
     ordem: str = "desc", 
     limite: int = 5
 ) -> List[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         resultados = []
         for item in dados:
@@ -45,7 +53,7 @@ def obter_ranking_subestacoes(
 
 def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         niveis_ordem = {"BAIXO": 0, "MEDIO": 1, "ALTO": 2}
         min_nivel = niveis_ordem.get(nivel_minimo.upper(), 1)
@@ -72,12 +80,8 @@ def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, An
 
 
 def obter_estatisticas_gerais() -> Dict[str, Any]:
-    """
-    Retorna estatísticas APENAS da cidade alvo (dados já filtrados no cache_mercado)
-    O cache_mercado contém apenas as subestações dentro dos territórios Voronoi da cidade
-    """
     try:
-        dados_cache = carregar_cache_mercado()
+        dados_cache = _carregar_dados_filtrados()
         
         # Todas as estatísticas vêm do cache (já filtrado por cidade)
         total_subs = len(dados_cache)
@@ -100,7 +104,7 @@ def obter_estatisticas_gerais() -> Dict[str, Any]:
 
 def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         nome_upper = nome.upper()
         
@@ -118,7 +122,7 @@ def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
 
 def obter_distribuicao_consumo_por_classe() -> Dict[str, Any]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         classes = {}
         consumo_total_geral = 0
@@ -157,7 +161,7 @@ def obter_distribuicao_consumo_por_classe() -> Dict[str, Any]:
 def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
     """Compara 2 ou mais subestações lado a lado"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         resultados = []
         for nome_busca in nomes:
@@ -185,7 +189,7 @@ def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
 def obter_insights_inteligentes() -> Dict[str, Any]:
     """Retorna insights automáticos baseados na análise dos dados"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         insights = {
             "alertas": [],
@@ -265,7 +269,7 @@ def analisar_territorio(nome_subestacao: str) -> Dict[str, Any]:
         area_m2 = territorio_proj.geometry.area.iloc[0]
         area_km2 = area_m2 / 1_000_000
         
-        dados_mercado = carregar_cache_mercado()
+        dados_mercado = _carregar_dados_filtrados()
         dados_sub = None
         for item in dados_mercado:
             if item.get('id_tecnico') == str(cod_id):
@@ -331,7 +335,7 @@ def buscar_subestacoes_proximas(nome_referencia: str, limite: int = 5) -> List[D
 def obter_metricas_performance() -> Dict[str, Any]:
     """Retorna métricas de performance do sistema elétrico"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         total_clientes = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados)
         total_consumo = sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados)
