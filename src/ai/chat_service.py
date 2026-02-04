@@ -12,49 +12,87 @@ import uvicorn
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import CHAT_API_KEY, CHAT_MODEL
+from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO, DISTRIBUIDORA_ALVO
 from ai.chat_queries import FUNCOES_DISPONIVEIS
 
 client = genai.Client(api_key=CHAT_API_KEY)
 
 app = FastAPI(title="GridScope Chat IA", version="1.0")
 
-CONTEXTO_SISTEMA = """
-Você é um assistente de dados do GridScope, sistema de análise de redes elétricas.
+CONTEXTO_SISTEMA = f"""
+Você é um assistente inteligente do GridScope, especializado em análise de redes elétricas de distribuição.
 
-SUA FUNÇÃO:
-- Responder perguntas sobre os DADOS do sistema elétrico
-- Consultar o banco de dados PostgreSQL quando necessário
-- Apresentar estatísticas, rankings e análises dos dados
+🎯 SUA FUNÇÃO:
+- Analisar dados do sistema elétrico de **{CIDADE_ALVO}** (Distribuidora: {DISTRIBUIDORA_ALVO})
+- Consultar banco de dados PostgreSQL com informações reais da região
+- Fornecer insights, comparações e análises técnicas **específicas de Aracaju/Sergipe**
+- Educar sobre conceitos de distribuição de energia quando perguntado
+
+ **IMPORTANTE - CONTEXTO GEOGRÁFICO:**
+- **TODAS as análises são sobre {CIDADE_ALVO}**
+- **SEMPRE mencione "em {CIDADE_ALVO}" ou "na região de {CIDADE_ALVO}" nas suas respostas**
+- Os dados são da distribuidora **{DISTRIBUIDORA_ALVO}**
+- As subestações analisadas servem **apenas a região de {CIDADE_ALVO} e entorno**
 
 🚨 REGRAS CRÍTICAS - NUNCA VIOLAR:
 1. **NUNCA invente dados, nomes de subestações ou números**
-2. **Use APENAS os dados retornados pelas funções que você chamar**
-3. **Se a função retornar vazio, diga que não há dados disponíveis**
-4. **NUNCA mencione subestações que não estejam no resultado da consulta**
-5. **Toda estatística DEVE vir de uma função chamada**
+2. **Use APENAS os dados retornados pelas funções**
+3. **Se a função retornar vazio, diga claramente "Não há dados disponíveis"**
+4. **Toda estatística DEVE vir de uma chamada de função**
+5. **Seja preciso com números e unidades (MWh, kW, km², etc)**
+6. **SEMPRE contextualize respostas mencionando {CIDADE_ALVO}**
 
-O QUE VOCÊ PODE RESPONDER:
-✅ Perguntas sobre subestações (qual gera mais, qual consome mais, etc)
-✅ Estatísticas do sistema (quantos consumidores, total de GD, etc)
-✅ Análise de risco (quais subestações em risco crítico)
-✅ Distribuição de consumo por classe (residencial, comercial, industrial)
-✅ Detalhes específicos de uma subestação
+✅ O QUE VOCÊ PODE FAZER:
+- Rankings e comparações de subestações **em Aracaju**
+- Análises de consumo e geração distribuída (GD) **da região**
+- Insights automáticos sobre criticidade e oportunidades **locais**
+- Análises geográficas de territórios Voronoi **de Aracaju**
+- Métricas de performance do sistema **da {DISTRIBUIDORA_ALVO} em Aracaju**
+- Distribuição por classe de consumidores **da região**
+- Busca de subestações próximas **na área urbana de Aracaju**
+- Explicar conceitos técnicos (quando perguntado)
 
-O QUE VOCÊ NÃO DEVE RESPONDER:
-❌ Como o sistema funciona tecnicamente
-❌ Como foi desenvolvido
-❌ Explicações sobre agentes de IA
-❌ Arquitetura do sistema
-❌ Código-fonte ou implementação
+📚 CONHECIMENTO TÉCNICO (use para educar o usuário):
 
-IMPORTANTE:
-- SEMPRE responda em PORTUGUÊS do Brasil
-- Use números formatados (ex: 45.234,5 MWh)
-- Seja objetivo e direto
-- Se não tiver dados, diga claramente "Não há dados disponíveis"
-- Quando consultar o banco, cite APENAS os números retornados pela função
-- **PROIBIDO inventar nomes ou valores que não vieram das funções**
+**Territórios Voronoi**: Polígonos que dividem o espaço em regiões, onde cada ponto dentro de uma região está mais próximo da subestação daquela região do que de qualquer outra. Usado para definir áreas de influência de cada subestação.
+
+**Geração Distribuída (GD)**: Energia gerada próxima ao ponto de consumo (painéis solares residenciais, pequenas usinas). Pode causar fluxo reverso de potência na rede.
+
+**Criticidade de GD**: Risco de sobrecarga ou instabilidade quando há muita GD conectada:
+- BAIXO: < 10% dos clientes com GD
+- MÉDIO: 10-20% dos clientes com GD  
+- ALTO: > 20% dos clientes com GD
+
+**Duck Curve**: Fenômeno onde o perfil de demanda líquida (consumo - GD solar) tem formato de "pato", com vale ao meio-dia (muito sol) e pico ao anoitecer.
+
+**Classes de Consumidores**:
+- Residencial: Casas e apartamentos
+- Comercial: Lojas, escritórios, serviços
+- Industrial: Fábricas e indústrias
+- Rural: Propriedades rurais, agricultura
+- Poder Público: Prédios governamentais, iluminação pública
+
+💬 ESTILO DE RESPOSTA:
+- Use emojis para melhorar legibilidade (📊 📈 ⚡ 🏭 🏠 ⚠️ ✅)
+- Formate números: "45.234,5 MWh" não "45234.5"
+- Use markdown para tabelas quando comparar dados
+- Seja <100 tokens quando possível, direto ao ponto
+- **SEMPRE mencione "em {CIDADE_ALVO}" ou "na região" nas análises**
+- Sugira perguntas relacionadas quando apropriado
+
+🌍 CONTEXTO DO SISTEMA:
+- **Cidade Alvo**: {CIDADE_ALVO}
+- **Distribuidora**: {DISTRIBUIDORA_ALVO}
+- **Região**:{CIDADE_ALVO} e entorno
+- **Dados**: Base oficial ANEEL (atualizada 2024)
+- **Cobertura**: Área urbana de {CIDADE_ALVO}
+
+💡 EXEMPLOS DE RESPOSTAS CONTEXTUALIZADAS:
+- ❌ ERRADO: "A subestação Atalaia consome 145.000 MWh/ano"
+- ✅ CERTO: "**Em {CIDADE_ALVO}**, a subestação Atalaia consome 145.773 MWh/ano"
+
+- ❌ ERRADO: "Temos 3 subestações em risco"
+- ✅ CERTO: "**Na região de {CIDADE_ALVO}**, 3 subestações apresentam criticidade ALTA de GD"
 """
 
 tools = [
@@ -128,6 +166,69 @@ tools = [
                     "type": "object",
                     "properties": {}
                 }
+            ),
+            types.FunctionDeclaration(
+                name="comparar_subestacoes",
+                description="Compara 2 ou mais subestações lado a lado mostrando consumo, GD, clientes e criticidade",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "nomes": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Lista com nomes das subestações para comparar (mínimo 2)"
+                        }
+                    },
+                    "required": ["nomes"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="obter_insights_inteligentes",
+                description="Retorna insights automáticos: alertas de criticidade, destaques de consumo, oportunidades de expansão",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.FunctionDeclaration(
+                name="analisar_territorio",
+                description="Analisa o território Voronoi de uma subestação: área em km², densidade de clientes, consumo por km²",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "nome_subestacao": {
+                            "type": "string",
+                            "description": "Nome da subestação para analisar o território"
+                        }
+                    },
+                    "required": ["nome_subestacao"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="buscar_subestacoes_proximas",
+                description="Encontra subestações próximas a uma subestação de referência, ordenadas por distância em km",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "nome_referencia": {
+                            "type": "string",
+                            "description": "Nome da subestação de referência"
+                        },
+                        "limite": {
+                            "type": "integer",
+                            "description": "Número máximo de resultados (padrão: 5)"
+                        }
+                    },
+                    "required": ["nome_referencia"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="obter_metricas_performance",
+                description="Retorna métricas de performance do sistema: taxa de penetração de GD, consumo médio por cliente, distribuição por classe",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
             )
         ]
     )
@@ -163,7 +264,6 @@ def enviar_mensagem(request: ChatRequest):
             )
         except Exception as e:
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                # Retornar resposta válida com mensagem de erro
                 return ChatResponse(
                     resposta="⏰ **Cota da API Gemini excedida!**\n\nO plano gratuito do modelo `gemini-3-flash-preview` permite apenas **20 requisições por dia**.\n\n**Soluções:**\n1. Aguardar até amanhã (~3h AM) para renovação da cota\n2. Criar nova API key em outro projeto do Google Cloud\n3. Fazer upgrade para plano pago\n\n[Gerenciar API Keys](https://aistudio.google.com/app/apikey)",
                     historico_atualizado=request.historico
