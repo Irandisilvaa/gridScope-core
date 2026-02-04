@@ -72,19 +72,18 @@ def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, An
 
 
 def obter_estatisticas_gerais() -> Dict[str, Any]:
-    engine = get_engine()
-    
+    """
+    Retorna estatísticas APENAS da cidade alvo (dados já filtrados no cache_mercado)
+    O cache_mercado contém apenas as subestações dentro dos territórios Voronoi da cidade
+    """
     try:
-        with engine.connect() as conn:
-            total_subs = conn.execute(text("SELECT COUNT(*) FROM subestacoes")).scalar()
-            
-            total_cons = conn.execute(text("SELECT COUNT(*) FROM consumidores")).scalar()
-            
-            total_gd = conn.execute(text("SELECT COUNT(*) FROM geracao_gd")).scalar()
-            
-            pot_total = conn.execute(text('SELECT SUM("POT_INST") FROM geracao_gd')).scalar() or 0
-        
         dados_cache = carregar_cache_mercado()
+        
+        # Todas as estatísticas vêm do cache (já filtrado por cidade)
+        total_subs = len(dados_cache)
+        total_cons = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados_cache)
+        total_gd = sum(d.get('geracao_distribuida', {}).get('total_unidades', 0) for d in dados_cache)
+        pot_total = sum(d.get('geracao_distribuida', {}).get('potencia_total_kw', 0) for d in dados_cache)
         consumo_total = sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados_cache)
         
         return {
@@ -97,9 +96,6 @@ def obter_estatisticas_gerais() -> Dict[str, Any]:
         
     except Exception as e:
         return {"erro": f"Erro ao buscar estatísticas: {str(e)}"}
-        
-    finally:
-        engine.dispose()
 
 
 def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
