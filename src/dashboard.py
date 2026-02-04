@@ -2,7 +2,6 @@ import streamlit as st
 import sys
 import os
 
-# Configuração da Página deve ser a PRIMEIRA coisa
 st.set_page_config(
     page_title="GridScope - Inteligência Energética",
     page_icon="⚡",
@@ -10,12 +9,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Adiciona o diretório atual ao path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# Tenta importar as views
 try:
-    from views import analise_subestacao, visao_geral
+    from views import analise_subestacao, visao_geral, relatorios
 except ImportError as e:
     st.error(f"Erro de importação no main.py: {e}")
     st.stop()
@@ -35,7 +32,7 @@ st.sidebar.markdown("---")
 
 navegacao = st.sidebar.radio(
     "Navegue pelo Sistema:",
-    ["🔍 Análise por Subestação (IA)", "📊 Visão Geral"]
+    ["🔍 Análise por Subestação (IA)", "📊 Visão Geral", "📄 Relatórios"]
 )
 
 st.sidebar.markdown("---")
@@ -60,3 +57,12 @@ elif navegacao == "📊 Visão Geral":
             st.warning("Módulo 'visao_geral' carregado, mas sem função render_view().")
     except Exception as e:
         st.error(f"Erro ao carregar módulo de Visão Geral: {e}")
+
+elif navegacao == "📄 Relatórios":
+    try:
+        if hasattr(relatorios, 'render_view'):
+            relatorios.render_view()
+        else:
+            st.warning("Módulo 'relatorios' carregado, mas sem função render_view().")
+    except Exception as e:
+        st.error(f"Erro ao carregar módulo de Relatórios: {e}")

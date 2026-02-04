@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Relatório GridScope</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1cm;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            font-size: 9pt;
+            color: #000;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Main Container Border */
+        .page-border {
+            border: 2px solid #000;
+            padding: 0;
+        }
+
+        /* HEADER */
+        .header-table {
+            width: 100%;
+            border-collapse: collapse;
+            border-bottom: 2px solid #000;
+        }
+
+        .header-table td {
+            border: 2px solid #000;
+            padding: 10px;
+            vertical-align: middle;
+        }
+
+        .logo-cell {
+            width: 30%;
+            text-align: center;
+        }
+
+        .logo-text {
+            font-size: 24pt;
+            font-weight: bold;
+        }
+
+        .logo-grid {
+            color: #FFD700;
+        }
+
+        .logo-scope {
+            color: #000;
+        }
+
+        .logo-sub {
+            font-size: 6pt;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-top: 5px;
+            color: #555;
+        }
+
+        .title-cell {
+            width: 40%;
+            text-align: center;
+            font-size: 14pt;
+            font-weight: bold;
+        }
+
+        .info-cell {
+            width: 30%;
+            text-align: center;
+            font-size: 8pt;
+        }
+
+        /* SECTION HEADERS */
+        .section-header {
+            background-color: #FFD700;
+            color: #000;
+            font-weight: bold;
+            text-align: center;
+            padding: 5px;
+            border: 2px solid #000;
+            border-top: none;
+            font-size: 10pt;
+        }
+
+        .section-header-first {
+            background-color: #FFD700;
+            color: #000;
+            font-weight: bold;
+            text-align: center;
+            padding: 5px;
+            border: 2px solid #000;
+            font-size: 10pt;
+        }
+
+        /* DATA TABLES */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 2px solid #000;
+            border-top: none;
+            margin-bottom: 0;
+        }
+
+        .data-table th,
+        .data-table td {
+            border: 1px solid #000;
+            padding: 4px 8px;
+            font-size: 9pt;
+        }
+
+        .data-table th {
+            background-color: #fff;
+            text-align: center;
+            font-weight: normal;
+        }
+
+        .label-cell {
+            background-color: #fff;
+            font-weight: normal;
+            width: 35%;
+        }
+
+        /* SPECIFIC TABLES STYLES */
+        .asset-table td {
+            border: 1px solid #000;
+        }
+
+        /* ALIGNMENT */
+        .text-right {
+            text-align: right;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .text-left {
+            text-align: left;
+        }
+
+        /* CRITICALITY */
+        .status-CRÍTICO {
+            font-weight: bold;
+            color: #dc3545;
+        }
+
+        .status-MÉDIO {
+            font-weight: bold;
+            color: #fd7e14;
+        }
+
+        .status-NORMAL {
+            font-weight: bold;
+            color: #28a745;
+        }
+
+        /* SPACING */
+        .spacer {
+            padding: 8px 0;
+            border-left: 2px solid #000;
+            border-right: 2px solid #000;
+        }
+
+        /* FILTROS APLICADOS */
+        .filtros-box {
+            border: 2px solid #000;
+            border-top: none;
+            padding: 8px 15px;
+            font-size: 8pt;
+            background-color: #f9f9f9;
+        }
+
+        .filtros-box strong {
+            color: #333;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="page-border">
+        <!-- HEADER -->
+        <table class="header-table">
+            <tr>
+                <td class="logo-cell">
+                    {% if pdf_data.logo_b64 %}
+                    <img src="data:image/png;base64,{{ pdf_data.logo_b64 }}" alt="GridScope"
+                        style="max-height: 50px; max-width: 100%;">
+                    {% else %}
+                    <div class="logo-text">
+                        <span class="logo-grid">Grid</span><span class="logo-scope">Scope</span>
+                    </div>
+                    {% endif %}
+                </td>
+                <td class="title-cell">
+                    Relatório de Exportação de Dados
+                </td>
+                <td class="info-cell">
+                    <strong>Nº Relatório</strong><br>
+                    {{ pdf_data.header.report_number }}<br><br>
+                    <strong>Data</strong><br>
+                    {{ pdf_data.header.report_date }}
+                </td>
+            </tr>
+        </table>
+
+        <!-- FILTROS APLICADOS -->
+        <div class="filtros-box">
+            <strong>Parâmetros:</strong>
+            Classes: {{ pdf_data.filtros.classes | join(', ') }} |
+            Métricas: {{ pdf_data.filtros.metricas | join(', ') }} |
+            Tipo: {{ pdf_data.filtros.tipo }}
+        </div>
+
+        <!-- ASSET IDENTIFICATION -->
+        <div class="section-header-first">Identificação do Ativo (Subestação)</div>
+        <table class="data-table asset-table">
+            <tr>
+                <td class="label-cell">Subestação</td>
+                <td class="text-right">{{ pdf_data.header.substation_name }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Alimentador</td>
+                <td class="text-right">{{ pdf_data.header.feeder_id }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Bairro / Região</td>
+                <td class="text-right">{{ pdf_data.header.neighborhood }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Área Coberta (km)</td>
+                <td class="text-right">{{ pdf_data.header.covered_area_km2 }}</td>
+            </tr>
+            <tr>
+                <td class="label-cell">Total de clientes conectados</td>
+                <td class="text-right">{{ pdf_data.header.total_clients }}</td>
+            </tr>
+        </table>
+
+        <!-- CONSUMPTION -->
+        {% if secoes.consumo %}
+        <div class="spacer"></div>
+        <div class="section-header">Consumo por Classe</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="text-left">Classe</th>
+                    <th>Energia Consumida (MWh/mês)</th>
+                    <th>% do Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pdf_data.consumption %}
+                <tr>
+                    <td>{{ row.classe }}</td>
+                    <td class="text-center">{{ row.energia_mwh }}</td>
+                    <td class="text-center">{{ row.percentual }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <!-- DISTRIBUTED GENERATION -->
+        {% if secoes.gd %}
+        <div class="spacer"></div>
+        <div class="section-header">Geração Distribuída por Classe</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th class="text-left">Classe</th>
+                    <th>Potência GD Instalada (kW)</th>
+                    <th>Quantidade de Unidades</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pdf_data.gd %}
+                <tr>
+                    <td>{{ row.classe }}</td>
+                    <td class="text-center">{{ row.potencia_kw }}</td>
+                    <td class="text-center">{{ row.qtd_clientes }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <!-- COMPARISON -->
+        {% if secoes.comparacao %}
+        <div class="spacer"></div>
+        <div class="section-header">Comparação da Subestação vs Total da Cidade</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Categoria</th>
+                    <th>Indicador</th>
+                    <th>Subestação (SE)</th>
+                    <th>Total Cidade</th>
+                    <th>% da Cidade</th>
+                    <th>Média da Cidade</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pdf_data.indicators %}
+                <tr>
+                    <td class="text-center">{{ row.categoria }}</td>
+                    <td>{{ row.indicador }}</td>
+                    <td class="text-center">{{ row.subestacao }}</td>
+                    <td class="text-center">{{ row.total_cidade }}</td>
+                    <td class="text-center">{{ row.pct_cidade }}</td>
+                    <td class="text-center">{{ row.media_cidade }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <!-- RANKING -->
+        {% if secoes.ranking %}
+        <div class="spacer"></div>
+        <div class="section-header">Ranking das Subestações</div>
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Posição</th>
+                    <th>ID</th>
+                    <th>Subestação</th>
+                    <th>Capacidade (MW)</th>
+                    <th>Clientes</th>
+                    <th>MMGD</th>
+                    <th>Criticidade</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in pdf_data.ranking %}
+                <tr>
+                    <td class="text-center">{{ row.posicao }}</td>
+                    <td class="text-center">{{ row.id }}</td>
+                    <td class="text-center">{{ row.nome }}</td>
+                    <td class="text-center">{{ row.capacidade_mw }}</td>
+                    <td class="text-center">{{ row.clientes }}</td>
+                    <td class="text-center">{{ row.mmgd }}</td>
+                    <td class="text-center status-{{ row.criticidade }}">{{ row.criticidade }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <div class="spacer"></div>
+
+        <!-- DIAGNOSTIC -->
+        <div class="section-header">Diagnóstico da Ferramenta</div>
+        <div style="border: 2px solid #000; border-top: none; padding: 10px; font-size: 8pt;">
+            {% if pdf_data.diagnostico %}
+            {{ pdf_data.diagnostico }}
+            {% else %}
+            <em>Área reservada para diagnóstico automático baseado em IA.</em>
+            {% endif %}
+        </div>
+
+    </div>
+
+</body>
+
+</html>

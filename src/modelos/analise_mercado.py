@@ -206,9 +206,19 @@ def analisar_mercado():
                     "consumo_anual_mwh": float(round(c_cls/1000, 2))
                 }
             
-            p_gd = d_gd[d_gd['TIPO'] == cls]['POT_INST'].sum() if not d_gd.empty else 0
-            if p_gd > 0:
-                stats["geracao_distribuida"]["detalhe_por_classe"][cls] = float(round(p_gd, 2))
+            # Filtra GD por classe
+            df_gd_cls = d_gd[d_gd['TIPO'] == cls] if not d_gd.empty else pd.DataFrame()
+            
+            # Calcula métricas
+            p_gd = df_gd_cls['POT_INST'].sum() if not df_gd_cls.empty else 0
+            q_gd = len(df_gd_cls) if not df_gd_cls.empty else 0
+            
+            # Salva no dicionário se houver dados
+            if p_gd > 0 or q_gd > 0:
+                stats["geracao_distribuida"]["detalhe_por_classe"][cls] = {
+                    "potencia_kw": float(round(p_gd, 2)),
+                    "qtd": int(q_gd)
+                }
         
         relatorio.append(stats)
     
