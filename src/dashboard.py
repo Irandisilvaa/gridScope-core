@@ -2,8 +2,9 @@ import streamlit as st
 import sys
 import os
 import base64
+from pathlib import Path
 
-# --- Configuração Inicial ---
+# --- Configuração Inicial (DEVE ser a primeira linha do Streamlit) ---
 st.set_page_config(
     page_title="GridScope - Inteligência Energética",
     page_icon="⚡",
@@ -11,27 +12,44 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Gerenciamento de Caminhos e Estado ---
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(BASE_DIR)
+# --- Gerenciamento de Caminhos Robusto (Fix para Docker/Linux) ---
+# Pega o diretório onde ESTE arquivo está localizado
+CURRENT_FILE_DIR = Path(__file__).parent.absolute()
+
+# Se este arquivo estiver na raiz, o BASE_DIR é ele mesmo.
+# Se estiver dentro de src, ajustamos.
+BASE_DIR = CURRENT_FILE_DIR
+
+# Adiciona ao path do sistema para importações funcionarem
+sys.path.append(str(BASE_DIR))
+
+# --- Definição dos Caminhos de Recursos ---
+# Usando Pathlib para garantir compatibilidade de barras (/ ou \)
+# IMPORTANTE: Verifique se no Linux as pastas estão exatamente como "src", "icons" (tudo minúsculo)
+path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
+path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
+
+# Debug nos logs da AWS (para você ver se o caminho está certo com 'docker logs')
+print(f"--- DEBUG PATHS ---")
+print(f"Base Dir: {BASE_DIR}")
+print(f"Logo Path: {path_logo} | Existe? {path_logo.exists()}")
+print(f"Avatar Path: {path_avatar} | Existe? {path_avatar.exists()}")
+print(f"-------------------")
 
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
 
-# --- Função Auxiliar: Imagem para Base64 (Compatibilidade AWS/Linux) ---
+# --- Função Auxiliar: Imagem para Base64 ---
 def get_img_as_base64(file_path):
     try:
-        if not os.path.exists(file_path):
+        if not file_path.exists():
             return ""
         with open(file_path, "rb") as f:
             data = f.read()
         return base64.b64encode(data).decode()
-    except Exception:
+    except Exception as e:
+        print(f"Erro ao carregar imagem {file_path}: {e}")
         return ""
-
-# --- Definição dos Caminhos de Recursos ---
-path_logo = os.path.join(BASE_DIR, "src", "icons", "logoGridScope.png")
-path_avatar = os.path.join(BASE_DIR, "src", "icons", "helio.png")
 
 # Carregamento prévio para HTML
 avatar_b64 = get_img_as_base64(path_avatar)
@@ -39,16 +57,22 @@ img_avatar_src = f"data:image/png;base64,{avatar_b64}" if avatar_b64 else ""
 
 # --- Importação das Views ---
 try:
-    from views import analise_subestacao, visao_geral, tab_chat, relatorios
-except ImportError as e:
-    st.error(f"Erro de Importação: {e}")
-    class MockView:
-        def render_view(self): st.info("Módulo não encontrado.")
-    
-    if 'analise_subestacao' not in locals(): analise_subestacao = MockView()
-    if 'visao_geral' not in locals(): visao_geral = MockView()
-    if 'tab_chat' not in locals(): tab_chat = MockView()
-    if 'relatorios' not in locals(): relatorios = MockView()
+    # Tenta importar dos módulos locais
+    from src.views import analise_subestacao, visao_geral, tab_chat, relatorios
+except ImportError:
+    try:
+        # Tenta importar direto se o PYTHONPATH já incluir src
+        from views import analise_subestacao, visao_geral, tab_chat, relatorios
+    except ImportError as e:
+        st.error(f"Erro de Importação das Views: {e}")
+        # Classes Mock para não quebrar a UI
+        class MockView:
+            def render_view(self): st.info("Módulo em manutenção ou não encontrado.")
+        
+        if 'analise_subestacao' not in locals(): analise_subestacao = MockView()
+        if 'visao_geral' not in locals(): visao_geral = MockView()
+        if 'tab_chat' not in locals(): tab_chat = MockView()
+        if 'relatorios' not in locals(): relatorios = MockView()
 
 # --- CSS Personalizado ---
 st.markdown("""
@@ -92,7 +116,7 @@ st.markdown("""
             border-radius: 50%;
             object-fit: cover; 
             object-position: center; 
-            transform: scale(2.1);
+            transform: scale(1.1); /* Ajustado escala para não cortar demais */
             display: block;
             border: none;
         }
@@ -134,10 +158,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- Construção da Sidebar ---
-if os.path.exists(path_logo):
-    st.sidebar.image(path_logo, use_container_width=True)
+if path_logo.exists():
+    st.sidebar.image(str(path_logo), use_container_width=True)
 else:
-    st.sidebar.warning("Logo não encontrado")
+    st.sidebar.warning(f"Logo não encontrado em: {path_logo}")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
@@ -165,7 +189,8 @@ if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
 
-st.sidebar.markdown(f"""
+# Renderiza Avatar HTML apenas se a imagem foi carregada
+avatar_html = f"""
     <div class="profile-container">
         <div class="avatar-frame">
             <img src="{img_avatar_src}" class="avatar-img">
@@ -173,7 +198,8 @@ st.sidebar.markdown(f"""
         <p class="profile-name">Helios AI</p>
         <p class="profile-status">● Online</p>
     </div>
-""", unsafe_allow_html=True)
+"""
+st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
 if st.sidebar.button("✨ Conversar com Helios"):
     st.session_state['pagina_atual'] = "Chat IA"
@@ -187,7 +213,8 @@ pagina = st.session_state['pagina_atual']
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover; transform:scale(2.1);"></div>', unsafe_allow_html=True)
+        # Ajuste no HTML do avatar pequeno
+        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover;"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
         
