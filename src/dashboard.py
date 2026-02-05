@@ -145,40 +145,34 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Construção da Sidebar ---
 if path_logo.exists():
     st.sidebar.image(str(path_logo), use_container_width=True)
 else:
-    # Mostra um aviso amigável se não achar
     st.sidebar.warning(f"Logo não encontrado.")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
 opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
 
-try:
-    if st.session_state['pagina_atual'] in opcoes_menu:
-        index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
-    else:
-        index_atual = 0 
-except ValueError:
-    index_atual = 0 
+def update_nav():
+    st.session_state['pagina_atual'] = st.session_state.nav_radio
 
-navegacao = st.sidebar.radio(
+if st.session_state['pagina_atual'] in opcoes_menu:
+    index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
+else:
+    index_atual = 0
+
+st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
-    key="nav_radio"
+    key="nav_radio",
+    on_change=update_nav
 )
-
-if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
-    st.session_state['pagina_atual'] = navegacao
-    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
 
-# Renderiza Avatar HTML apenas se a imagem foi carregada
 avatar_html = f"""
     <div class="profile-container">
         <div class="avatar-frame">
@@ -190,19 +184,19 @@ avatar_html = f"""
 """
 st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
-if st.sidebar.button("✨ Conversar com Helios"):
+def go_to_chat():
     st.session_state['pagina_atual'] = "Chat IA"
-    st.rerun()
+
+st.sidebar.button("✨ Conversar com Helios", on_click=go_to_chat)
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
-# --- Roteamento de Páginas ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover;"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover; transform: scale(2.1);"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
         
