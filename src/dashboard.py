@@ -12,28 +12,32 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- Gerenciamento de Caminhos Robusto (Fix para Docker/Linux) ---
-# Pega o diretório onde ESTE arquivo está localizado
+# --- CORREÇÃO DE CAMINHOS INTELIGENTE (RESOLVE O DUPLO SRC) ---
+# Pega o diretório exato onde este arquivo está
 CURRENT_FILE_DIR = Path(__file__).parent.absolute()
 
-# Se este arquivo estiver na raiz, o BASE_DIR é ele mesmo.
-# Se estiver dentro de src, ajustamos.
-BASE_DIR = CURRENT_FILE_DIR
+# Lógica: Se o arquivo já está dentro de "src", a raiz do projeto é a pasta pai.
+# Se o arquivo está na raiz, a raiz é a pasta atual.
+if CURRENT_FILE_DIR.name == 'src':
+    BASE_DIR = CURRENT_FILE_DIR.parent  # Sobe um nível para /app
+else:
+    BASE_DIR = CURRENT_FILE_DIR         # Já está em /app
 
-# Adiciona ao path do sistema para importações funcionarem
-sys.path.append(str(BASE_DIR))
+# Garante que a raiz do projeto esteja no Python Path para importações
+if str(BASE_DIR) not in sys.path:
+    sys.path.append(str(BASE_DIR))
 
 # --- Definição dos Caminhos de Recursos ---
-# Usando Pathlib para garantir compatibilidade de barras (/ ou \)
-# IMPORTANTE: Verifique se no Linux as pastas estão exatamente como "src", "icons" (tudo minúsculo)
+# Agora BASE_DIR é garantidamente a raiz (/app), então podemos adicionar /src/icons seguramente
 path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
 path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
 
-# Debug nos logs da AWS (para você ver se o caminho está certo com 'docker logs')
+# --- DEBUG: Verificando no console da AWS se os arquivos existem ---
 print(f"--- DEBUG PATHS ---")
-print(f"Base Dir: {BASE_DIR}")
-print(f"Logo Path: {path_logo} | Existe? {path_logo.exists()}")
-print(f"Avatar Path: {path_avatar} | Existe? {path_avatar.exists()}")
+print(f"Diretório Atual do Arquivo: {CURRENT_FILE_DIR}")
+print(f"Raiz do Projeto Definida (BASE_DIR): {BASE_DIR}")
+print(f"Procurando Logo em: {path_logo}")
+print(f"Existe? {path_logo.exists()}")
 print(f"-------------------")
 
 if 'pagina_atual' not in st.session_state:
@@ -41,14 +45,15 @@ if 'pagina_atual' not in st.session_state:
 
 # --- Função Auxiliar: Imagem para Base64 ---
 def get_img_as_base64(file_path):
+    # Converte Path para string se necessário e verifica existência
+    if not file_path.exists():
+        return ""
     try:
-        if not file_path.exists():
-            return ""
         with open(file_path, "rb") as f:
             data = f.read()
         return base64.b64encode(data).decode()
     except Exception as e:
-        print(f"Erro ao carregar imagem {file_path}: {e}")
+        print(f"Erro ao ler imagem {file_path}: {e}")
         return ""
 
 # Carregamento prévio para HTML
@@ -57,17 +62,17 @@ img_avatar_src = f"data:image/png;base64,{avatar_b64}" if avatar_b64 else ""
 
 # --- Importação das Views ---
 try:
-    # Tenta importar dos módulos locais
+    # Tenta importar com prefixo src. (caso rode da raiz)
     from src.views import analise_subestacao, visao_geral, tab_chat, relatorios
 except ImportError:
     try:
-        # Tenta importar direto se o PYTHONPATH já incluir src
+        # Tenta importar direto (caso rode de dentro de src)
         from views import analise_subestacao, visao_geral, tab_chat, relatorios
     except ImportError as e:
-        st.error(f"Erro de Importação das Views: {e}")
-        # Classes Mock para não quebrar a UI
+        st.error(f"Erro de Importação: {e}")
+        # MockView para não quebrar a tela
         class MockView:
-            def render_view(self): st.info("Módulo em manutenção ou não encontrado.")
+            def render_view(self): st.info("Módulo não encontrado.")
         
         if 'analise_subestacao' not in locals(): analise_subestacao = MockView()
         if 'visao_geral' not in locals(): visao_geral = MockView()
@@ -116,7 +121,7 @@ st.markdown("""
             border-radius: 50%;
             object-fit: cover; 
             object-position: center; 
-            transform: scale(1.1); /* Ajustado escala para não cortar demais */
+            transform: scale(1.1);
             display: block;
             border: none;
         }
@@ -161,7 +166,8 @@ st.markdown("""
 if path_logo.exists():
     st.sidebar.image(str(path_logo), use_container_width=True)
 else:
-    st.sidebar.warning(f"Logo não encontrado em: {path_logo}")
+    # Mostra um aviso amigável se não achar
+    st.sidebar.warning(f"Logo não encontrado.")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
@@ -213,7 +219,6 @@ pagina = st.session_state['pagina_atual']
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        # Ajuste no HTML do avatar pequeno
         st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover;"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
