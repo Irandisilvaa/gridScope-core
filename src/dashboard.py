@@ -32,7 +32,7 @@ print(f"Existe? {path_logo.exists()}")
 print(f"-------------------")
 
 if 'pagina_atual' not in st.session_state:
-    st.session_state['pagina_atual'] = "Visão Geral"
+    st.session_state['pagina_atual'] = "📊 Visão Geral"
 
 def get_img_as_base64(file_path):
     if not file_path.exists():
@@ -156,24 +156,36 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
 opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
 
+# --- Função de Navegação Centralizada ---
+def set_page(page_name=None):
+    if page_name is None:
+        page_name = st.session_state.get('nav_radio')
+    
+    st.session_state['pagina_atual'] = page_name
+    
+    # Se a página não estiver no menu (ex: Chat), limpa a seleção do radio
+    if page_name not in opcoes_menu and 'nav_radio' in st.session_state:
+        st.session_state['nav_radio'] = None
+
+# Callback para o radio button
+def update_nav():
+    set_page(st.session_state['nav_radio'])
+
 try:
     if st.session_state['pagina_atual'] in opcoes_menu:
         index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
     else:
-        index_atual = 0 
+        index_atual = None 
 except ValueError:
-    index_atual = 0 
+    index_atual = None 
 
 navegacao = st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
-    key="nav_radio"
+    key="nav_radio",
+    on_change=update_nav
 )
-
-if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
-    st.session_state['pagina_atual'] = navegacao
-    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
@@ -190,9 +202,8 @@ avatar_html = f"""
 """
 st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
-if st.sidebar.button("✨ Conversar com Helios"):
-    st.session_state['pagina_atual'] = "Chat IA"
-    st.rerun()
+st.sidebar.button("✨ Conversar com Helios", on_click=set_page, args=("Chat IA",))
+
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
