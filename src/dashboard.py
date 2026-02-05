@@ -4,7 +4,6 @@ import os
 import base64
 from pathlib import Path
 
-# --- Configuração Inicial (DEVE ser a primeira linha do Streamlit) ---
 st.set_page_config(
     page_title="GridScope - Inteligência Energética",
     page_icon="⚡",
@@ -12,27 +11,19 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CORREÇÃO DE CAMINHOS INTELIGENTE (RESOLVE O DUPLO SRC) ---
-# Pega o diretório exato onde este arquivo está
 CURRENT_FILE_DIR = Path(__file__).parent.absolute()
 
-# Lógica: Se o arquivo já está dentro de "src", a raiz do projeto é a pasta pai.
-# Se o arquivo está na raiz, a raiz é a pasta atual.
 if CURRENT_FILE_DIR.name == 'src':
-    BASE_DIR = CURRENT_FILE_DIR.parent  # Sobe um nível para /app
+    BASE_DIR = CURRENT_FILE_DIR.parent  
 else:
-    BASE_DIR = CURRENT_FILE_DIR         # Já está em /app
+    BASE_DIR = CURRENT_FILE_DIR       
 
-# Garante que a raiz do projeto esteja no Python Path para importações
 if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
-# --- Definição dos Caminhos de Recursos ---
-# Agora BASE_DIR é garantidamente a raiz (/app), então podemos adicionar /src/icons seguramente
 path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
 path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
 
-# --- DEBUG: Verificando no console da AWS se os arquivos existem ---
 print(f"--- DEBUG PATHS ---")
 print(f"Diretório Atual do Arquivo: {CURRENT_FILE_DIR}")
 print(f"Raiz do Projeto Definida (BASE_DIR): {BASE_DIR}")
@@ -43,9 +34,7 @@ print(f"-------------------")
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
 
-# --- Função Auxiliar: Imagem para Base64 ---
 def get_img_as_base64(file_path):
-    # Converte Path para string se necessário e verifica existência
     if not file_path.exists():
         return ""
     try:
@@ -56,21 +45,16 @@ def get_img_as_base64(file_path):
         print(f"Erro ao ler imagem {file_path}: {e}")
         return ""
 
-# Carregamento prévio para HTML
 avatar_b64 = get_img_as_base64(path_avatar)
 img_avatar_src = f"data:image/png;base64,{avatar_b64}" if avatar_b64 else ""
 
-# --- Importação das Views ---
 try:
-    # Tenta importar com prefixo src. (caso rode da raiz)
     from src.views import analise_subestacao, visao_geral, tab_chat, relatorios
 except ImportError:
     try:
-        # Tenta importar direto (caso rode de dentro de src)
         from views import analise_subestacao, visao_geral, tab_chat, relatorios
     except ImportError as e:
         st.error(f"Erro de Importação: {e}")
-        # MockView para não quebrar a tela
         class MockView:
             def render_view(self): st.info("Módulo não encontrado.")
         
@@ -79,7 +63,6 @@ except ImportError:
         if 'tab_chat' not in locals(): tab_chat = MockView()
         if 'relatorios' not in locals(): relatorios = MockView()
 
-# --- CSS Personalizado ---
 st.markdown("""
     <style>
         .stApp { background-color: #0e1117; }
@@ -121,7 +104,7 @@ st.markdown("""
             border-radius: 50%;
             object-fit: cover; 
             object-position: center; 
-            transform: scale(1.1);
+            transform: scale(2.1);
             display: block;
             border: none;
         }
