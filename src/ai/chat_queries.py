@@ -3,8 +3,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import get_engine, carregar_cache_mercado
-from sqlalchemy import text
+from database import carregar_cache_mercado
 from typing import List, Dict, Any, Optional
 
 
