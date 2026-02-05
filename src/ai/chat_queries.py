@@ -8,13 +8,21 @@ from sqlalchemy import text
 from typing import List, Dict, Any, Optional
 
 
+def _carregar_dados_filtrados() -> List[Dict[str, Any]]:
+    dados = carregar_cache_mercado()
+    return [
+        d for d in dados 
+        if d.get('metricas_rede', {}).get('total_clientes', 0) > 10
+        and d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) > 0
+    ]
+
 def obter_ranking_subestacoes(
     criterio: str = "consumo", 
     ordem: str = "desc", 
     limite: int = 5
 ) -> List[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         resultados = []
         for item in dados:
@@ -45,7 +53,7 @@ def obter_ranking_subestacoes(
 
 def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         niveis_ordem = {"BAIXO": 0, "MEDIO": 1, "ALTO": 2}
         min_nivel = niveis_ordem.get(nivel_minimo.upper(), 1)
@@ -72,12 +80,8 @@ def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, An
 
 
 def obter_estatisticas_gerais() -> Dict[str, Any]:
-    """
-    Retorna estatísticas APENAS da cidade alvo (dados já filtrados no cache_mercado)
-    O cache_mercado contém apenas as subestações dentro dos territórios Voronoi da cidade
-    """
     try:
-        dados_cache = carregar_cache_mercado()
+        dados_cache = _carregar_dados_filtrados()
         
         # Todas as estatísticas vêm do cache (já filtrado por cidade)
         total_subs = len(dados_cache)
@@ -100,7 +104,7 @@ def obter_estatisticas_gerais() -> Dict[str, Any]:
 
 def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         nome_upper = nome.upper()
         
@@ -118,7 +122,7 @@ def buscar_subestacao_detalhes(nome: str) -> Optional[Dict[str, Any]]:
 
 def obter_distribuicao_consumo_por_classe() -> Dict[str, Any]:
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         classes = {}
         consumo_total_geral = 0
@@ -157,7 +161,7 @@ def obter_distribuicao_consumo_por_classe() -> Dict[str, Any]:
 def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
     """Compara 2 ou mais subestações lado a lado"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         resultados = []
         for nome_busca in nomes:
@@ -185,7 +189,7 @@ def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
 def obter_insights_inteligentes() -> Dict[str, Any]:
     """Retorna insights automáticos baseados na análise dos dados"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         insights = {
             "alertas": [],
@@ -265,7 +269,7 @@ def analisar_territorio(nome_subestacao: str) -> Dict[str, Any]:
         area_m2 = territorio_proj.geometry.area.iloc[0]
         area_km2 = area_m2 / 1_000_000
         
-        dados_mercado = carregar_cache_mercado()
+        dados_mercado = _carregar_dados_filtrados()
         dados_sub = None
         for item in dados_mercado:
             if item.get('id_tecnico') == str(cod_id):
@@ -331,7 +335,7 @@ def buscar_subestacoes_proximas(nome_referencia: str, limite: int = 5) -> List[D
 def obter_metricas_performance() -> Dict[str, Any]:
     """Retorna métricas de performance do sistema elétrico"""
     try:
-        dados = carregar_cache_mercado()
+        dados = _carregar_dados_filtrados()
         
         total_clientes = sum(d.get('metricas_rede', {}).get('total_clientes', 0) for d in dados)
         total_consumo = sum(d.get('metricas_rede', {}).get('consumo_anual_mwh', 0) for d in dados)
@@ -373,6 +377,220 @@ def obter_metricas_performance() -> Dict[str, Any]:
         return {"erro": f"Erro ao calcular métricas: {str(e)}"}
 
 
+# ==================== FUNÇÕES DE GRÁFICOS ====================
+
+import plotly.graph_objects as go
+import plotly.express as px
+
+
+def gerar_grafico_consumo_por_classe() -> Dict[str, Any]:
+    """Gera gráfico de pizza do consumo por classe"""
+    try:
+        dados = obter_distribuicao_consumo_por_classe()
+        
+        if "erro" in dados:
+            return {"erro": dados["erro"]}
+        
+        dist = dados.get("distribuicao", {})
+        
+        labels = []
+        values = []
+        for classe, info in dist.items():
+            labels.append(classe)
+            values.append(info["consumo_anual_mwh"])
+        
+        fig = go.Figure(data=[go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.3,
+            textinfo='label+percent',
+            marker=dict(colors=px.colors.qualitative.Set3)
+        )])
+        
+        fig.update_layout(
+            title="Distribuição de Consumo por Classe",
+            height=500
+        )
+        
+        return {
+            "tipo": "plotly",
+            "spec": fig.to_json(),
+            "titulo": "Consumo por Classe de Consumidor"
+        }
+    except Exception as e:
+        return {"erro": f"Erro ao gerar gráfico: {str(e)}"}
+
+
+def gerar_grafico_ranking_subestacoes(
+    criterio: str = "consumo",
+    limite: int = 10
+) -> Dict[str, Any]:
+    """Gera gráfico de barras do ranking de subestações"""
+    try:
+        dados = obter_ranking_subestacoes(criterio, "desc", limite)
+        
+        if not dados or "erro" in dados[0]:
+            return {"erro": "Erro ao buscar dados"}
+        
+        nomes = [d["nome"].split("(ID:")[0].strip() for d in dados]
+        valores = [d["valor"] for d in dados]
+        unidade = dados[0]["unidade"]
+        
+        fig = go.Figure(data=[go.Bar(
+            x=valores,
+            y=nomes,
+            orientation='h',
+            marker=dict(
+                color=valores,
+                colorscale='Viridis',
+                showscale=True
+            ),
+            text=[f"{v:.1f} {unidade}" for v in valores],
+            textposition='auto'
+        )])
+        
+        titulo = f"Top {limite} Subestações - {'Consumo' if criterio == 'consumo' else 'Geração Distribuída'}"
+        
+        fig.update_layout(
+            title=titulo,
+            xaxis_title=f"Valor ({unidade})",
+            yaxis_title="Subestação",
+            height=max(400, limite * 40),
+            yaxis={'categoryorder':'total ascending'}
+        )
+        
+        return {
+            "tipo": "plotly",
+            "spec": fig.to_json(),
+            "titulo": titulo
+        }
+    except Exception as e:
+        return {"erro": f"Erro ao gerar gráfico: {str(e)}"}
+
+
+def gerar_grafico_distribuicao_gd() -> Dict[str, Any]:
+    """Gera gráfico de barras da distribuição de GD por subestação"""
+    try:
+        dados = _carregar_dados_filtrados()
+        
+        # Ordena por potência GD
+        dados_sorted = sorted(
+            dados,
+            key=lambda x: x.get('geracao_distribuida', {}).get('potencia_total_kw', 0),
+            reverse=True
+        )[:15]  # Top 15
+        
+        nomes = [d['subestacao'].split("(ID:")[0].strip() for d in dados_sorted]
+        potencias = [d.get('geracao_distribuida', {}).get('potencia_total_kw', 0) for d in dados_sorted]
+        qtds = [d.get('geracao_distribuida', {}).get('total_unidades', 0) for d in dados_sorted]
+        
+        fig = go.Figure()
+        
+        fig.add_trace(go.Bar(
+            name='Potência (kW)',
+            x=nomes,
+            y=potencias,
+            yaxis='y',
+            marker=dict(color='#1f77b4')
+        ))
+        
+        fig.add_trace(go.Scatter(
+            name='Nº Unidades',
+            x=nomes,
+            y=qtds,
+            yaxis='y2',
+            mode='lines+markers',
+            marker=dict(color='#ff7f0e', size=8),
+            line=dict(width=2)
+        ))
+        
+        fig.update_layout(
+            title='Distribuição de Geração Distribuída (Top 15 Subestações)',
+            xaxis=dict(title='Subestação', tickangle=-45),
+            yaxis=dict(title='Potência Total (kW)', side='left'),
+            yaxis2=dict(title='Quantidade de Unidades', overlaying='y', side='right'),
+            height=600,
+            hovermode='x unified',
+            legend=dict(x=0.01, y=0.99)
+        )
+        
+        return {
+            "tipo": "plotly",
+            "spec": fig.to_json(),
+            "titulo": "Distribuição de GD por Subestação"
+        }
+    except Exception as e:
+        return {"erro": f"Erro ao gerar gráfico: {str(e)}"}
+
+
+def gerar_grafico_criticidade_vs_consumo() -> Dict[str, Any]:
+    """Gera scatter plot de criticidade GD vs consumo"""
+    try:
+        dados = _carregar_dados_filtrados()
+        
+        consumos = []
+        gd_percentuais = []
+        nomes = []
+        cores = []
+        tamanhos = []
+        
+        mapa_cores = {"BAIXO": "green", "MEDIO": "orange", "ALTO": "red"}
+        
+        for d in dados:
+            total_cli = d.get('metricas_rede', {}).get('total_clientes', 0)
+            if total_cli < 100:
+                continue
+                
+            consumo = d.get('metricas_rede', {}).get('consumo_anual_mwh', 0)
+            gd_unidades = d.get('geracao_distribuida', {}).get('total_unidades', 0)
+            nivel = d.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO')
+            
+            if total_cli > 0:
+                gd_pct = (gd_unidades / total_cli) * 100
+            else:
+                gd_pct = 0
+            
+            consumos.append(consumo)
+            gd_percentuais.append(gd_pct)
+            nomes.append(d['subestacao'].split("(ID:")[0].strip())
+            cores.append(mapa_cores.get(nivel, "gray"))
+            tamanhos.append(total_cli / 50)
+        
+        fig = go.Figure(data=go.Scatter(
+            x=consumos,
+            y=gd_percentuais,
+            mode='markers',
+            marker=dict(
+                size=tamanhos,
+                color=cores,
+                opacity=0.6,
+                line=dict(width=1, color='white')
+            ),
+            text=nomes,
+            hovertemplate='<b>%{text}</b><br>Consumo: %{x:.1f} MWh/ano<br>GD: %{y:.2f}% dos clientes<extra></extra>'
+        ))
+        
+        fig.update_layout(
+            title='Criticidade de GD vs Consumo (tamanho = nº clientes)',
+            xaxis_title='Consumo Anual (MWh)',
+            yaxis_title='Penetração de GD (% clientes com GD)',
+            height=600,
+            hovermode='closest'
+        )
+        
+        # Adiciona linhas de referência
+        fig.add_hline(y=10, line_dash="dash", line_color="orange", annotation_text="Médio risco (10%)")
+        fig.add_hline(y=20, line_dash="dash", line_color="red", annotation_text="Alto risco (20%)")
+        
+        return {
+            "tipo": "plotly",
+            "spec": fig.to_json(),
+            "titulo": "Análise de Criticidade de GD"
+        }
+    except Exception as e:
+        return {"erro": f"Erro ao gerar gráfico: {str(e)}"}
+
+
 
 FUNCOES_DISPONIVEIS = {
     "obter_ranking_subestacoes": obter_ranking_subestacoes,
@@ -385,7 +603,12 @@ FUNCOES_DISPONIVEIS = {
     "obter_insights_inteligentes": obter_insights_inteligentes,
     "analisar_territorio": analisar_territorio,
     "buscar_subestacoes_proximas": buscar_subestacoes_proximas,
-    "obter_metricas_performance": obter_metricas_performance
+    "obter_metricas_performance": obter_metricas_performance,
+    # Funções de gráficos
+    "gerar_grafico_consumo_por_classe": gerar_grafico_consumo_por_classe,
+    "gerar_grafico_ranking_subestacoes": gerar_grafico_ranking_subestacoes,
+    "gerar_grafico_distribuicao_gd": gerar_grafico_distribuicao_gd,
+    "gerar_grafico_criticidade_vs_consumo": gerar_grafico_criticidade_vs_consumo
 }
 
 

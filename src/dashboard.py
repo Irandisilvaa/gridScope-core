@@ -123,24 +123,32 @@ st.sidebar.markdown("<br>", unsafe_allow_html=True)
 
 opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
 
+# Callback para atualizar a página quando o radio muda
+def on_radio_change():
+    st.session_state['pagina_atual'] = st.session_state['nav_radio']
+
+# Define o índice inicial do radio
+# Se a página atual não estiver no menu (ex: Chat IA), mantemos o índice anterior ou 0
+if 'nav_radio' not in st.session_state:
+     st.session_state['nav_radio'] = opcoes_menu[0]
+
 try:
+    # Tenta sincronizar o radio com a página atual se ela estiver no menu
     if st.session_state['pagina_atual'] in opcoes_menu:
         index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
     else:
-        index_atual = 0 
-except ValueError:
-    index_atual = 0 
+        # Se estiver no Chat, mantemos o visual no último item ou 0, sem triggerar mudança
+        index_atual = opcoes_menu.index(st.session_state.get('nav_radio', opcoes_menu[0]))
+except (ValueError, KeyError):
+    index_atual = 0
 
 navegacao = st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
-    key="nav_radio"
+    key="nav_radio",
+    on_change=on_radio_change
 )
-
-if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
-    st.session_state['pagina_atual'] = navegacao
-    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")

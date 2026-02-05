@@ -234,6 +234,7 @@ def render_view():
     with col_sec2:
         sec_comparacao = st.checkbox("Comparação vs Total da Cidade", value=True, key="sec_comparacao")
         sec_ranking = st.checkbox("Ranking das Subestações", value=True, key="sec_ranking")
+        sec_diagnostico = st.checkbox("Diagnóstico da Ferramenta (IA)", value=True, help="Gera análise automática com Inteligência Artificial (pode demorar alguns segundos)", key="sec_diagnostico")
     
     secoes_pdf = []
     if sec_consumo:
@@ -244,6 +245,8 @@ def render_view():
         secoes_pdf.append("comparacao")
     if sec_ranking:
         secoes_pdf.append("ranking")
+    if sec_diagnostico:
+        secoes_pdf.append("diagnostico")
     
     if pdf_classes and secoes_pdf and subestacao_selecionada:
         try:

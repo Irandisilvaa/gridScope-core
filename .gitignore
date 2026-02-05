@@ -16,10 +16,12 @@ dados/
 # Ignorar arquivos do sistema operacional
 .DS_Store
 
+subestacoes_logicas.geojson
 mapa_voronoi_preview.png
 subestacoes_logicas_aracaju.geojson
 perfil_mercado_aracaju.json
 territorios_voronoi.png
+perfil_mercado.json
 # Imagens geradas pela validação da IA
 src/ai/validacao/
 

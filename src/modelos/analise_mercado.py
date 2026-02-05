@@ -310,16 +310,22 @@ def analisar_mercado():
                     "consumo_anual_mwh": float(round(cons_cls/1000, 2))
                 }
             
-            df_gd_cls = d_gd[d_gd['TIPO'] == cls] if not d_gd.empty else pd.DataFrame()
-            
-            p_gd = df_gd_cls['POT_INST'].sum() if not df_gd_cls.empty else 0
-            q_gd = len(df_gd_cls) if not df_gd_cls.empty else 0
-            
-            if p_gd > 0 or q_gd > 0:
-                stats["geracao_distribuida"]["detalhe_por_classe"][cls] = {
-                    "potencia_kw": float(round(p_gd, 2)),
-                    "qtd": int(q_gd)
-                }
+            if not df_gd_final.empty:
+                dados_gd_cls = gd_por_sub_classe[gd_por_sub_classe['ID_SUBESTACAO'] == sub_id]
+                
+                for cls in classes_interesse:
+                    linha_gd_cls = dados_gd_cls[dados_gd_cls['TIPO'] == cls]
+                    
+                    if not linha_gd_cls.empty:
+                        p_gd = float(linha_gd_cls['POT_INST'].values[0])
+                        q_gd = 1  
+                        
+                        if p_gd > 0:
+                            stats["geracao_distribuida"]["detalhe_por_classe"][cls] = {
+                                "potencia_kw": float(round(p_gd, 2)),
+                                "qtd": int(q_gd)
+                            }
+        
         
         relatorio.append(stats)
 

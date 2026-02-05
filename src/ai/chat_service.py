@@ -2,98 +2,84 @@ import os
 import sys
 import json
 import traceback
-from typing import List, Dict, Any
+import hashlib
+from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO, DISTRIBUIDORA_ALVO
 from ai.chat_queries import FUNCOES_DISPONIVEIS
+from database import (criar_tabela_feedback, salvar_feedback_chat,
+                    criar_tabelas_historico, criar_conversa, salvar_mensagem, 
+                    carregar_conversas, carregar_mensagens)
 
 client = genai.Client(api_key=CHAT_API_KEY)
+try:
+    criar_tabela_feedback()
+    criar_tabelas_historico()
+except Exception as e:
+    print(f"⚠️ Erro ao inicializar: {e}")
 
 app = FastAPI(title="GridScope Chat IA", version="1.0")
 
 CONTEXTO_SISTEMA = f"""
-Você é um assistente inteligente do GridScope, especializado em análise de redes elétricas de distribuição.
+Você é um assistente especializado em análise de redes elétricas de distribuição.
+**Responda SEMPRE em Português do Brasil.**
 
-🎯 SUA FUNÇÃO:
-- Analisar dados do sistema elétrico de **{CIDADE_ALVO}** (Distribuidora: {DISTRIBUIDORA_ALVO})
-- Consultar banco de dados PostgreSQL com informações reais da região
-- Fornecer insights, comparações e análises técnicas **específicas de Aracaju/Sergipe**
-- Educar sobre conceitos de distribuição de energia quando perguntado
+Dados disponíveis: Sistema elétrico de {CIDADE_ALVO}, operado pela {DISTRIBUIDORA_ALVO}.
+Use as funções disponíveis para consultar dados reais do banco quando solicitado.
 
- **IMPORTANTE - CONTEXTO GEOGRÁFICO:**
-- **TODAS as análises são sobre {CIDADE_ALVO}**
-- **SEMPRE mencione "em {CIDADE_ALVO}" ou "na região de {CIDADE_ALVO}" nas suas respostas**
-- Os dados são da distribuidora **{DISTRIBUIDORA_ALVO}**
-- As subestações analisadas servem **apenas a região de {CIDADE_ALVO} e entorno**
+Conceitos importantes:
 
-🚨 REGRAS CRÍTICAS - NUNCA VIOLAR:
-1. **NUNCA invente dados, nomes de subestações ou números**
-2. **Use APENAS os dados retornados pelas funções**
-3. **Se a função retornar vazio, diga claramente "Não há dados disponíveis"**
-4. **Toda estatística DEVE vir de uma chamada de função**
-5. **Seja preciso com números e unidades (MWh, kW, km², etc)**
-6. **SEMPRE contextualize respostas mencionando {CIDADE_ALVO}**
+Geração Distribuída (GD): Energia gerada próxima ao ponto de consumo (painéis solares, pequenas usinas). Pode causar fluxo reverso de potência na rede.
 
-✅ O QUE VOCÊ PODE FAZER:
-- Rankings e comparações de subestações **em Aracaju**
-- Análises de consumo e geração distribuída (GD) **da região**
-- Insights automáticos sobre criticidade e oportunidades **locais**
-- Análises geográficas de territórios Voronoi **de Aracaju**
-- Métricas de performance do sistema **da {DISTRIBUIDORA_ALVO} em Aracaju**
-- Distribuição por classe de consumidores **da região**
-- Busca de subestações próximas **na área urbana de Aracaju**
-- Explicar conceitos técnicos (quando perguntado)
+Criticidade de GD:
+- BAIXA: < 10% dos clientes com GD
+- MÉDIA: 10-20% dos clientes com GD  
+- ALTA: > 20% dos clientes com GD (risco de sobrecarga)
 
-📚 CONHECIMENTO TÉCNICO (use para educar o usuário):
+Territórios Voronoi: Áreas de influência de cada subestação, onde cada ponto está mais próximo daquela subestação do que de qualquer outra.
 
-**Territórios Voronoi**: Polígonos que dividem o espaço em regiões, onde cada ponto dentro de uma região está mais próximo da subestação daquela região do que de qualquer outra. Usado para definir áreas de influência de cada subestação.
-
-**Geração Distribuída (GD)**: Energia gerada próxima ao ponto de consumo (painéis solares residenciais, pequenas usinas). Pode causar fluxo reverso de potência na rede.
-
-**Criticidade de GD**: Risco de sobrecarga ou instabilidade quando há muita GD conectada:
-- BAIXO: < 10% dos clientes com GD
-- MÉDIO: 10-20% dos clientes com GD  
-- ALTO: > 20% dos clientes com GD
-
-**Duck Curve**: Fenômeno onde o perfil de demanda líquida (consumo - GD solar) tem formato de "pato", com vale ao meio-dia (muito sol) e pico ao anoitecer.
-
-**Classes de Consumidores**:
+Classes de consumo:
 - Residencial: Casas e apartamentos
-- Comercial: Lojas, escritórios, serviços
-- Industrial: Fábricas e indústrias
-- Rural: Propriedades rurais, agricultura
-- Poder Público: Prédios governamentais, iluminação pública
+- Comercial: Lojas e serviços
+- Industrial: Fábricas
+- Rural: Propriedades rurais
+- Poder Público: Órgãos governamentais
 
-💬 ESTILO DE RESPOSTA:
-- Use emojis para melhorar legibilidade (📊 📈 ⚡ 🏭 🏠 ⚠️ ✅)
-- Formate números: "45.234,5 MWh" não "45234.5"
-- Use markdown para tabelas quando comparar dados
-- Seja <100 tokens quando possível, direto ao ponto
-- **SEMPRE mencione "em {CIDADE_ALVO}" ou "na região" nas análises**
-- Sugira perguntas relacionadas quando apropriado
+Seja objetivo e use dados reais das funções.
 
-🌍 CONTEXTO DO SISTEMA:
-- **Cidade Alvo**: {CIDADE_ALVO}
-- **Distribuidora**: {DISTRIBUIDORA_ALVO}
-- **Região**:{CIDADE_ALVO} e entorno
-- **Dados**: Base oficial ANEEL (atualizada 2024)
-- **Cobertura**: Área urbana de {CIDADE_ALVO}
-
-💡 EXEMPLOS DE RESPOSTAS CONTEXTUALIZADAS:
-- ❌ ERRADO: "A subestação Atalaia consome 145.000 MWh/ano"
-- ✅ CERTO: "**Em {CIDADE_ALVO}**, a subestação Atalaia consome 145.773 MWh/ano"
-
-- ❌ ERRADO: "Temos 3 subestações em risco"
-- ✅ CERTO: "**Na região de {CIDADE_ALVO}**, 3 subestações apresentam criticidade ALTA de GD"
+DIRETRIZES PARA GRÁFICOS (MUITO IMPORTANTE):
+1. NUNCA desenhe gráficos usando texto ou caracteres (como [###...]).
+2. SEMPRE que o usuário pedir um gráfico, visualização ou comparação visual, USE AS FUNÇÕES DE GRÁFICO disponíveis (`gerar_grafico_*`).
+3. Se não houver uma função de gráfico específica para o que foi pedido, explique que não pode gerar o gráfico, mas apresente os dados em tabela.
+4. Gráficos disponíveis:
+   - Consumo por classe -> `gerar_grafico_consumo_por_classe`
+   - Ranking/Top subestações -> `gerar_grafico_ranking_subestacoes`
+   - Distribuição de GD -> `gerar_grafico_distribuicao_gd`
+   - Criticidade vs Consumo -> `gerar_grafico_criticidade_vs_consumo`
 """
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    retry=retry_if_exception_type(ServerError)
+)
+def call_gemini_with_retry(client, model, contents, config):
+    return client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=config
+    )
 
 tools = [
     types.Tool(
@@ -229,6 +215,49 @@ tools = [
                     "type": "object",
                     "properties": {}
                 }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_consumo_por_classe",
+                description=" Gera o gráfico visual de pizza. OBRIGATÓRIO usar esta função para mostrar a distribuição de consumo.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_ranking_subestacoes",
+                description="Gera o gráfico visual de barras. OBRIGATÓRIO usar esta função para mostrar rankings de subestações.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "criterio": {
+                            "type": "string",
+                            "enum": ["consumo", "geracao"],
+                            "description": "Critério de ordenação: 'consumo' (MWh/ano) ou 'geracao' (kW de GD)"
+                        },
+                        "limite": {
+                            "type": "integer",
+                            "description": "Número de subestações no ranking (padrão: 10)"
+                        }
+                    },
+                    "required": ["criterio"]
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_distribuicao_gd",
+                description="Gera o gráfico visual de distribuição de GD. OBRIGATÓRIO usar esta função para mostrar dados de GD.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
+            types.FunctionDeclaration(
+                name="gerar_grafico_criticidade_vs_consumo",
+                description="Gera o gráfico visual de scatter plot. OBRIGATÓRIO usar esta função para análises de criticidade.",
+                parameters={
+                    "type": "object",
+                    "properties": {}
+                }
             )
         ]
     )
@@ -237,14 +266,33 @@ tools = [
 class ChatRequest(BaseModel):
     mensagem: str
     historico: List[Dict[str, str]] = []
+    conversa_id: Optional[int] = None
+    usuario_id: Optional[str] = None
 
 class ChatResponse(BaseModel):
     resposta: str
     historico_atualizado: List[Dict[str, str]]
+    conversa_id: Optional[int] = None
+    graficos: Optional[List[Dict[str, Any]]] = None
+
+class FeedbackRequest(BaseModel):
+    pergunta: str
+    resposta: str
+    feedback: bool
+    comentario: str = None
 
 @app.post("/chat/message", response_model=ChatResponse)
 def enviar_mensagem(request: ChatRequest):
     try:
+        conversa_id = request.conversa_id
+        if not conversa_id and request.usuario_id:
+            titulo = request.mensagem[:50] + "..." if len(request.mensagem) > 50 else request.mensagem
+            conversa_id = criar_conversa(request.usuario_id, titulo)
+            print(f"📝 Nova conversa criada: ID {conversa_id}")
+        if conversa_id:
+            salvar_mensagem(conversa_id, "user", request.mensagem)
+            print(f"💾 Mensagem do usuário salva na conversa {conversa_id}")
+        
         contents = [types.Content(role="user", parts=[types.Part(text=CONTEXTO_SISTEMA)])]
         
         for msg in request.historico:
@@ -254,10 +302,11 @@ def enviar_mensagem(request: ChatRequest):
         contents.append(types.Content(role="user", parts=[types.Part(text=request.mensagem)]))
         
         try:
-            response = client.models.generate_content(
-                model='gemini-3-flash-preview',
-                contents=contents,
-                config=types.GenerateContentConfig(
+            response = call_gemini_with_retry(
+                client,
+                'gemini-3-flash-preview',
+                contents,
+                types.GenerateContentConfig(
                     tools=tools,
                     temperature=0.7
                 )
@@ -266,14 +315,42 @@ def enviar_mensagem(request: ChatRequest):
             if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
                 return ChatResponse(
                     resposta="⏰ **Cota da API Gemini excedida!**\n\nO plano gratuito do modelo `gemini-3-flash-preview` permite apenas **20 requisições por dia**.\n\n**Soluções:**\n1. Aguardar até amanhã (~3h AM) para renovação da cota\n2. Criar nova API key em outro projeto do Google Cloud\n3. Fazer upgrade para plano pago\n\n[Gerenciar API Keys](https://aistudio.google.com/app/apikey)",
-                    historico_atualizado=request.historico
+                    historico_atualizado=request.historico,
+                    conversa_id=conversa_id
                 )
             raise
         
-        historico_atual = list(request.historico)
+        historico_atual = request.historico.copy()
         historico_atual.append({"role": "user", "content": request.mensagem})
         
-        while response.candidates[0].content.parts[0].function_call:
+        generation_config = types.GenerateContentConfig(
+            max_output_tokens=2800,
+            temperature=0.68
+        )
+        
+        max_iterations = 10
+        iteration = 0
+        graficos_gerados = []  # Lista para coletar gráficos
+        
+        while iteration < max_iterations:
+            iteration += 1
+            
+            try:
+                has_function_call = (
+                    response.candidates and 
+                    len(response.candidates) > 0 and
+                    response.candidates[0].content.parts and
+                    len(response.candidates[0].content.parts) > 0 and
+                    hasattr(response.candidates[0].content.parts[0], 'function_call') and
+                    response.candidates[0].content.parts[0].function_call
+                )
+                if not has_function_call:
+                    print(f"✅ Fim do function calling (iteração {iteration})")
+                    break
+            except Exception as e:
+                print(f"⚠️ Erro ao verificar function_call: {e}")
+                break
+            
             function_call = response.candidates[0].content.parts[0].function_call
             function_name = function_call.name
             function_args = dict(function_call.args)
@@ -281,7 +358,20 @@ def enviar_mensagem(request: ChatRequest):
             print(f"🔧 Chamando função: {function_name} com args: {function_args}")
             
             if function_name in FUNCOES_DISPONIVEIS:
-                resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
+                try:
+                    resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
+                    print(f"✅ Função {function_name} executada com sucesso")
+                except Exception as e:
+                    print(f"❌ Erro ao executar função {function_name}: {e}")
+                    resultado = {"erro": str(e)}
+                
+                if function_name.startswith("gerar_grafico_"):
+                    if isinstance(resultado, dict) and "spec" in resultado and "tipo" in resultado:
+                        graficos_gerados.append(resultado)
+                        print(f"📊 Gráfico capturado: {resultado.get('titulo', 'Sem título')}")
+                    else:
+                        print(f"⚠️ A função {function_name} não retornou um gráfico válido:Keys={resultado.keys() if isinstance(resultado, dict) else 'Not Dict'}")
+
             else:
                 resultado = {"erro": f"Função {function_name} não encontrada"}
             
@@ -298,10 +388,15 @@ def enviar_mensagem(request: ChatRequest):
             ))
             
             try:
-                response = client.models.generate_content(
-                    model='gemini-3-flash-preview',
-                    contents=contents,
-                    config=types.GenerateContentConfig(tools=tools)
+                response = call_gemini_with_retry(
+                    client,
+                    'gemini-3-flash-preview',
+                    contents,
+                    types.GenerateContentConfig(
+                        tools=tools,
+                        max_output_tokens=2500,  # Aumentado para 2500 para evitar cortar respostas
+                        temperature=0.75
+                    )
                 )
             except Exception as e:
                 error_str = str(e)
@@ -320,36 +415,119 @@ def enviar_mensagem(request: ChatRequest):
         
         
         
+        resposta_final = ""
         if hasattr(response, 'candidates') and response.candidates:
+            print(f"DEBUG: Candidates count: {len(response.candidates)}")
             if len(response.candidates) > 0:
                 first_candidate = response.candidates[0]
                 if hasattr(first_candidate, 'content') and first_candidate.content:
+                    print(f"DEBUG: Content parts count: {len(first_candidate.content.parts)}")
                     if hasattr(first_candidate.content, 'parts') and first_candidate.content.parts:
-                        for idx, part in enumerate(first_candidate.content.parts):
-                            resposta_final = response.text
+                        for part in first_candidate.content.parts:
+                            print(f"DEBUG: Part text: {getattr(part, 'text', 'N/A')}")
+                            if hasattr(part, 'text') and part.text:
+                                resposta_final = part.text
+                                break
+        
         if not resposta_final or resposta_final.strip() == "":
             try:
-                if hasattr(response, 'candidates') and response.candidates:
-                    parts = response.candidates[0].content.parts
-                    if parts and len(parts) > 0 and hasattr(parts[0], 'text'):
-                        resposta_final = parts[0].text
-                        print(f"✅ Extraído de candidates.parts: '{resposta_final[:100]}'")
+                if hasattr(response, 'text') and response.text:
+                    resposta_final = response.text
+                    print(f"✅ Extraído de response.text: '{resposta_final[:100]}'")
             except Exception as ex:
-                print(f"❌ Erro ao extrair: {ex}")
+                print(f"⚠️ response.text não disponível: {ex}")
         
+        if not resposta_final or resposta_final.strip() == "":
+            print("⚠️ Resposta vazia detectada. Forçando uma última chamada para gerar texto...")
+            try:
+                retry_contents = [types.Content(role="user", parts=[types.Part(text=CONTEXTO_SISTEMA)])]
+                
+                for msg in historico_atual:
+                    role = "user" if msg.get("role") == "user" else "model"
+                    content_text = msg.get("content", "")
+                    if content_text:
+                        retry_contents.append(types.Content(role=role, parts=[types.Part(text=str(content_text))]))
+                
+                # Adiciona o prompt de força
+                retry_contents.append(types.Content(role="user", parts=[types.Part(text="Com base nos dados acima, responda minha pergunta original de forma direta e em Português.")]))
+
+                final_response = client.models.generate_content(
+                    model=CHAT_MODEL,
+                    contents=retry_contents,
+                    config=generation_config
+                )
+                
+                if hasattr(final_response, 'text') and final_response.text:
+                    resposta_final = final_response.text
+                    print(f"✅ Texto recuperado com chamada extra: '{resposta_final[:100]}'")
+            except Exception as retry_ex:
+                print(f"❌ Falha no retry de resposta vazia: {retry_ex}")
+
         if not resposta_final or resposta_final.strip() == "":
             resposta_final = "⚠️ O modelo processou a requisição mas não retornou texto. Os dados foram consultados com sucesso no banco."
         
+        if "{" in resposta_final and '"tipo": "plotly"' in resposta_final:
+            import re
+            padrao = r'\{.*?"tipo":\s*"plotly".*?\}'
+            resposta_final = re.sub(padrao, '', resposta_final, flags=re.DOTALL)
+            resposta_final = re.sub(r'\n\s*\n', '\n\n', resposta_final).strip()
+
         historico_atual.append({"role": "assistant", "content": resposta_final})
+
+        if conversa_id:
+            salvar_mensagem(conversa_id, "assistant", resposta_final)
+            print(f"💾 Resposta do assistente salva na conversa {conversa_id}")
         
         return ChatResponse(
             resposta=resposta_final,
-            historico_atualizado=historico_atual
+            historico_atualizado=historico_atual,
+            conversa_id=conversa_id,
+            graficos=graficos_gerados if graficos_gerados else None
         )
         
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Erro no chat: {str(e)}")
+
+@app.post("/chat/feedback")
+def enviar_feedback(request: FeedbackRequest):
+    try:
+        salvar_feedback_chat(
+            pergunta=request.pergunta,
+            resposta=request.resposta,
+            feedback=request.feedback,
+            comentario=request.comentario
+        )
+        return {"status": "ok", "mensagem": "Obrigado pelo feedback!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar feedback: {str(e)}")
+
+@app.post("/chat/conversa/nova")
+def nova_conversa(usuario_id: str, titulo: str):
+    try:
+        conversa_id = criar_conversa(usuario_id, titulo)
+        if conversa_id:
+            return {"status": "ok", "conversa_id": conversa_id}
+        else:
+            raise HTTPException(status_code=500, detail="Erro ao criar conversa")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+@app.get("/chat/conversas")
+def listar_conversas(usuario_id: str):
+    try:
+        conversas = carregar_conversas(usuario_id)
+        return {"conversas": conversas}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+@app.get("/chat/conversa/{conversa_id}")
+def obter_conversa(conversa_id: int):
+    try:
+        mensagens = carregar_mensagens(conversa_id)
+        return {"mensagens": mensagens}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 @app.get("/health")
 def health_check():

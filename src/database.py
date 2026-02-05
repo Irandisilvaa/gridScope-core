@@ -455,3 +455,198 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n❌ Falha no teste: {e}")
         sys.exit(1)
+
+def criar_tabela_feedback():
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS chat_feedback (
+                    id SERIAL PRIMARY KEY,
+                    pergunta TEXT NOT NULL,
+                    resposta TEXT NOT NULL,
+                    feedback BOOLEAN NOT NULL,
+                    comentario TEXT,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_feedback_created 
+                ON chat_feedback(created_at)
+            """))
+            
+            conn.commit()
+            logger.info("✅ Tabela chat_feedback verificada/criada")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao criar tabela chat_feedback: {e}")
+
+
+def salvar_feedback_chat(pergunta: str, resposta: str, feedback: bool, comentario: str = None):
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO chat_feedback (pergunta, resposta, feedback, comentario)
+                VALUES (:pergunta, :resposta, :feedback, :comentario)
+            """), {
+                "pergunta": pergunta,
+                "resposta": resposta,
+                "feedback": feedback,
+                "comentario": comentario
+            })
+            conn.commit()
+            
+            emoji = "👍" if feedback else "👎"
+            logger.info(f"{emoji} Feedback salvo: {pergunta[:50]}")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao salvar feedback: {e}")
+
+
+def criar_tabelas_historico():
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS chat_conversas (
+                    id SERIAL PRIMARY KEY,
+                    usuario_id TEXT NOT NULL,
+                    titulo TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS chat_mensagens (
+                    id SERIAL PRIMARY KEY,
+                    conversa_id INTEGER REFERENCES chat_conversas(id) ON DELETE CASCADE,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_conversas_usuario 
+                ON chat_conversas(usuario_id)
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_mensagens_conversa 
+                ON chat_mensagens(conversa_id)
+            """))
+            
+            conn.commit()
+            logger.info("✅ Tabelas de histórico verificadas/criadas")
+            
+    except Exception as e:
+        logger.error(f"❌ Erro ao criar tabelas de histórico: {e}")
+
+
+def criar_conversa(usuario_id: str, titulo: str):
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                INSERT INTO chat_conversas (usuario_id, titulo)
+                VALUES (:usuario_id, :titulo)
+                RETURNING id
+            """), {
+                "usuario_id": usuario_id,
+                "titulo": titulo[:100]
+            })
+            
+            conversa_id = result.fetchone()[0]
+            conn.commit()
+            
+            logger.info(f"📝 Nova conversa criada: {conversa_id} - {titulo[:30]}")
+            return conversa_id
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao criar conversa: {e}")
+        return None
+
+
+def salvar_mensagem(conversa_id: int, role: str, content: str):
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO chat_mensagens (conversa_id, role, content)
+                VALUES (:conversa_id, :role, :content)
+            """), {
+                "conversa_id": conversa_id,
+                "role": role,
+                "content": content
+            })
+            
+            conn.execute(text("""
+                UPDATE chat_conversas 
+                SET updated_at = NOW() 
+                WHERE id = :conversa_id
+            """), {"conversa_id": conversa_id})
+            
+            conn.commit()
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao salvar mensagem: {e}")
+
+
+def carregar_conversas(usuario_id: str, limite: int = 50):
+    """Carrega lista de conversas do usuário"""
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT id, titulo, created_at, updated_at
+                FROM chat_conversas
+                WHERE usuario_id = :usuario_id
+                ORDER BY updated_at DESC
+                LIMIT :limite
+            """), {
+                "usuario_id": usuario_id,
+                "limite": limite
+            })
+            
+            conversas = []
+            for row in result:
+                conversas.append({
+                    "id": row[0],
+                    "titulo": row[1],
+                    "created_at": row[2].isoformat() if row[2] else None,
+                    "updated_at": row[3].isoformat() if row[3] else None
+                })
+            
+            return conversas
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao carregar conversas: {e}")
+        return []
+
+
+def carregar_mensagens(conversa_id: int):
+    """Carrega mensagens de uma conversa"""
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT role, content, created_at
+                FROM chat_mensagens
+                WHERE conversa_id = :conversa_id
+                ORDER BY created_at ASC
+            """), {"conversa_id": conversa_id})
+            
+            mensagens = []
+            for row in result:
+                mensagens.append({
+                    "role": row[0],
+                    "content": row[1]
+                })
+            
+            return mensagens
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao carregar mensagens: {e}")
+        return []
