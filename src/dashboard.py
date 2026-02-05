@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import os
+import base64
 
 # --- Configuração Inicial ---
 st.set_page_config(
@@ -10,20 +11,39 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Inicialização do Estado
+# --- Gerenciamento de Caminhos e Estado ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
 
-# Configuração de Caminho
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# --- Função Auxiliar: Imagem para Base64 (Compatibilidade AWS/Linux) ---
+def get_img_as_base64(file_path):
+    try:
+        if not os.path.exists(file_path):
+            return ""
+        with open(file_path, "rb") as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except Exception:
+        return ""
 
-# --- Importação das Views com Tratamento de Erro ---
+# --- Definição dos Caminhos de Recursos ---
+path_logo = os.path.join(BASE_DIR, "src", "icons", "logoGridScope.png")
+path_avatar = os.path.join(BASE_DIR, "src", "icons", "helio.png")
+
+# Carregamento prévio para HTML
+avatar_b64 = get_img_as_base64(path_avatar)
+img_avatar_src = f"data:image/png;base64,{avatar_b64}" if avatar_b64 else ""
+
+# --- Importação das Views ---
 try:
     from views import analise_subestacao, visao_geral, tab_chat, relatorios
 except ImportError as e:
-    st.error(f"Aviso: {e}. Certifique-se que a pasta 'views' existe e contém os arquivos.")
+    st.error(f"Erro de Importação: {e}")
     class MockView:
-        def render_view(self): st.info("Funcionalidade em desenvolvimento ou arquivo não encontrado.")
+        def render_view(self): st.info("Módulo não encontrado.")
     
     if 'analise_subestacao' not in locals(): analise_subestacao = MockView()
     if 'visao_geral' not in locals(): visao_geral = MockView()
@@ -42,13 +62,12 @@ st.markdown("""
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding-top: 10px;
-            padding-bottom: 10px; 
+            padding: 10px 0; 
             margin-bottom: 10px;
         }
         
         .avatar-frame {
-            width: 90px; /* Reduzi levemente para caber melhor embaixo */
+            width: 90px;
             height: 90px;
             border-radius: 50%;
             padding: 3px; 
@@ -114,41 +133,34 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-url_logo = "https://i.ibb.co/PzM7Kbs7/imagem-2026-02-04-150703728-removebg-preview.png" 
-url_avatar = "https://i.ibb.co/8Lm3gSKk/Gemini-Generated-Image-dmdcrpdmdcrpdmdc.png"
+# --- Construção da Sidebar ---
+if os.path.exists(path_logo):
+    st.sidebar.image(path_logo, use_container_width=True)
+else:
+    st.sidebar.warning("Logo não encontrado")
 
-
-st.sidebar.image(url_logo, use_container_width=True)
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
 opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
 
-# Callback para atualizar a página quando o radio muda
-def on_radio_change():
-    st.session_state['pagina_atual'] = st.session_state['nav_radio']
-
-# Define o índice inicial do radio
-# Se a página atual não estiver no menu (ex: Chat IA), mantemos o índice anterior ou 0
-if 'nav_radio' not in st.session_state:
-     st.session_state['nav_radio'] = opcoes_menu[0]
-
 try:
-    # Tenta sincronizar o radio com a página atual se ela estiver no menu
     if st.session_state['pagina_atual'] in opcoes_menu:
         index_atual = opcoes_menu.index(st.session_state['pagina_atual'])
     else:
-        # Se estiver no Chat, mantemos o visual no último item ou 0, sem triggerar mudança
-        index_atual = opcoes_menu.index(st.session_state.get('nav_radio', opcoes_menu[0]))
-except (ValueError, KeyError):
-    index_atual = 0
+        index_atual = 0 
+except ValueError:
+    index_atual = 0 
 
 navegacao = st.sidebar.radio(
     "Ferramentas:",
     opcoes_menu,
     index=index_atual,
-    key="nav_radio",
-    on_change=on_radio_change
+    key="nav_radio"
 )
+
+if navegacao != st.session_state['pagina_atual'] and navegacao in opcoes_menu:
+    st.session_state['pagina_atual'] = navegacao
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
@@ -156,7 +168,7 @@ st.sidebar.markdown("**Assistente Inteligente**")
 st.sidebar.markdown(f"""
     <div class="profile-container">
         <div class="avatar-frame">
-            <img src="{url_avatar}" class="avatar-img">
+            <img src="{img_avatar_src}" class="avatar-img">
         </div>
         <p class="profile-name">Helios AI</p>
         <p class="profile-status">● Online</p>
@@ -169,12 +181,13 @@ if st.sidebar.button("✨ Conversar com Helios"):
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
+# --- Roteamento de Páginas ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":
     col_a, col_b = st.columns([1, 20])
     with col_a:
-        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{url_avatar}" style="width:100%; height:100%; object-fit:cover; transform:scale(2.1);"></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="width:60px; height:60px; border-radius:50%; overflow:hidden;"><img src="{img_avatar_src}" style="width:100%; height:100%; object-fit:cover; transform:scale(2.1);"></div>', unsafe_allow_html=True)
     with col_b:
         st.title("Helios AI Assistant")
         
@@ -182,7 +195,7 @@ if pagina == "Chat IA":
         if hasattr(tab_chat, 'render_view'):
             tab_chat.render_view()
         else:
-            st.info("Olá! Sou o Helios. O módulo de chat ainda não está conectado.")
+            st.info("Módulo de chat desconectado.")
     except Exception as e:
         st.error(f"Erro no Chat: {e}")
 
@@ -191,20 +204,18 @@ elif pagina == "🔍 Análise por Subestação":
         if hasattr(analise_subestacao, 'render_view'):
             analise_subestacao.render_view()
     except Exception as e:
-        st.error(f"Erro ao carregar módulo de Análise: {e}")
+        st.error(f"Erro em Análise: {e}")
 
 elif pagina == "📊 Visão Geral":
     try:
         if hasattr(visao_geral, 'render_view'):
             visao_geral.render_view()
     except Exception as e:
-        st.error(f"Erro ao carregar módulo de Visão Geral: {e}")
+        st.error(f"Erro em Visão Geral: {e}")
 
 elif pagina == "📄 Relatórios":
     try:
         if hasattr(relatorios, 'render_view'):
             relatorios.render_view()
-        else:
-            st.warning("Módulo 'relatorios' carregado, mas sem função render_view().")
     except Exception as e:
-        st.error(f"Erro ao carregar módulo de Relatórios: {e}")
+        st.error(f"Erro em Relatórios: {e}")
