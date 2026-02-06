@@ -12,17 +12,25 @@ MINIMO_CLIENTES = 10
 
 def calcular_criticidade(potencia_gd_kw, consumo_anual_mwh):
     """
-    Calcula o nível de criticidade baseado na injeção de potência na rede.
+    Calcula o nível de criticidade baseado na Capacidade de Hospedagem (Hosting Capacity).
+    
+    Lógica Científica:
+    - Converte Consumo Anual (MWh) em Demanda Média (kW).
+    - Compara a Potência Instalada com a Demanda Média.
+    - Se Potência GD > Demanda Média, há risco matemático de Inversão de Fluxo (Curva de Pato).
     """
     if consumo_anual_mwh == 0:
         return "NORMAL", "#28a745"
     
-    geracao_estimada_mwh = (potencia_gd_kw * 4.5 * 365) / 1000
-    percentual_injecao = (geracao_estimada_mwh / consumo_anual_mwh) * 100
-    
-    if percentual_injecao < 15:
+    demanda_media_kw = (consumo_anual_mwh * 1000) / 8760
+    if demanda_media_kw > 0:
+        razao = potencia_gd_kw / demanda_media_kw
+    else:
+        return "CRÍTICO", "#dc3545" 
+
+    if razao < 0.4:
         return "NORMAL", "#28a745"
-    elif percentual_injecao < 30:
+    elif razao <= 1.0:
         return "MÉDIO", "#ffc107"
     else:
         return "CRÍTICO", "#dc3545"
