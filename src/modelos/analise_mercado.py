@@ -74,9 +74,13 @@ def analisar_mercado():
             print("ERRO CRÍTICO: Voronoi sem coluna COD_ID.")
             return
 
-        # Normalização de Nomes
-        if 'NOM' not in gdf_voronoi.columns and 'NOME' in gdf_voronoi.columns:
-            gdf_voronoi = gdf_voronoi.rename(columns={'NOME': 'NOM'})
+        # Normalização de Nomes - cria NOM se não existir
+        if 'NOM' not in gdf_voronoi.columns:
+            if 'NOME' in gdf_voronoi.columns:
+                gdf_voronoi = gdf_voronoi.rename(columns={'NOME': 'NOM'})
+            else:
+                # Se não tiver NOM nem NOME, usa COD_ID como nome
+                gdf_voronoi['NOM'] = 'SE_' + gdf_voronoi['COD_ID'].astype(str)
         
         # LIMPEZA PROFUNDA DO ID
         gdf_voronoi['COD_ID_CLEAN'] = gdf_voronoi['COD_ID'].apply(limpar_id)

@@ -17,13 +17,46 @@ from database import get_engine, carregar_cache_mercado, carregar_voronoi
 from jinja2 import Environment, FileSystemLoader
 
 import google.generativeai as genai
-from config import CHAT_API_KEY, CHAT_MODEL
+from config import CHAT_API_KEY, CHAT_MODEL, GEMINI_API_KEYS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PDFReport")
 
-if CHAT_API_KEY:
-    genai.configure(api_key=CHAT_API_KEY)
+# Multi-key rotation for PDF diagnostics
+_current_key_index = 0
+_exhausted_keys = set()
+
+def _get_gemini_model():
+    """Gets a Gemini model using the next available API key."""
+    global _current_key_index, _exhausted_keys
+    
+    keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([CHAT_API_KEY] if CHAT_API_KEY else [])
+    
+    if not keys:
+        return None
+    
+    # Find a non-exhausted key
+    for i in range(len(keys)):
+        idx = (_current_key_index + i) % len(keys)
+        if idx not in _exhausted_keys:
+            genai.configure(api_key=keys[idx])
+            _current_key_index = idx
+            return genai.GenerativeModel(CHAT_MODEL)
+    
+    # All keys exhausted, reset and try again
+    _exhausted_keys.clear()
+    _current_key_index = 0
+    genai.configure(api_key=keys[0])
+    return genai.GenerativeModel(CHAT_MODEL)
+
+def _mark_key_exhausted():
+    """Marks current key as exhausted and rotates to next."""
+    global _current_key_index, _exhausted_keys
+    _exhausted_keys.add(_current_key_index)
+    keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([CHAT_API_KEY] if CHAT_API_KEY else [])
+    _current_key_index = (_current_key_index + 1) % len(keys) if keys else 0
+    logger.info(f"🔄 Rotacionando para chave Gemini {_current_key_index + 1}")
+
 
 CLASSES_DISPONIVEIS = [
     "Residencial", "Comercial", "Industrial", 
@@ -159,8 +192,10 @@ def _get_neighborhood_from_coords(substation_id: str) -> str:
 def _generate_diagnostic_text(data: Dict) -> str:
     """
     Gera um diagnóstico textual usando Gemini com base nos dados do relatório.
+    Suporta rotação automática de chaves em caso de 429.
     """
-    if not CHAT_API_KEY:
+    keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([CHAT_API_KEY] if CHAT_API_KEY else [])
+    if not keys:
         return "Chave de API da IA não configurada para gerar diagnósticos automáticos."
         
     try:
@@ -193,13 +228,29 @@ def _generate_diagnostic_text(data: Dict) -> str:
         Não use markdown, apenas texto puro. Não use saudações. Seja direto.
         """
         
-        model = genai.GenerativeModel(CHAT_MODEL)
-        response = model.generate_content(prompt)
+        # Try with key rotation
+        for attempt in range(len(keys)):
+            try:
+                model = _get_gemini_model()
+                if model is None:
+                    return "Nenhuma chave de API disponível."
+                    
+                response = model.generate_content(prompt)
+                
+                if response and response.text:
+                    return response.text.strip()
+                    
+                return "Não foi possível gerar o diagnóstico automático."
+                
+            except Exception as e:
+                error_str = str(e)
+                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                    _mark_key_exhausted()
+                    logger.warning(f"Chave {attempt + 1} esgotada, tentando próxima...")
+                    continue
+                raise
         
-        if response and response.text:
-            return response.text.strip()
-            
-        return "Não foi possível gerar o diagnóstico automático."
+        return "⚠️ Todas as chaves de API esgotadas. Diagnóstico indisponível."
         
     except Exception as e:
         logger.error(f"Erro na chamada Gemini: {e}")

@@ -19,6 +19,15 @@ CRS_PROJETADO = "EPSG:31984"
 ANEEL_API_HUB_URL = os.getenv("ANEEL_API_HUB_URL", "https://hub.arcgis.com/api/search/v1/collections/all/items")
 DISTRIBUIDORA_ALVO = os.getenv("DISTRIBUIDORA_ALVO", "Energisa SE")
 
-# Chat IA
+# Chat IA - Multi-Key Support
+# Primary key (backward compatible)
 CHAT_API_KEY = os.getenv("GEMINI_API_KEY")
+# Secondary keys for rotation
+GEMINI_API_KEYS = [
+    os.getenv("GEMINI_API_KEY"),
+    os.getenv("GEMINI_API_KEY_2"),
+]
+# Filter out None values
+GEMINI_API_KEYS = [k for k in GEMINI_API_KEYS if k]
+
 CHAT_MODEL = os.getenv("CHAT_MODEL", "gemini-3-flash-preview")

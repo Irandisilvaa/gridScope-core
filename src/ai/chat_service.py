@@ -16,20 +16,74 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO, DISTRIBUIDORA_ALVO
+from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO, DISTRIBUIDORA_ALVO, GEMINI_API_KEYS
 from ai.chat_queries import FUNCOES_DISPONIVEIS
 from database import (criar_tabela_feedback, salvar_feedback_chat,
                     criar_tabelas_historico, criar_conversa, salvar_mensagem, 
                     carregar_conversas, carregar_mensagens)
 
-client = genai.Client(api_key=CHAT_API_KEY)
+# ==========================================
+# MULTI-KEY ROTATION SYSTEM
+# ==========================================
+class GeminiKeyManager:
+    """Manages multiple Gemini API keys with automatic rotation on rate limit."""
+    
+    def __init__(self, api_keys: List[str]):
+        self.api_keys = api_keys if api_keys else []
+        self.current_index = 0
+        self.exhausted_keys = set()  # Track keys that hit 429
+        self.clients = {}  # Cache clients per key
+        
+        # Initialize clients for all keys
+        for key in self.api_keys:
+            self.clients[key] = genai.Client(api_key=key)
+        
+        print(f"🔑 Gemini Key Manager inicializado com {len(self.api_keys)} chave(s)")
+    
+    def get_client(self) -> genai.Client:
+        """Returns the current active client."""
+        if not self.api_keys:
+            raise ValueError("Nenhuma API key configurada!")
+        return self.clients[self.api_keys[self.current_index]]
+    
+    def mark_exhausted_and_rotate(self) -> bool:
+        """Marks current key as exhausted and tries to rotate to next.
+        Returns True if rotation successful, False if all keys exhausted."""
+        if not self.api_keys:
+            return False
+            
+        self.exhausted_keys.add(self.current_index)
+        print(f"⚠️ Chave {self.current_index + 1} esgotada (429)")
+        
+        # Try to find a non-exhausted key
+        for i in range(len(self.api_keys)):
+            if i not in self.exhausted_keys:
+                self.current_index = i
+                print(f"🔄 Rotacionando para chave {i + 1}")
+                return True
+        
+        print("❌ Todas as chaves Gemini esgotadas!")
+        return False
+    
+    def reset_exhausted(self):
+        """Resets exhausted keys (call this daily or on new day)."""
+        self.exhausted_keys.clear()
+        self.current_index = 0
+
+
+# Initialize key manager
+key_manager = GeminiKeyManager(GEMINI_API_KEYS)
+
+# Backward compatibility: keep 'client' for any direct usage
+client = key_manager.get_client() if GEMINI_API_KEYS else None
+
 try:
     criar_tabela_feedback()
     criar_tabelas_historico()
 except Exception as e:
     print(f"⚠️ Erro ao inicializar: {e}")
 
-app = FastAPI(title="GridScope Chat IA", version="1.0")
+app = FastAPI(title="GridScope Chat IA", version="1.1-MultiKey")
 
 CONTEXTO_SISTEMA = f"""
 Você é um assistente especializado em análise de redes elétricas de distribuição.
@@ -69,17 +123,43 @@ DIRETRIZES PARA GRÁFICOS (MUITO IMPORTANTE):
    - Criticidade vs Consumo -> `gerar_grafico_criticidade_vs_consumo`
 """
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=10),
-    retry=retry_if_exception_type(ServerError)
-)
-def call_gemini_with_retry(client, model, contents, config):
-    return client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=config
-    )
+
+def call_gemini_with_retry_and_rotation(model, contents, config, max_key_attempts=None):
+    """Calls Gemini with retry logic AND key rotation on 429 errors."""
+    if max_key_attempts is None:
+        max_key_attempts = len(GEMINI_API_KEYS)
+    
+    for key_attempt in range(max_key_attempts):
+        try:
+            current_client = key_manager.get_client()
+            
+            # Standard retry for server errors (503, etc)
+            @retry(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=2, max=10),
+                retry=retry_if_exception_type(ServerError)
+            )
+            def _call():
+                return current_client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=config
+                )
+            
+            return _call()
+            
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                # Try to rotate to next key
+                if key_manager.mark_exhausted_and_rotate():
+                    continue  # Retry with new key
+                else:
+                    raise  # All keys exhausted
+            raise  # Other error, don't retry
+    
+    raise Exception("Todas as tentativas de chave falharam")
+
 
 tools = [
     types.Tool(
@@ -302,8 +382,7 @@ def enviar_mensagem(request: ChatRequest):
         contents.append(types.Content(role="user", parts=[types.Part(text=request.mensagem)]))
         
         try:
-            response = call_gemini_with_retry(
-                client,
+            response = call_gemini_with_retry_and_rotation(
                 'gemini-3-flash-preview',
                 contents,
                 types.GenerateContentConfig(
@@ -388,13 +467,12 @@ def enviar_mensagem(request: ChatRequest):
             ))
             
             try:
-                response = call_gemini_with_retry(
-                    client,
+                response = call_gemini_with_retry_and_rotation(
                     'gemini-3-flash-preview',
                     contents,
                     types.GenerateContentConfig(
                         tools=tools,
-                        max_output_tokens=2500,  # Aumentado para 2500 para evitar cortar respostas
+                        max_output_tokens=2500,
                         temperature=0.75
                     )
                 )
