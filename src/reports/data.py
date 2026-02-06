@@ -131,18 +131,22 @@ def get_report_data(substation_id: str):
     gd_rows = []
     
     for cls in classes_interest:
-        pot_kw = limpar_float(gd_detalhe.get(cls, 0))
-        # Note: 'count' per class might not be available in simple cache, using mock or total
-        # We'll use total clients of that class if available, or just omit count logic
-        cls_data = perfil.get(cls, {})
-        if isinstance(cls_data, str): cls_data = eval(cls_data)
-        count_cli = int(cls_data.get('qtd_clientes', 0))
+        cls_gd_data = gd_detalhe.get(cls, {})
+        if isinstance(cls_gd_data, str): cls_gd_data = eval(cls_gd_data)
+        
+        # Handle both dict format (new) and direct value (legacy)
+        if isinstance(cls_gd_data, dict):
+            pot_kw = limpar_float(cls_gd_data.get('potencia_kw', 0))
+            count_gd = int(cls_gd_data.get('qtd', 0))
+        else:
+            pot_kw = limpar_float(cls_gd_data)
+            count_gd = 1 if pot_kw > 0 else 0
         
         if pot_kw > 0:
             gd_rows.append({
                 "class": cls,
                 "power_kw": pot_kw,
-                "count": count_cli
+                "count": count_gd
             })
     df_gd = pd.DataFrame(gd_rows)
 

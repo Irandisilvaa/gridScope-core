@@ -278,29 +278,39 @@
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Posição</th>
-                    <th>ID</th>
-                    <th>Subestações</th>
-                    <th>Capacidade (MW)</th>
-                    <th>Clientes</th>
-                    <th>MMGD</th>
-                    <th>Criticidade</th>
+                    <th style="width: 8%;">Posição</th>
+                    <th style="width: 12%; word-break: break-all; font-size: 7pt;">ID</th>
+                    <th style="width: 18%;">Subestação</th>
+                    <th style="width: 14%;">Capacidade (MW)</th>
+                    <th style="width: 14%;">Clientes</th>
+                    <th style="width: 12%;">MMGD</th>
+                    <th style="width: 12%;">Criticidade</th>
                 </tr>
             </thead>
             <tbody>
                 {% for index, row in pdf_data.ranking.iterrows() %}
                 <tr>
                     <td class="text-center">{{ row['position'] }}</td>
-                    <td class="text-center">{{ row['id'] }}</td>
+                    <td class="text-center" style="word-break: break-all; font-size: 7pt;">{{ row['id'] }}</td>
                     <td class="text-center">{{ row['name'] }}</td>
-                    <td class="text-center">{{ row['capacity_mw'] }}</td>
-                    <td class="text-center">{{ row['clients'] }}</td>
-                    <td class="text-center">{{ row['mmgd'] }}</td>
+                    <td class="text-center">{{ "{:,.2f}".format(row['capacity_mw']).replace(',', '.') }}</td>
+                    <td class="text-center">{{ "{:,.0f}".format(row['clients']).replace(',', '.') }}</td>
+                    <td class="text-center">{{ "{:,.0f}".format(row['mmgd']).replace(',', '.') }}</td>
                     <td class="text-center status-{{ row['criticality'] }}">{{ row['criticality'] }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
+
+        <!-- CRITICALITY LEGEND -->
+        <div style="border: 2px solid #000; border-top: none; padding: 8px; font-size: 8pt; background-color: #f9f9f9;">
+            <strong>Legenda de Criticidade:</strong><br>
+            <span style="color: #28a745;">●</span> <strong>NORMAL:</strong> Injeção < 15% do consumo
+                &nbsp;&nbsp;|&nbsp;&nbsp; <span style="color: #ffc107;">●</span> <strong>MÉDIO:</strong> Injeção entre
+                15% e 30% do consumo &nbsp;&nbsp;|&nbsp;&nbsp;
+                <span style="color: #dc3545;">●</span> <strong>CRÍTICO:</strong> Injeção > 30% do consumo (risco de
+                inversão de fluxo)
+        </div>
 
         <!-- DIAGNOSTIC (Future) -->
         <div class="section-header">Diagnóstico da Ferramenta</div>

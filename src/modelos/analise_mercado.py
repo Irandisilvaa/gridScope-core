@@ -232,7 +232,10 @@ def analisar_mercado():
             qtd=('TRAFO_LINK', 'count'),
             potencia=('POT_INST', 'sum')
         )
-        gd_por_sub_classe = df_gd_final.groupby(['ID_SUBESTACAO', 'TIPO'])['POT_INST'].sum().reset_index()
+        gd_por_sub_classe = df_gd_final.groupby(['ID_SUBESTACAO', 'TIPO']).agg(
+            potencia=('POT_INST', 'sum'),
+            qtd=('TRAFO_LINK', 'count')
+        ).reset_index()
 
     # Loop Principal
     for idx, row in gdf_voronoi.iterrows():
@@ -317,8 +320,8 @@ def analisar_mercado():
                     linha_gd_cls = dados_gd_cls[dados_gd_cls['TIPO'] == cls]
                     
                     if not linha_gd_cls.empty:
-                        p_gd = float(linha_gd_cls['POT_INST'].values[0])
-                        q_gd = 1  
+                        p_gd = float(linha_gd_cls['potencia'].values[0])
+                        q_gd = int(linha_gd_cls['qtd'].values[0])  # Use actual count from grouped data
                         
                         if p_gd > 0:
                             stats["geracao_distribuida"]["detalhe_por_classe"][cls] = {
