@@ -255,9 +255,9 @@ def render_view():
     
     st.markdown("""
     **Legenda de Criticidade:**
-    - 🟢 **NORMAL**: Injeção < 15% do consumo
-    - 🟡 **MÉDIO**: Injeção entre 15% e 30% do consumo
-    - 🔴 **CRÍTICO**: Injeção > 30% do consumo (risco de inversão de fluxo)
+    - **NORMAL**: Injeção < 15% do consumo
+    - **MÉDIO**: Injeção entre 15% e 30% do consumo
+    - **CRÍTICO**: Injeção > 30% do consumo (risco de inversão de fluxo)
     """)
     
     try:
