@@ -254,10 +254,10 @@ def render_view():
     st.header("🗺️ Mapa de Criticidade das Subestações")
     
     st.markdown("""
-    **Legenda de Criticidade:**
-    - **NORMAL**: Injeção < 15% do consumo
-    - **MÉDIO**: Injeção entre 15% e 30% do consumo
-    - **CRÍTICO**: Injeção > 30% do consumo (risco de inversão de fluxo)
+    **Legenda de Criticidade** (R = P_GD / D_Média):
+    - 🟢 **NORMAL** (R < 40%): Zona de Segurança - Geração absorvida pela carga base
+    - 🟡 **MÉDIO** (40% ≤ R ≤ 100%): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
+    - 🔴 **CRÍTICO** (R > 100%): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
     """)
     
     try:
