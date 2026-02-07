@@ -17,7 +17,17 @@ from database import get_engine, carregar_cache_mercado, carregar_voronoi
 from jinja2 import Environment, FileSystemLoader
 
 import google.generativeai as genai
-from config import CHAT_API_KEY, CHAT_MODEL, GEMINI_API_KEYS
+from config import CHAT_API_KEY, CHAT_MODEL, GEMINI_API_KEYS, GROQ_API_KEY
+
+# Groq client for PDF diagnostics 
+try:
+    from groq import Groq
+    groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+    if groq_client:
+        print("🚀 Groq configurado para diagnósticos PDF")
+except ImportError:
+    groq_client = None
+    print("⚠️ Biblioteca Groq não instalada")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PDFReport")
@@ -106,11 +116,8 @@ def _get_substation_area_km2(substation_id: str) -> str:
         if gdf_filtered.empty:
             return "N/D"
         
-        # Reprojecta para UTM (zona 24S - Aracaju/SE) para calcular área em metros²
-        # EPSG:31984 é UTM zona 24S
         gdf_proj = gdf_filtered.to_crs(epsg=31984)
         
-        # Calcula área em m², converte para km²
         area_m2 = gdf_proj.geometry.area.iloc[0]
         area_km2 = area_m2 / 1_000_000
         
@@ -191,13 +198,9 @@ def _get_neighborhood_from_coords(substation_id: str) -> str:
 
 def _generate_diagnostic_text(data: Dict) -> str:
     """
-    Gera um diagnóstico textual usando Gemini com base nos dados do relatório.
-    Suporta rotação automática de chaves em caso de 429.
+    Gera um diagnóstico textual usando Groq (primário) ou Gemini (fallback).
+    Groq tem ~14.000 req/dia grátis vs 20 do Gemini, economizando cota do chat.
     """
-    keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([CHAT_API_KEY] if CHAT_API_KEY else [])
-    if not keys:
-        return "Chave de API da IA não configurada para gerar diagnósticos automáticos."
-        
     try:
         header = data.get('header', {})
         resumo = f"""
@@ -206,7 +209,21 @@ def _generate_diagnostic_text(data: Dict) -> str:
         Clientes: {header.get('total_clientes')}
         """
         
-        resumo += "\nIndicadores:\n"
+        # Adiciona dados específicos de GD para garantir que a IA veja
+        gd_data = data.get('gd', [])
+        try:
+            total_potencia_gd = sum([float(str(item['potencia_kw']).replace('.', '').replace(',', '.')) for item in gd_data])
+            total_qtd_gd = sum([int(str(item['qtd_clientes']).replace('.', '')) for item in gd_data])
+        except Exception as e:
+            logger.warning(f"Erro ao somar GD para prompt: {e}")
+            total_potencia_gd = 0
+            total_qtd_gd = 0
+            
+        resumo += f"\nDADOS GERAÇÃO DISTRIBUÍDA (GD):\n"
+        resumo += f"- Potência Instalada Total: {total_potencia_gd:,.2f} kW\n"
+        resumo += f"- Quantidade de Usinas: {total_qtd_gd}\n"
+        
+        resumo += "\nIndicadores Comparativos:\n"
         for ind in data.get('indicators', []):
             resumo += f"- {ind.get('indicador')}: {ind.get('subestacao')} (Média cidade: {ind.get('media_cidade')})\n"
             
@@ -214,46 +231,64 @@ def _generate_diagnostic_text(data: Dict) -> str:
         for item in data.get('ranking', [])[:3]:
             resumo += f"- {item.get('nome')}: {item.get('criticidade')} (MMGD: {item.get('mmgd')})\n"
 
-        prompt = f"""
-        Atue como um especialista em distribuição de energia. Analise os dados desta subestação e escreva um diagnóstico TÉCNICO e CONCISO (máximo 4 a 5 linhas) para um relatório executivo.
+        prompt = f"""Você é um engenheiro elétrico especialista em redes de distribuição. Analise os dados abaixo e escreva um diagnóstico técnico de 4-5 linhas.
+
+DADOS DA SUBESTAÇÃO:
+{resumo}
+
+INSTRUÇÕES:
+- Compare os valores da subestação com a média da cidade
+- Comente sobre a Geração Distribuída (GD) e seus impactos
+- Indique se há riscos operacionais
+- Escreva em português brasileiro
+- Seja direto e técnico, sem saudações"""
         
-        Dados:
-        {resumo}
-        
-        Foque em:
-        1. Comparação volumétrica com a média da cidade (se está acima/abaixo)
-        2. Impacto da Geração Distribuída (GD)
-        3. Nível de criticidade e riscos operacionais
-        
-        Não use markdown, apenas texto puro. Não use saudações. Seja direto.
-        """
-        
-        # Try with key rotation
-        for attempt in range(len(keys)):
+        # GROQ (Primary) - ~14.000 req/dia grátis
+        if groq_client:
             try:
-                model = _get_gemini_model()
-                if model is None:
-                    return "Nenhuma chave de API disponível."
-                    
-                response = model.generate_content(prompt)
-                
-                if response and response.text:
-                    return response.text.strip()
-                    
-                return "Não foi possível gerar o diagnóstico automático."
-                
+                logger.info("🚀 Gerando diagnóstico com Groq...")
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",  # Modelo SOTA atual do Groq
+                    messages=[
+                        {"role": "system", "content": "Você é um engenheiro elétrico especialista em distribuição de energia. Responda sempre em português brasileiro de forma técnica e concisa."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.5,
+                    max_tokens=400
+                )
+                if response.choices and response.choices[0].message.content:
+                    logger.info("✅ Diagnóstico gerado com sucesso via Groq")
+                    return response.choices[0].message.content.strip()
             except Exception as e:
-                error_str = str(e)
-                if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                    _mark_key_exhausted()
-                    logger.warning(f"Chave {attempt + 1} esgotada, tentando próxima...")
-                    continue
-                raise
+                logger.warning(f"⚠️ Groq falhou: {e}, tentando Gemini...")
         
-        return "⚠️ Todas as chaves de API esgotadas. Diagnóstico indisponível."
+        # GEMINI (Fallback)
+        keys = GEMINI_API_KEYS if GEMINI_API_KEYS else ([CHAT_API_KEY] if CHAT_API_KEY else [])
+        if keys:
+            for attempt in range(len(keys)):
+                try:
+                    model = _get_gemini_model()
+                    if model is None:
+                        continue
+                        
+                    logger.info(f"🔄 Tentando Gemini (chave {attempt + 1})...")
+                    response = model.generate_content(prompt)
+                    
+                    if response and response.text:
+                        logger.info("✅ Diagnóstico gerado via Gemini (fallback)")
+                        return response.text.strip()
+                        
+                except Exception as e:
+                    error_str = str(e)
+                    if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                        _mark_key_exhausted()
+                        continue
+                    raise
+        
+        return "⚠️ Não foi possível gerar diagnóstico (Groq e Gemini indisponíveis)."
         
     except Exception as e:
-        logger.error(f"Erro na chamada Gemini: {e}")
+        logger.error(f"Erro ao gerar diagnóstico: {e}")
         return "Erro ao processar diagnóstico inteligente."
 
 
@@ -622,6 +657,9 @@ def get_pdf_data(
         else:
             criticidade = "CRÍTICO"
         
+        if clientes <= 0 or not r['subestacao'] or str(r['subestacao']).strip() == 'SUB-' or not r['id']:
+            continue
+
         ranking_data.append({
             'subestacao': r['subestacao'],
             'id': r['id'],

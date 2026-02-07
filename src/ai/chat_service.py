@@ -22,17 +22,59 @@ from database import (criar_tabela_feedback, salvar_feedback_chat,
                     criar_tabelas_historico, criar_conversa, salvar_mensagem, 
                     carregar_conversas, carregar_mensagens)
 
-# ==========================================
+import time
+try:
+    from cache_redis import redis_client, is_redis_available
+    CACHE_ENABLED = is_redis_available()
+    print(f"📦 Cache Redis: {'✅ Habilitado' if CACHE_ENABLED else '❌ Desabilitado'}")
+except ImportError:
+    CACHE_ENABLED = False
+    redis_client = None
+    print("⚠️ Cache Redis não disponível")
+
+CACHE_TTL_SECONDS = 24 * 60 * 60  
+CACHE_DELAY_SECONDS = 2.5 
+
+def get_cache_key(mensagem: str) -> str:
+    """Generates a cache key from the message hash."""
+    normalized = mensagem.lower().strip()
+    return f"chat_response:{hashlib.md5(normalized.encode()).hexdigest()}"
+
+def get_cached_response(mensagem: str) -> Optional[dict]:
+    """Checks if there's a cached response for this message."""
+    if not CACHE_ENABLED or not redis_client:
+        return None
+    try:
+        key = get_cache_key(mensagem)
+        cached = redis_client.get(key)
+        if cached:
+            print(f"⚡ Cache HIT: {mensagem[:50]}...")
+            return json.loads(cached)
+    except Exception as e:
+        print(f"⚠️ Erro ao ler cache: {e}")
+    return None
+
+def save_to_cache(mensagem: str, resposta: str, graficos: list = None):
+    """Saves a response to cache."""
+    if not CACHE_ENABLED or not redis_client:
+        return
+    try:
+        key = get_cache_key(mensagem)
+        data = {"resposta": resposta, "graficos": graficos or []}
+        redis_client.setex(key, CACHE_TTL_SECONDS, json.dumps(data))
+        print(f"💾 Cache SAVE: {mensagem[:50]}... (TTL: {CACHE_TTL_SECONDS}s)")
+    except Exception as e:
+        print(f"⚠️ Erro ao salvar cache: {e}")
+
 # MULTI-KEY ROTATION SYSTEM
-# ==========================================
 class GeminiKeyManager:
     """Manages multiple Gemini API keys with automatic rotation on rate limit."""
     
     def __init__(self, api_keys: List[str]):
         self.api_keys = api_keys if api_keys else []
         self.current_index = 0
-        self.exhausted_keys = set()  # Track keys that hit 429
-        self.clients = {}  # Cache clients per key
+        self.exhausted_keys = set()  
+        self.clients = {}  
         
         # Initialize clients for all keys
         for key in self.api_keys:
@@ -373,6 +415,29 @@ def enviar_mensagem(request: ChatRequest):
             salvar_mensagem(conversa_id, "user", request.mensagem)
             print(f"💾 Mensagem do usuário salva na conversa {conversa_id}")
         
+        # ==========================================
+        # CHECK CACHE BEFORE CALLING GEMINI
+        # ==========================================
+        cached = get_cached_response(request.mensagem)
+        if cached:
+            print(f"⚡ Retornando resposta do cache!")
+            time.sleep(CACHE_DELAY_SECONDS)  # Delay para parecer natural
+            
+            historico_atual = request.historico.copy()
+            historico_atual.append({"role": "user", "content": request.mensagem})
+            historico_atual.append({"role": "assistant", "content": cached["resposta"]})
+            
+            if conversa_id:
+                salvar_mensagem(conversa_id, "assistant", cached["resposta"] + " _(cache)_")
+            
+            return ChatResponse(
+                resposta=cached["resposta"],
+                historico_atualizado=historico_atual,
+                conversa_id=conversa_id,
+                graficos=cached.get("graficos")
+            )
+        # ==========================================
+        
         contents = [types.Content(role="user", parts=[types.Part(text=CONTEXTO_SISTEMA)])]
         
         for msg in request.historico:
@@ -555,6 +620,12 @@ def enviar_mensagem(request: ChatRequest):
         if conversa_id:
             salvar_mensagem(conversa_id, "assistant", resposta_final)
             print(f"💾 Resposta do assistente salva na conversa {conversa_id}")
+        
+        # ==========================================
+        # SAVE RESPONSE TO CACHE
+        # ==========================================
+        save_to_cache(request.mensagem, resposta_final, graficos_gerados)
+        # ==========================================
         
         return ChatResponse(
             resposta=resposta_final,
