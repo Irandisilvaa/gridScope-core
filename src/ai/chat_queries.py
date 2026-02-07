@@ -54,12 +54,12 @@ def obter_subestacoes_em_risco(nivel_minimo: str = "MEDIO") -> List[Dict[str, An
     try:
         dados = _carregar_dados_filtrados()
         
-        niveis_ordem = {"BAIXO": 0, "MEDIO": 1, "ALTO": 2}
+        niveis_ordem = {"NORMAL": 0, "MÉDIO": 1, "CRÍTICO": 2}
         min_nivel = niveis_ordem.get(nivel_minimo.upper(), 1)
         
         resultados = []
         for item in dados:
-            nivel = item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO')
+            nivel = item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'NORMAL')
             
             if niveis_ordem.get(nivel, 0) >= min_nivel:
                 resultados.append({
@@ -174,7 +174,7 @@ def comparar_subestacoes(nomes: List[str]) -> List[Dict[str, Any]]:
                         "total_clientes": int(item.get('metricas_rede', {}).get('total_clientes', 0)),
                         "potencia_gd_kw": float(item.get('geracao_distribuida', {}).get('potencia_total_kw', 0)),
                         "unidades_gd": int(item.get('geracao_distribuida', {}).get('total_unidades', 0)),
-                        "nivel_criticidade": item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO'),
+                        "nivel_criticidade": item.get('metricas_rede', {}).get('nivel_criticidade_gd', 'NORMAL'),
                         "consumo_medio_kwh_cliente": float(item.get('metricas_rede', {}).get('consumo_anual_mwh', 0) * 1000 / max(item.get('metricas_rede', {}).get('total_clientes', 1), 1))
                     })
                     break
@@ -196,7 +196,7 @@ def obter_insights_inteligentes() -> Dict[str, Any]:
             "destaques": []
         }
         
-        subs_alto_gd = [d for d in dados if d.get('metricas_rede', {}).get('nivel_criticidade_gd') == 'ALTO']
+        subs_alto_gd = [d for d in dados if d.get('metricas_rede', {}).get('nivel_criticidade_gd') == 'CRÍTICO']
         if subs_alto_gd:
             insights["alertas"].append({
                 "tipo": "CRITICIDADE_GD",
@@ -533,7 +533,7 @@ def gerar_grafico_criticidade_vs_consumo() -> Dict[str, Any]:
         cores = []
         tamanhos = []
         
-        mapa_cores = {"BAIXO": "green", "MEDIO": "orange", "ALTO": "red"}
+        mapa_cores = {"NORMAL": "green", "MÉDIO": "orange", "CRÍTICO": "red"}
         
         for d in dados:
             total_cli = d.get('metricas_rede', {}).get('total_clientes', 0)
@@ -542,7 +542,7 @@ def gerar_grafico_criticidade_vs_consumo() -> Dict[str, Any]:
                 
             consumo = d.get('metricas_rede', {}).get('consumo_anual_mwh', 0)
             gd_unidades = d.get('geracao_distribuida', {}).get('total_unidades', 0)
-            nivel = d.get('metricas_rede', {}).get('nivel_criticidade_gd', 'BAIXO')
+            nivel = d.get('metricas_rede', {}).get('nivel_criticidade_gd', 'NORMAL')
             
             if total_cli > 0:
                 gd_pct = (gd_unidades / total_cli) * 100

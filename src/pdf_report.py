@@ -561,12 +561,14 @@ def get_pdf_data(
         clientes = int(r.get('total_clientes', 0) or 0)
         qtd_gd = int(r.get('qtd_total_gd', 0) or 0)
         
-        geracao_estimada = (potencia * 4.5 * 365) / 1000
-        penetracao = (geracao_estimada / consumo) * 100 if consumo > 0 else 0
+        # Calcula demanda média e razão R (nova fórmula Irandi)
+        demanda_media_kw = (consumo * 1000) / 8760 if consumo > 0 else 0
+        razao_r = potencia / demanda_media_kw if demanda_media_kw > 0 else 0
         
-        if penetracao < 15:
+        # Nova classificação: R < 0.4 = Normal, 0.4 <= R <= 1.0 = Médio, R > 1.0 = Crítico
+        if razao_r < 0.4:
             criticidade = "NORMAL"
-        elif penetracao < 30:
+        elif razao_r <= 1.0:
             criticidade = "MÉDIO"
         else:
             criticidade = "CRÍTICO"
@@ -578,12 +580,12 @@ def get_pdf_data(
             'potencia_gd': potencia,
             'qtd_gd': qtd_gd,
             'criticidade': criticidade,
-            'penetracao': penetracao
+            'razao_r': razao_r
         })
     
     # Ordena por criticidade
     ordem = {'CRÍTICO': 0, 'MÉDIO': 1, 'NORMAL': 2}
-    ranking_data.sort(key=lambda x: (ordem.get(x['criticidade'], 3), -x['penetracao']))
+    ranking_data.sort(key=lambda x: (ordem.get(x['criticidade'], 3), -x['razao_r']))
     
     # Formata ranking
     ranking_formatted = []

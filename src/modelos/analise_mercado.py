@@ -261,10 +261,17 @@ def analisar_mercado():
                 geom_dict = mapping(geom_wgs)
         except: pass
 
-        # 3. Definição Nível
-        nivel = "BAIXO"
-        if total_gd_pot > 1000: nivel = "MEDIO"
-        if total_gd_pot > 5000: nivel = "ALTO"
+        # 3. Definição Nível (R = P_GD / D_Média - nova fórmula Irandi)
+        consumo_anual_mwh = total_cons / 1000  # Convertendo kWh para MWh
+        demanda_media_kw = (consumo_anual_mwh * 1000) / 8760 if consumo_anual_mwh > 0 else 0
+        razao_r = total_gd_pot / demanda_media_kw if demanda_media_kw > 0 else 0
+        
+        if razao_r < 0.4:
+            nivel = "NORMAL"
+        elif razao_r <= 1.0:
+            nivel = "MÉDIO"
+        else:
+            nivel = "CRÍTICO"
 
         # 4. Estrutura Base
         stats = {
