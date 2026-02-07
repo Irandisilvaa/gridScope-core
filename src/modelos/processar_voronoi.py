@@ -116,6 +116,22 @@ def processar_voronoi_robusto(gdf_limite, gdf_pontos):
     # Explode multipartes para garantir que ilhas sejam polígonos válidos, mas mantém o mesmo ID
     gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
     
+    # 6. MARCAÇÃO DE SUBESTAÇÕES EXTERNAS
+    # Detecta subestações cujo centróide está fora do limite oficial da cidade
+    logger.info("Verificando subestações externas...")
+    gdf_centroides = gdf_pontos.dissolve(by="cod_id_sub").centroid
+    limite_oficial_uniao = gdf_limite.union_all()
+    
+    for idx, row in gdf_final.iterrows():
+        cod_id = row['COD_ID']
+        if cod_id in gdf_centroides.index:
+            ponto_central = gdf_centroides.loc[cod_id]
+            if not ponto_central.within(limite_oficial_uniao):
+                if "(EXTERNA)" not in str(row['NOM']):
+                    novo_nome = f"{row['NOM']} (EXTERNA)"
+                    gdf_final.at[idx, 'NOM'] = novo_nome
+                    logger.info(f"  -> Marcada como externa: {novo_nome}")
+    
     return gdf_final
 
 def main():

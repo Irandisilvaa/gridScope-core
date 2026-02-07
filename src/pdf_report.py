@@ -310,9 +310,14 @@ def get_bulk_data() -> pd.DataFrame:
         registros = []
         
         for item in dados_cache:
+            # Ignora subestações externas
+            nome_completo = str(item.get('subestacao', ''))
+            if '(EXTERNA)' in nome_completo:
+                continue
+            
             # Extrai informações básicas
             registro = {
-                'subestacao': str(item.get('subestacao', '')).split(' (ID:')[0],
+                'subestacao': nome_completo.split(' (ID:')[0],
                 'id': item.get('id_tecnico', ''),
                 'regiao': item.get('regiao', 'Aracaju - SE'),
             }
@@ -659,8 +664,12 @@ def get_pdf_data(
         else:
             criticidade = "CRÍTICO"
         
-        if clientes <= 0 or not r['subestacao'] or str(r['subestacao']).strip() == 'SUB-' or not r['id']:
+        # Filtros: clientes inválidos, nome inválido, ID vazio, ou subestação EXTERNA
+        nome_sub = str(r.get('subestacao', '') or '')
+        if clientes <= 0 or not nome_sub or nome_sub.strip() == 'SUB-' or not r['id']:
             continue
+        if '(EXTERNA)' in nome_sub:
+            continue  # Ignora subestações de cidades vizinhas
 
         ranking_data.append({
             'subestacao': r['subestacao'],

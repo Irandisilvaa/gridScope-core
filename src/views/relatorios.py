@@ -187,8 +187,11 @@ def render_view():
         mapa_opcoes = {}
         if not df_mercado.empty and 'subestacao' in df_mercado.columns:
             for idx, row in df_mercado.iterrows():
+                label = str(row.get('subestacao', ''))
+                # Ignora subestações externas
+                if '(EXTERNA)' in label:
+                    continue
                 id_tec = row.get('id_tecnico', idx)
-                label = row['subestacao']
                 mapa_opcoes[label] = id_tec
     except Exception as e:
         st.error(f"Erro ao carregar subestações: {e}")

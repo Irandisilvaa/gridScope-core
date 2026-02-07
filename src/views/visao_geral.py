@@ -278,6 +278,10 @@ def render_view():
         nome = str(row.get('subestacao', '')).split(' (ID:')[0]
         id_tec = row.get('id_tecnico', '')
         
+        # Ignora subestações externas
+        if '(EXTERNA)' in str(row.get('subestacao', '')):
+            continue
+        
         metricas_row = row.get('metricas_rede', {})
         gd_row = row.get('geracao_distribuida', {})
         
