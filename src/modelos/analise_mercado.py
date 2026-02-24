@@ -9,7 +9,6 @@ from shapely.geometry import mapping
 
 warnings.filterwarnings('ignore')
 
-# garante que os módulos do projeto sejam encontrados
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database import (
     carregar_voronoi,
@@ -51,7 +50,6 @@ def calcular_consumo_real(df):
         df['CONSUMO_ANUAL'] = 0.0
         return df
 
-    # Converte para numérico e preenche NaN com 0
     df[cols_existentes] = df[cols_existentes].apply(pd.to_numeric, errors='coerce').fillna(0.0)
     
     df['CONSUMO_ANUAL'] = df[cols_existentes].sum(axis=1)
@@ -67,21 +65,17 @@ def analisar_mercado():
     print("1. Carregando e Normalizando Territórios...")
     try:
         gdf_voronoi = carregar_voronoi()
-        # Reprojeção para metros para cálculos se necessário, mas aqui vamos manter controle
         gdf_voronoi = gdf_voronoi.to_crs(epsg=31984) 
 
         if 'COD_ID' not in gdf_voronoi.columns:
             print("ERRO CRÍTICO: Voronoi sem coluna COD_ID.")
             return
 
-        # Normalização de Nomes
         if 'NOM' not in gdf_voronoi.columns and 'NOME' in gdf_voronoi.columns:
             gdf_voronoi = gdf_voronoi.rename(columns={'NOME': 'NOM'})
         
-        # LIMPEZA PROFUNDA DO ID
         gdf_voronoi['COD_ID_CLEAN'] = gdf_voronoi['COD_ID'].apply(limpar_id)
         
-        # Remove Voronois sem ID válido
         gdf_voronoi = gdf_voronoi.dropna(subset=['COD_ID_CLEAN'])
         
         print(f"   -> {len(gdf_voronoi)} territórios válidos carregados.")
@@ -92,7 +86,6 @@ def analisar_mercado():
     try:
         gdf_trafos = carregar_transformadores().to_crs(epsg=31984)
 
-        # Join Espacial: Trafo -> Voronoi
         trafos_join = gpd.sjoin(
             gdf_trafos, 
             gdf_voronoi[['NOM', 'COD_ID_CLEAN', 'geometry']], 
@@ -100,22 +93,18 @@ def analisar_mercado():
             how="inner"
         )
 
-        # Identificação das colunas corretas após o join
-        col_id_sub = 'COD_ID_CLEAN' # Coluna que veio do Voronoi (já limpa)
+        col_id_sub = 'COD_ID_CLEAN' 
         if 'COD_ID_CLEAN_right' in trafos_join.columns:
             col_id_sub = 'COD_ID_CLEAN_right'
             
-        # Coluna do ID do Trafo (geralmente COD_ID ou COD_ID_left)
         col_id_trafo = 'COD_ID'
         if 'COD_ID_left' in trafos_join.columns:
             col_id_trafo = 'COD_ID_left'
 
-        # Cria tabela de referência limpa
         ref_trafos = pd.DataFrame()
         ref_trafos['ID_TRAFO'] = trafos_join[col_id_trafo].apply(limpar_id)
-        ref_trafos['ID_SUBESTACAO'] = trafos_join[col_id_sub].apply(limpar_id) # Já deve vir limpo, mas garante
+        ref_trafos['ID_SUBESTACAO'] = trafos_join[col_id_sub].apply(limpar_id) 
         
-        # Remove duplicatas (trafo na borda pode pegar 2 voronois, pegamos o primeiro)
         ref_trafos = ref_trafos.drop_duplicates(subset=['ID_TRAFO'])
         
         print(f"   -> {len(ref_trafos)} transformadores vinculados a subestações.")
@@ -130,7 +119,6 @@ def analisar_mercado():
         cols_ene = [f'ENE_{i:02d}' for i in range(1, 13)]
         cols_leitura = ['UNI_TR_MT', 'CLAS_SUB', 'PN_CON'] + cols_ene
         
-        # Ignora geometria para economizar memória e evitar erros
         df_uc = carregar_consumidores(colunas=cols_leitura, ignore_geometry=True)
 
         if df_uc is None or df_uc.empty:
@@ -138,10 +126,8 @@ def analisar_mercado():
         else:
             df_uc = calcular_consumo_real(df_uc)
             
-            # LIMPEZA DO ID DE LIGAÇÃO
             df_uc['TRAFO_LINK'] = df_uc['UNI_TR_MT'].apply(limpar_id)
             
-            # MERGE: Consumidor -> Trafo (que já tem a Subestação)
             df_cons_final = pd.merge(
                 df_uc, 
                 ref_trafos, 
@@ -150,10 +136,8 @@ def analisar_mercado():
                 how='inner'
             )
             
-            # Mapeamento de Classes
             df_cons_final['TIPO'] = df_cons_final['CLAS_SUB'].astype(str).str[:2].map(MAPA_CLASSES).fillna('Outros')
 
-            # Cache para usar na GD
             if 'PN_CON' in df_cons_final.columns:
                 mapa_pn_classe = df_cons_final[['PN_CON', 'TIPO']].drop_duplicates(subset='PN_CON').set_index('PN_CON')['TIPO']
             
@@ -176,10 +160,8 @@ def analisar_mercado():
         if df_gd is not None and not df_gd.empty:
             df_gd['POT_INST'] = pd.to_numeric(df_gd['POT_INST'], errors='coerce').fillna(0.0)
             
-            # LIMPEZA ID
             df_gd['TRAFO_LINK'] = df_gd['UNI_TR_MT'].apply(limpar_id)
 
-            # MERGE
             df_gd_final = pd.merge(
                 df_gd, 
                 ref_trafos, 
@@ -202,30 +184,24 @@ def analisar_mercado():
     print("5. Construindo JSON de saída...")
     relatorio = []
 
-    # Prepara geometria WGS84 para exportação
     try:
         gdf_voronoi_wgs = gdf_voronoi.to_crs(epsg=4326)
     except:
         gdf_voronoi_wgs = gdf_voronoi.copy()
 
-    # Otimização: Agrupar dados antes do loop
     print("   -> Agrupando dados para preenchimento rápido...")
     
-    # Agrupamento Consumidores
     grouped_cons = pd.DataFrame()
     if not df_cons_final.empty:
-        # Por Subestação (Total)
         cons_por_sub = df_cons_final.groupby('ID_SUBESTACAO').agg(
             qtd=('TRAFO_LINK', 'count'),
             consumo=('CONSUMO_ANUAL', 'sum')
         )
-        # Por Subestação e Classe (Detalhe)
         cons_por_sub_classe = df_cons_final.groupby(['ID_SUBESTACAO', 'TIPO']).agg(
             qtd=('TRAFO_LINK', 'count'),
             consumo=('CONSUMO_ANUAL', 'sum')
         ).reset_index()
     
-    # Agrupamento GD
     grouped_gd = pd.DataFrame()
     if not df_gd_final.empty:
         gd_por_sub = df_gd_final.groupby('ID_SUBESTACAO').agg(
@@ -237,13 +213,10 @@ def analisar_mercado():
             potencia=('POT_INST', 'sum')
         ).reset_index()
 
-    # Loop Principal
     for idx, row in gdf_voronoi.iterrows():
-        # Usa o ID Limpo
         sub_id = row['COD_ID_CLEAN']
         nome = row.get('NOM', f'Subestação {sub_id}')
 
-        # 1. Recupera Dados Totais
         total_cli = 0
         total_cons = 0.0
         if not df_cons_final.empty and sub_id in cons_por_sub.index:
@@ -256,7 +229,6 @@ def analisar_mercado():
             total_gd_qtd = int(gd_por_sub.loc[sub_id, 'qtd'])
             total_gd_pot = float(gd_por_sub.loc[sub_id, 'potencia'])
 
-        # 2. Recupera Geometria Segura
         geom_dict = None
         try:
             geom_wgs = gdf_voronoi_wgs.loc[idx, 'geometry']
@@ -264,8 +236,7 @@ def analisar_mercado():
                 geom_dict = mapping(geom_wgs)
         except: pass
 
-        # 3. Definição Nível (R = P_GD / D_Média - nova fórmula Irandi)
-        consumo_anual_mwh = total_cons / 1000  # Convertendo kWh para MWh
+        consumo_anual_mwh = total_cons / 1000
         demanda_media_kw = (consumo_anual_mwh * 1000) / 8760 if consumo_anual_mwh > 0 else 0
         razao_r = total_gd_pot / demanda_media_kw if demanda_media_kw > 0 else 0
         
@@ -276,7 +247,6 @@ def analisar_mercado():
         else:
             nivel = "CRÍTICO"
 
-        # 4. Estrutura Base
         stats = {
             "subestacao": f"{nome} (ID: {sub_id})",
             "id_tecnico": str(sub_id),
@@ -294,15 +264,12 @@ def analisar_mercado():
             "geometry": geom_dict
         }
         
-        # 5. Preenche Perfil Detalhado (Usando os dados agrupados)
         classes_interesse = ['Residencial', 'Comercial', 'Industrial', 'Rural', 'Poder Público']
         
         if total_cli > 0 and not df_cons_final.empty:
-            # Filtra o dataframe agrupado (muito mais rápido que filtrar o dataframe gigante)
             dados_cls = cons_por_sub_classe[cons_por_sub_classe['ID_SUBESTACAO'] == sub_id]
             
             for cls in classes_interesse:
-                # Busca segura
                 linha_cls = dados_cls[dados_cls['TIPO'] == cls]
                 
                 qtd_cls = 0

@@ -138,29 +138,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Construção da Sidebar ---
 if path_logo.exists():
     st.sidebar.image(str(path_logo), use_container_width=True)
 else:
-    # Mostra um aviso amigável se não achar
     st.sidebar.warning(f"Logo não encontrado.")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
 opcoes_menu = ["Visão Geral", "Análise por Subestação", "Relatórios"]
 
-# --- Função de Navegação Centralizada ---
 def set_page(page_name=None):
     if page_name is None:
         page_name = st.session_state.get('nav_radio')
     
     st.session_state['pagina_atual'] = page_name
     
-    # Se a página não estiver no menu (ex: Chat), limpa a seleção do radio
     if page_name not in opcoes_menu and 'nav_radio' in st.session_state:
         st.session_state['nav_radio'] = None
 
-# Callback para o radio button
 def update_nav():
     set_page(st.session_state['nav_radio'])
 
@@ -183,7 +178,6 @@ navegacao = st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
 
-# Renderiza Avatar HTML apenas se a imagem foi carregada
 avatar_html = f"""
     <div class="profile-container">
         <div class="avatar-frame">
@@ -200,7 +194,6 @@ st.sidebar.button("Conversar com Helios", on_click=set_page, args=("Chat IA",))
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
-# --- Roteamento de Páginas ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":

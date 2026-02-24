@@ -60,9 +60,9 @@ def tab_chat():
         st.session_state.usuario_id = socket.gethostname()
     
     with st.sidebar:
-        st.subheader("📚 Histórico")
+        st.subheader("Histórico")
         
-        if st.button("➕ Nova Conversa", use_container_width=True):
+        if st.button("+ Nova Conversa", use_container_width=True):
             st.session_state.chat_mensagens = []
             st.session_state.chat_historico = []
             st.session_state.conversa_id = None
@@ -86,7 +86,7 @@ def tab_chat():
                         titulo_curto = conv["titulo"][:40] + "..." if len(conv["titulo"]) > 40 else conv["titulo"]
                         
                         if st.button(
-                            f"📝 {titulo_curto}",
+                            f"{titulo_curto}",
                             key=f"conv_{conv['id']}",
                             use_container_width=True
                         ):
@@ -113,39 +113,39 @@ def tab_chat():
             st.caption(f"⚠️ Erro ao carregar histórico: {str(e)}")
             print(f"DEBUG - Erro ao carregar conversas: {str(e)}")
     
-    st.markdown("### 💡 Perguntas Sugeridas")
+    st.markdown("### Perguntas Sugeridas")
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📊 Quantos consumidores temos?", use_container_width=True):
+        if st.button("Quantos consumidores temos?", use_container_width=True):
             st.session_state.pergunta_sugerida = "Quantos consumidores temos no total?"
     
     with col2:
-        if st.button("⚡ Qual subestação gera mais energia?", use_container_width=True):
+        if st.button("Qual subestação gera mais energia?", use_container_width=True):
             st.session_state.pergunta_sugerida = "Qual subestação tem maior potência de geração distribuída?"
     
     with col3:
-        if st.button("🚨 Quais subestações estão em risco?", use_container_width=True):
+        if st.button("Quais subestações estão em risco?", use_container_width=True):
             st.session_state.pergunta_sugerida = "Quais subestações estão em risco crítico de geração distribuída?"
     
     col4, col5, col6 = st.columns(3)
     
     with col4:
-        if st.button("🏠 Distribuição por classe", use_container_width=True):
+        if st.button("Distribuição por classe", use_container_width=True):
             st.session_state.pergunta_sugerida = "Como está a distribuição de consumo por classe (residencial, comercial, industrial)?"
     
     with col5:
-        if st.button("📈 Top 5 consumidores", use_container_width=True):
+        if st.button("Top 5 consumidores", use_container_width=True):
             st.session_state.pergunta_sugerida = "Me mostre as 5 subestações que mais consomem energia"
     
     with col6:
-        if st.button("🔍 Estatísticas gerais", use_container_width=True):
+        if st.button("Estatísticas gerais", use_container_width=True):
             st.session_state.pergunta_sugerida = "Me dê um resumo das estatísticas gerais do sistema"
     
     st.markdown("---")
     
-    st.markdown("### 💬 Conversa")
+    st.markdown("### Conversa")
     
     chat_container = st.container()
     
@@ -186,7 +186,7 @@ def tab_chat():
             with st.chat_message("user"):
                 st.markdown(pergunta_input)
         
-        with st.spinner("🔍 Consultando dados do sistema e processando resposta..."):
+        with st.spinner("Consultando dados do sistema e processando resposta..."):
             resultado = consultar_chat(
                 pergunta_input, 
                 st.session_state.chat_historico,
@@ -197,7 +197,7 @@ def tab_chat():
         resposta_ia = resultado.get("resposta", "Erro ao processar resposta")
         
         if not resposta_ia or resposta_ia.strip() == "":
-            resposta_ia = "⚠️ Recebi uma resposta vazia da API. Tente novamente."
+            resposta_ia = "Recebi uma resposta vazia da API. Tente novamente."
         
         nova_mensagem = {
             "role": "assistant",
@@ -240,7 +240,7 @@ def tab_chat():
                                 "resposta": resposta_ia,
                                 "feedback": True
                             })
-                            st.success("Obrigado! ✅")
+                            st.success("Obrigado!")
                         except:
                             st.error("Erro ao enviar feedback")
                 with col2:
@@ -251,20 +251,20 @@ def tab_chat():
                                 "resposta": resposta_ia,
                                 "feedback": False
                             })
-                            st.success("Obrigado pelo feedback! ✅")
+                            st.success("Obrigado pelo feedback!")
                         except:
                             st.error("Erro ao enviar feedback")
         
         st.rerun()
     
     st.markdown("---")
-    if st.button("🗑️ Limpar Conversa"):
+    if st.button("Limpar Conversa"):
         st.session_state.chat_historico = []
         st.session_state.chat_mensagens = []
         st.rerun()
     
     st.markdown("---")
-    st.caption("💡 Dica: Faça perguntas específicas sobre subestações, consumo, geração distribuída ou estatísticas do sistema")
+    st.caption("Dica: Faça perguntas específicas sobre subestações, consumo, geração distribuída ou estatísticas do sistema")
     
     try:
         health = requests.get(f"{CHAT_API_URL}/health", timeout=2)

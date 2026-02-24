@@ -138,7 +138,6 @@ def render_view():
     dados_gd = converter_para_dict(dados_raw.get("geracao_distribuida", {}))
     perfil = converter_para_dict(dados_raw.get("perfil_consumo", {}))
 
-    # --- CÁLCULO DE CRITICIDADE (MOVIDO PARA O TOPO) ---
     potencia_kw_calc = limpar_float(dados_gd.get('potencia_total_kw', 0))
     consumo_mwh_calc = limpar_float(metricas.get('consumo_anual_mwh', 1))
     if consumo_mwh_calc == 0: consumo_mwh_calc = 1
@@ -146,11 +145,9 @@ def render_view():
     geracao_est_mwh_calc = (potencia_kw_calc * 4.5 * 365) / 1000
     penetracao_calc = (geracao_est_mwh_calc / consumo_mwh_calc) * 100
 
-    # --- RENDERIZAÇÃO ---
     st.title(f"Monitoramento: {subestacao_obj['nome']}")
     st.caption(f"ID Técnico: {id_escolhido}")
     
-    # Exibe Banner de Status baseado na penetração
     if penetracao_calc > 25:
         st.error(f"🚨 **CRITICIDADE ALTA: RISCO DE INVERSÃO DE FLUXO** | Penetração GD: {penetracao_calc:.1f}%")
     elif penetracao_calc > 15:
@@ -325,7 +322,6 @@ def render_view():
 
         with col_actions:
             st.subheader("Diagnóstico")
-            # Usa os valores já calculados no início para exibir
             st.write(f"**Penetração GD:** {penetracao_calc:.1f}%")
             
             if penetracao_calc > 25:

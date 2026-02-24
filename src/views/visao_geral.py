@@ -260,10 +260,11 @@ def render_view():
     st.header("Mapa de Criticidade das Subestações")
     
     st.markdown("""
-    **Legenda de Criticidade** (R = P_GD / D_Média):
-    - 🟢 **NORMAL** (R < 40%): Zona de Segurança - Geração absorvida pela carga base
-    - 🟡 **MÉDIO** (40% ≤ R ≤ 100%): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
-    - 🔴 **CRÍTICO** (R > 100%): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
+    **Legenda de Criticidade** ($R = \\frac{P_{GD}}{D_{Média}}$):
+    
+    - 🟢 **NORMAL** ($R < 40\\%$): Zona de Segurança - Geração absorvida pela carga base
+    - 🟡 **MÉDIO** ($40\\% \\leq R \\leq 100\\%$): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
+    - 🔴 **CRÍTICO** ($R > 100\\%$): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
     """)
     
     try:
@@ -441,4 +442,4 @@ def render_view():
     - Capacidade de geração instalada: **{metricas['total_potencia_kw']:,.2f} kW**
     """.replace(",", "."))
     
-    st.caption(f"GridScope v5.0 Enterprise | Dashboard ")
+    st.caption(f"GridScope v2.0 Enterprise | Dashboard ")
