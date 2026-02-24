@@ -17,7 +17,7 @@ from database import get_engine, carregar_cache_mercado, carregar_voronoi
 from jinja2 import Environment, FileSystemLoader
 
 import google.generativeai as genai
-from config import CHAT_API_KEY, CHAT_MODEL
+from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PDFReport")
@@ -134,26 +134,25 @@ def _get_neighborhood_from_coords(substation_id: str) -> str:
             data = response.json()
             address = data.get('address', {})
             
-            # Tenta pegar o bairro (diferentes chaves possíveis)
             bairro = (
                 address.get('suburb') or 
                 address.get('neighbourhood') or 
                 address.get('quarter') or
                 address.get('city_district') or
                 address.get('town') or
-                address.get('city', 'Aracaju')
+                address.get('city', CIDADE_ALVO)
             )
             
-            return f"{bairro} - SE"
+            return f"{bairro}"
         
-        return "Aracaju - SE"
+        return CIDADE_ALVO
         
     except requests.exceptions.Timeout:
         logger.warning("Timeout na geocodificação reversa")
-        return "Aracaju - SE"
+        return CIDADE_ALVO
     except Exception as e:
         logger.warning(f"Erro na geocodificação: {e}")
-        return "Aracaju - SE"
+        return CIDADE_ALVO
 
 
 def _generate_diagnostic_text(data: Dict) -> str:
@@ -228,7 +227,7 @@ def get_bulk_data() -> pd.DataFrame:
             registro = {
                 'subestacao': str(item.get('subestacao', '')).split(' (ID:')[0],
                 'id': item.get('id_tecnico', ''),
-                'regiao': item.get('regiao', 'Aracaju - SE'),
+                'regiao': item.get('regiao', CIDADE_ALVO),
             }
             
             # Extrai métricas da rede
@@ -482,7 +481,7 @@ def get_pdf_data(
         percentual = (consumo_classe / total_consumo_sub) * 100 if total_consumo_sub > 0 else 0
         consumption_data.append({
             'classe': classe,
-            'energia_mwh': _format_number(consumo_classe, 0),
+            'energia_mwh': _format_number(consumo_classe, 2),
             'percentual': f"{percentual:.0f}"
         })
     
@@ -493,7 +492,7 @@ def get_pdf_data(
         qtd_classe = int(row.get(f'qtd_gd_{classe}', 0) or 0)
         gd_data.append({
             'classe': classe,
-            'potencia_kw': _format_number(potencia_classe, 0),
+            'potencia_kw': _format_number(potencia_classe, 2),
             'qtd_clientes': _format_number(qtd_classe, 0)
         })
     
@@ -520,10 +519,10 @@ def get_pdf_data(
     indicators_data.append({
         'categoria': 'Consumo',
         'indicador': 'Energia Consumida (MWh)',
-        'subestacao': _format_number(consumo_sub, 0),
-        'total_cidade': _format_number(total_consumo_cidade, 0),
+        'subestacao': _format_number(consumo_sub, 2),
+        'total_cidade': _format_number(total_consumo_cidade, 2),
         'pct_cidade': f"{pct_consumo:.1f}%",
-        'media_cidade': _format_number(media_consumo, 0)
+        'media_cidade': _format_number(media_consumo, 2)
     })
     
     # GD - garante tipo numérico
@@ -533,10 +532,10 @@ def get_pdf_data(
     indicators_data.append({
         'categoria': 'GD',
         'indicador': 'Potência Instalada (kW)',
-        'subestacao': _format_number(potencia_sub, 0),
-        'total_cidade': _format_number(total_potencia_gd_cidade, 0),
+        'subestacao': _format_number(potencia_sub, 2),
+        'total_cidade': _format_number(total_potencia_gd_cidade, 2),
         'pct_cidade': f"{pct_potencia:.1f}%",
-        'media_cidade': _format_number(media_potencia, 0)
+        'media_cidade': _format_number(media_potencia, 2)
     })
     
     # Qtd GD - garante tipo numérico

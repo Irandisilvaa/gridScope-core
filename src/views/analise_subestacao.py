@@ -13,8 +13,14 @@ import warnings
 try:
     sys.path.append(os.path.dirname(os.path.abspath(__file__)))
     import tab_ia
+    
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if parent_dir not in sys.path:
+        sys.path.append(parent_dir)
+    from config import CIDADE_ALVO
 except ImportError:
     tab_ia = None 
+    CIDADE_ALVO = "Cidade Desconhecida"
 
 def render_view():
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -152,7 +158,7 @@ def render_view():
     else:
         st.success(f"✅ **OPERACIONAL: REDE ESTÁVEL** | Penetração GD: {penetracao_calc:.1f}%")
 
-    st.markdown(f"**Localização:** Aracaju - SE | **Status:** Conectado")
+    st.markdown(f"**Localização:** {CIDADE_ALVO} | **Status:** Conectado")
 
     st.header("Infraestrutura de Rede")
     k1, k2, k3, k4 = st.columns(4)
@@ -170,6 +176,26 @@ def render_view():
     tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral", "🧠 Simulação Duck Curve (IA)"])
 
     with tab_visao_geral:
+        st.subheader("Área de Cobertura Geográfica")
+        if centroid_existe:
+            m = folium.Map(location=[lat_c, lon_c], zoom_start=13, scrollWheelZoom=False)
+
+            def style_fn(feature):
+                feature_id = feature['properties'].get('COD_ID')
+                is_sel = (str(feature_id) == str(id_escolhido))
+                cor = '#007bff' if is_sel else 'gray'
+                return {'fillColor': cor, 'color': 'white' if is_sel else 'gray', 'weight': 3 if is_sel else 1,
+                        'fillOpacity': 0.7 if is_sel else 0.3}
+
+            folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
+                                                                                            aliases=["Subestação:",
+                                                                                                     "ID:"])).add_to(m)
+            st_folium(m, use_container_width=True, height=400)
+        else:
+            st.warning("Geometria não encontrada para este ID.")
+
+        st.divider()
+
         st.subheader("Potência da GD Instalada por Classe")
 
         detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
@@ -193,7 +219,7 @@ def render_view():
                 x=list(detalhe_gd.keys()),
                 y=list(detalhe_gd.values()),
                 marker_color=lista_cores, 
-                text=[f"{v:,.1f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
+                text=[f"{v:,.2f} kW".replace(",", "X").replace(".", ",").replace("X", ".") for v in
                     detalhe_gd.values()],
                 textposition='auto'
             )])
@@ -203,103 +229,84 @@ def render_view():
         else:
             st.info("Sem dados de GD para exibir.")
 
-        st.divider()
+        st.subheader("Perfil de Carga")
 
-        st.subheader("📍 Área de Cobertura Geográfica")
-        if centroid_existe:
-            m = folium.Map(location=[lat_c, lon_c], zoom_start=13, scrollWheelZoom=False)
+        dados_perfil = []
+        detalhe_raw = converter_para_dict(dados_gd.get("detalhe_por_classe", {}))
+        for cls in CATEGORIAS_ALVO:
+            perfil_cls = converter_para_dict(perfil.get(cls, {}))
+            gd_cls = detalhe_raw.get(cls, {})
+            if isinstance(gd_cls, (int, float)):
+                pot_gd = float(gd_cls)
+                qtd_gd = 0
+            else:
+                pot_gd = float(gd_cls.get('potencia_kw', 0)) if isinstance(gd_cls, dict) else 0
+                qtd_gd = int(gd_cls.get('qtd', 0)) if isinstance(gd_cls, dict) else 0
 
-            def style_fn(feature):
-                feature_id = feature['properties'].get('COD_ID')
-                is_sel = (str(feature_id) == str(id_escolhido))
-                cor = '#007bff' if is_sel else 'gray'
-                return {'fillColor': cor, 'color': 'white' if is_sel else 'gray', 'weight': 3 if is_sel else 1,
-                        'fillOpacity': 0.7 if is_sel else 0.3}
+            dados_perfil.append({
+                "Classe": cls,
+                "Clientes": perfil_cls.get("qtd_clientes", 0),
+                "Consumo (MWh)": limpar_float(perfil_cls.get("consumo_anual_mwh", 0)),
+                "Unidades MMGD": qtd_gd,
+                "Potência GD (kW)": pot_gd
+            })
 
-            folium.GeoJson(gdf, style_function=style_fn, tooltip=folium.GeoJsonTooltip(fields=["NOM", "COD_ID"],
-                                                                                            aliases=["Subestação:",
-                                                                                                     "ID:"])).add_to(m)
-            st_folium(m, use_container_width=True, height=400)
+        df_perfil = pd.DataFrame(dados_perfil)
+
+        filtro_metrica = st.radio(
+            "Visualizar por:",
+            ["Consumo por Classe", "Clientes por Classe", "Unidades MMGD por Classe"],
+            horizontal=True,
+            key="filtro_perfil_carga"
+        )
+
+        if filtro_metrica == "Consumo por Classe":
+            col_y = "Consumo (MWh)"
+            titulo_y = "Consumo Anual (MWh)"
+            sufixo = " MWh"
+        elif filtro_metrica == "Clientes por Classe":
+            col_y = "Clientes"
+            titulo_y = "Nº de Clientes"
+            sufixo = ""
         else:
-            st.warning("⚠️ Geometria não encontrada para este ID.")
+            col_y = "Unidades MMGD"
+            titulo_y = "Unidades MMGD"
+            sufixo = ""
 
-        st.divider()
+        df_plot = df_perfil[df_perfil[col_y] > 0].sort_values(by=col_y, ascending=False)
 
-        st.subheader("📌 Segmentação de Mercado")
+        if not df_plot.empty:
+            if col_y in ["Clientes", "Unidades MMGD"]:
+                text_labels = [f"{int(v)}{sufixo}" for v in df_plot[col_y]]
+                hover_tmpl = '<b>%{x}</b><br>' + titulo_y + ': %{y}<extra></extra>'
+            else:
+                text_labels = [f"{formatar_br(v)}{sufixo}" for v in df_plot[col_y]]
+                hover_tmpl = '<b>%{x}</b><br>' + titulo_y + ': %{y:,.2f}<extra></extra>'
 
-        col_graf1, col_graf2 = st.columns(2)
-
-        with col_graf1:
-            st.markdown("**Distribuição de Clientes (Qtd)**")
-            dados_clientes = []
-            for k, v in perfil.items():
-                if k in CATEGORIAS_ALVO:
-                    v_dict = converter_para_dict(v)
-                    val = v_dict.get("qtd_clientes", 0)
-                    if val > 0:
-                        dados_clientes.append({"Segmento": k, "Valor": val})
-
-            df_pie = pd.DataFrame(dados_clientes)
-            if not df_pie.empty:
-                fig_pie = px.pie(df_pie, values="Valor", names="Segmento", hole=0.4, color="Segmento",
-                                color_discrete_map=CORES_MAPA)
-                fig_pie.update_layout(
-                    margin=dict(t=20, b=20, l=20, r=20),
-                    height=350,
-                    showlegend=True,
-                    legend=dict(orientation="h", y=-0.1)
-                )
-                fig_pie.update_traces(
+            fig_perfil = go.Figure(data=[
+                go.Bar(
+                    x=df_plot["Classe"],
+                    y=df_plot[col_y],
+                    marker_color=[CORES_MAPA.get(c, '#6c757d') for c in df_plot["Classe"]],
+                    text=text_labels,
                     textposition='auto',
-                    textinfo='percent+label',
-                    textfont_size=13,
-                    hovertemplate='%{label}<br>Qtd: %{value}<br>%{percent}'
+                    hovertemplate=hover_tmpl
                 )
-                st.plotly_chart(fig_pie, use_container_width=True)
-            else:
-                st.info("Sem dados de Clientes.")
-
-        with col_graf2:
-            st.markdown("**Consumo Anual por Classe (MWh)**")
-            dados_carga = []
-            if perfil:
-                for k, v in perfil.items():
-                    if k not in CATEGORIAS_ALVO: continue
-                    v_dict = converter_para_dict(v)
-                    val_candidato = (v_dict.get("consumo_anual_mwh") or v_dict.get("ENE_12") or 0)
-                    val_float = limpar_float(val_candidato)
-                    if val_float > 0:
-                        dados_carga.append({"Segmento": k, "Valor": val_float})
-            
-            df_carga = pd.DataFrame(dados_carga)
-            if not df_carga.empty:
-                df_carga = df_carga.sort_values(by="Valor", ascending=False)
-
-                fig_carga = go.Figure(data=[
-                    go.Bar(
-                        x=df_carga["Segmento"],
-                        y=df_carga["Valor"],
-                        marker_color=[CORES_MAPA.get(s, '#17a2b8') for s in df_carga["Segmento"]],
-                        text=[f"{val:,.0f} MWh".replace(",", "X").replace(".", ",").replace("X", ".") for val in
-                            df_carga["Valor"]],
-                        textposition='auto',
-                        hovertemplate='<b>%{x}</b><br>Consumo: %{y:,.2f} MWh<extra></extra>'
-                    )
-                ])
-                fig_carga.update_layout(
-                    margin=dict(t=20, b=20, l=20, r=20),
-                    height=350,
-                    yaxis_title="Consumo Anual (MWh)",
-                    showlegend=False,
-                    xaxis=dict(title=None)
-                )
-                st.plotly_chart(fig_carga, use_container_width=True)
-            else:
-                st.info("Sem dados de Carga.")
+            ])
+            fig_perfil.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=10, b=10),
+                yaxis_title=titulo_y,
+                showlegend=False,
+                xaxis=dict(title=None)
+            )
+            st.plotly_chart(fig_perfil, use_container_width=True)
+        else:
+            st.info(f"Sem dados de {filtro_metrica.lower()} para exibir.")
 
         st.divider()
 
-        st.header("📋 Relatório Técnico & Ações")
+        st.header("Relatório Técnico & Ações")
         col_table, col_actions = st.columns([2, 1])
 
         with col_table:

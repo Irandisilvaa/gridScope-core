@@ -122,10 +122,11 @@ def run_pipeline():
             logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
             sys.exit(1)
 
-        logger.info("🗺️ Gerando territórios Voronoi...")
-        run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
+    logger.info("🗺️ Gerando territórios Voronoi...")
+    run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
 
-        run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
+    logger.info("📊 Atualizando análise de mercado...")
+    run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
 
     logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
     run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest")

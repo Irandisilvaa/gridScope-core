@@ -24,15 +24,8 @@ if str(BASE_DIR) not in sys.path:
 path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
 path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
 
-print(f"--- DEBUG PATHS ---")
-print(f"Diretório Atual do Arquivo: {CURRENT_FILE_DIR}")
-print(f"Raiz do Projeto Definida (BASE_DIR): {BASE_DIR}")
-print(f"Procurando Logo em: {path_logo}")
-print(f"Existe? {path_logo.exists()}")
-print(f"-------------------")
-
 if 'pagina_atual' not in st.session_state:
-    st.session_state['pagina_atual'] = "📊 Visão Geral"
+    st.session_state['pagina_atual'] = "Visão Geral"
 
 def get_img_as_base64(file_path):
     if not file_path.exists():
@@ -154,7 +147,7 @@ else:
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
-opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
+opcoes_menu = ["Visão Geral", "Análise por Subestação", "Relatórios"]
 
 # --- Função de Navegação Centralizada ---
 def set_page(page_name=None):
@@ -202,7 +195,7 @@ avatar_html = f"""
 """
 st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
-st.sidebar.button("✨ Conversar com Helios", on_click=set_page, args=("Chat IA",))
+st.sidebar.button("Conversar com Helios", on_click=set_page, args=("Chat IA",))
 
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
@@ -225,21 +218,21 @@ if pagina == "Chat IA":
     except Exception as e:
         st.error(f"Erro no Chat: {e}")
 
-elif pagina == "🔍 Análise por Subestação":
+elif pagina == "Análise por Subestação":
     try:
         if hasattr(analise_subestacao, 'render_view'):
             analise_subestacao.render_view()
     except Exception as e:
         st.error(f"Erro em Análise: {e}")
 
-elif pagina == "📊 Visão Geral":
+elif pagina == "Visão Geral":
     try:
         if hasattr(visao_geral, 'render_view'):
             visao_geral.render_view()
     except Exception as e:
         st.error(f"Erro em Visão Geral: {e}")
 
-elif pagina == "📄 Relatórios":
+elif pagina == "Relatórios":
     try:
         if hasattr(relatorios, 'render_view'):
             relatorios.render_view()
