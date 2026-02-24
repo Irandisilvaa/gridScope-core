@@ -456,24 +456,21 @@ def get_pdf_data(
     """
     df = get_bulk_data()
     
-    # Totais da cidade
     total_clientes_cidade = int(df['total_clientes'].sum())
     total_consumo_cidade = float(df['consumo_total_mwh'].sum())
     total_potencia_gd_cidade = float(df['potencia_total_gd_kw'].sum())
     total_gd_cidade = int(df['qtd_total_gd'].sum())
     num_subestacoes = len(df)
     
-    # Se especificou subestação, filtra
     if substation_id:
         df_sub = df[df['id'].astype(str) == str(substation_id)]
         if df_sub.empty:
-            df_sub = df.iloc[[0]]  # Fallback para primeira
+            df_sub = df.iloc[[0]]  
     else:
-        df_sub = df.iloc[[0]]  # Usa primeira como referência
+        df_sub = df.iloc[[0]]  
     
     row = df_sub.iloc[0]
     
-    # Monta dados de consumo por classe (filtrado)
     consumption_data = []
     total_consumo_sub = float(row.get('consumo_total_mwh', 0) or 1)
     for classe in classes_selecionadas:
@@ -485,7 +482,6 @@ def get_pdf_data(
             'percentual': f"{percentual:.0f}"
         })
     
-    # Monta dados de GD por classe (filtrado)
     gd_data = []
     for classe in classes_selecionadas:
         potencia_classe = float(row.get(f'potencia_gd_kw_{classe}', 0) or 0)
@@ -496,10 +492,8 @@ def get_pdf_data(
             'qtd_clientes': _format_number(qtd_classe, 0)
         })
     
-    # Monta indicadores comparativos
     indicators_data = []
     
-    # Clientes - garante tipo numérico
     clientes_sub = float(row.get('total_clientes', 0) or 0)
     pct_clientes = (clientes_sub / total_clientes_cidade) * 100 if total_clientes_cidade > 0 else 0
     media_clientes = total_clientes_cidade / num_subestacoes if num_subestacoes > 0 else 0
@@ -512,7 +506,6 @@ def get_pdf_data(
         'media_cidade': _format_number(media_clientes, 0)
     })
     
-    # Consumo - garante tipo numérico
     consumo_sub = float(row.get('consumo_total_mwh', 0) or 0)
     pct_consumo = (consumo_sub / total_consumo_cidade) * 100 if total_consumo_cidade > 0 else 0
     media_consumo = total_consumo_cidade / num_subestacoes if num_subestacoes > 0 else 0
@@ -525,7 +518,6 @@ def get_pdf_data(
         'media_cidade': _format_number(media_consumo, 2)
     })
     
-    # GD - garante tipo numérico
     potencia_sub = float(row.get('potencia_total_gd_kw', 0) or 0)
     pct_potencia = (potencia_sub / total_potencia_gd_cidade) * 100 if total_potencia_gd_cidade > 0 else 0
     media_potencia = total_potencia_gd_cidade / num_subestacoes if num_subestacoes > 0 else 0
@@ -538,7 +530,6 @@ def get_pdf_data(
         'media_cidade': _format_number(media_potencia, 2)
     })
     
-    # Qtd GD - garante tipo numérico
     qtd_gd_sub = float(row.get('qtd_total_gd', 0) or 0)
     pct_qtd = (qtd_gd_sub / total_gd_cidade) * 100 if total_gd_cidade > 0 else 0
     media_qtd = total_gd_cidade / num_subestacoes if num_subestacoes > 0 else 0
@@ -551,20 +542,16 @@ def get_pdf_data(
         'media_cidade': _format_number(media_qtd, 0)
     })
     
-    # Monta ranking de criticidade
     ranking_data = []
     for idx, r in df.iterrows():
-        # Garante tipos numéricos
         potencia = float(r.get('potencia_total_gd_kw', 0) or 0)
         consumo = float(r.get('consumo_total_mwh', 1) or 1)
         clientes = int(r.get('total_clientes', 0) or 0)
         qtd_gd = int(r.get('qtd_total_gd', 0) or 0)
         
-        # Calcula demanda média e razão R (nova fórmula Irandi)
         demanda_media_kw = (consumo * 1000) / 8760 if consumo > 0 else 0
         razao_r = potencia / demanda_media_kw if demanda_media_kw > 0 else 0
         
-        # Nova classificação: R < 0.4 = Normal, 0.4 <= R <= 1.0 = Médio, R > 1.0 = Crítico
         if razao_r < 0.4:
             criticidade = "NORMAL"
         elif razao_r <= 1.0:
@@ -582,11 +569,9 @@ def get_pdf_data(
             'razao_r': razao_r
         })
     
-    # Ordena por criticidade
     ordem = {'CRÍTICO': 0, 'MÉDIO': 1, 'NORMAL': 2}
     ranking_data.sort(key=lambda x: (ordem.get(x['criticidade'], 3), -x['razao_r']))
     
-    # Formata ranking
     ranking_formatted = []
     for i, item in enumerate(ranking_data[:10], 1):
         ranking_formatted.append({
@@ -601,7 +586,7 @@ def get_pdf_data(
     
     return {
         'pdf_data': {
-            'logo_b64': None,  # Pode ser preenchido com logo em base64
+            'logo_b64': None,  
             'header': {
                 'report_number': datetime.now().strftime("%Y%m%d%H%M%S"),
                 'report_date': datetime.now().strftime("%d/%m/%Y"),
@@ -650,14 +635,11 @@ def generate_pdf(
         logger.error("xhtml2pdf não instalado. Execute: pip install xhtml2pdf")
         raise ImportError("xhtml2pdf não está instalado. Adicione 'xhtml2pdf' ao requirements.txt")
     
-    # Seções padrão
     if secoes is None:
         secoes = ["consumo", "gd", "comparacao", "ranking"]
     
-    # Busca dados
     data_raw = get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
     
-    # Gera diagnóstico com IA (se configurada)
     if "diagnostico" in secoes:
         try:
             logger.info("Gerando diagnóstico com IA...")
@@ -669,7 +651,6 @@ def generate_pdf(
     
     data = data_raw
     
-    # Adiciona controle de seções
     data['secoes'] = {
         'consumo': 'consumo' in secoes,
         'gd': 'gd' in secoes,
@@ -677,7 +658,6 @@ def generate_pdf(
         'ranking': 'ranking' in secoes
     }
     
-    # Carrega logo em base64
     logo_path = os.path.join(os.path.dirname(__file__), 'reports', 'logo.png')
     if os.path.exists(logo_path):
         try:
@@ -692,7 +672,6 @@ def generate_pdf(
         logger.warning(f"Logo não encontrada: {logo_path}")
         data['pdf_data']['logo_b64'] = None
     
-    # Carrega template
     template_dir = os.path.join(os.path.dirname(__file__), 'templates')
     
     if not os.path.exists(template_dir):
@@ -707,7 +686,6 @@ def generate_pdf(
     else:
         raise FileNotFoundError(f"Template não encontrado: {template_path}")
     
-    # Gera PDF usando xhtml2pdf
     pdf_buffer = io.BytesIO()
     
     try:
@@ -730,7 +708,6 @@ def generate_pdf(
     return pdf_buffer.getvalue()
 
 
-# Mantém compatibilidade com função antiga
 def get_report_data(
     classes_selecionadas: List[str],
     metricas_selecionadas: List[str],
@@ -741,7 +718,6 @@ def get_report_data(
     return get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
 
 
-# Exporta constantes para uso na UI
 __all__ = [
     'CLASSES_DISPONIVEIS',
     'METRICAS_DISPONIVEIS',
