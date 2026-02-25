@@ -117,7 +117,7 @@ def analisar_mercado():
     
     try:
         cols_ene = [f'ENE_{i:02d}' for i in range(1, 13)]
-        cols_leitura = ['UNI_TR_MT', 'CLAS_SUB', 'PN_CON'] + cols_ene
+        cols_leitura = ['UNI_TR_MT', 'CLAS_SUB', 'PN_CON', 'DAT_CON'] + cols_ene
         
         df_uc = carregar_consumidores(colunas=cols_leitura, ignore_geometry=True)
 
@@ -140,6 +140,14 @@ def analisar_mercado():
 
             if 'PN_CON' in df_cons_final.columns:
                 mapa_pn_classe = df_cons_final[['PN_CON', 'TIPO']].drop_duplicates(subset='PN_CON').set_index('PN_CON')['TIPO']
+
+            # Tratamento de Data para Série Temporal
+            if 'DAT_CON' in df_cons_final.columns:
+                # Converte para datetime e extrai YYYY-MM
+                df_cons_final['DATA_CONEXAO'] = pd.to_datetime(df_cons_final['DAT_CON'], errors='coerce', dayfirst=True)
+                df_cons_final['ANO_MES'] = df_cons_final['DATA_CONEXAO'].dt.to_period('M').astype(str)
+                # Remove nulos caso a data seja inválida para a série temporal
+                df_cons_final['ANO_MES'] = df_cons_final['ANO_MES'].replace('NaT', None)
             
             total_ucs = len(df_uc)
             total_match = len(df_cons_final)
@@ -155,7 +163,7 @@ def analisar_mercado():
     print("4. Processando GD...")
     df_gd_final = pd.DataFrame()
     try:
-        df_gd = carregar_geracao_gd(colunas=['UNI_TR_MT', 'POT_INST', 'PN_CON'], ignore_geometry=True)
+        df_gd = carregar_geracao_gd(colunas=['UNI_TR_MT', 'POT_INST', 'PN_CON', 'DAT_CON'], ignore_geometry=True)
         
         if df_gd is not None and not df_gd.empty:
             df_gd['POT_INST'] = pd.to_numeric(df_gd['POT_INST'], errors='coerce').fillna(0.0)
@@ -174,6 +182,12 @@ def analisar_mercado():
                 df_gd_final['TIPO'] = df_gd_final['PN_CON'].map(mapa_pn_classe).fillna('Outros')
             else:
                 df_gd_final['TIPO'] = 'Outros'
+
+            # Tratamento de Data para Série Temporal
+            if 'DAT_CON' in df_gd_final.columns:
+                df_gd_final['DATA_CONEXAO'] = pd.to_datetime(df_gd_final['DAT_CON'], errors='coerce', dayfirst=True)
+                df_gd_final['ANO_MES'] = df_gd_final['DATA_CONEXAO'].dt.to_period('M').astype(str)
+                df_gd_final['ANO_MES'] = df_gd_final['ANO_MES'].replace('NaT', None)
 
             print(f"   -> {len(df_gd_final)} unidades de GD vinculadas.")
             del df_gd
@@ -212,6 +226,67 @@ def analisar_mercado():
             qtd=('TRAFO_LINK', 'count'),
             potencia=('POT_INST', 'sum')
         ).reset_index()
+
+    # --- Agregacao temporal para crescimento history (cumsum) ---
+    print("   -> Gerando histórico de crescimento temporal...")
+    df_temporal_sub = {}
+
+    # Consumidores temporal
+    if not df_cons_final.empty and 'ANO_MES' in df_cons_final.columns:
+        df_validos = df_cons_final.dropna(subset=['ANO_MES'])
+        if not df_validos.empty:
+            cons_tempo = df_validos.groupby(['ID_SUBESTACAO', 'ANO_MES']).size().reset_index(name='novos_clientes')
+            cons_tempo = cons_tempo.sort_values(['ID_SUBESTACAO', 'ANO_MES'])
+            cons_tempo['clientes_cumulativo'] = cons_tempo.groupby('ID_SUBESTACAO')['novos_clientes'].cumsum()
+            
+            for sub, group in cons_tempo.groupby('ID_SUBESTACAO'):
+                if sub not in df_temporal_sub: df_temporal_sub[sub] = {}
+                df_temporal_sub[sub]['clientes'] = group[['ANO_MES', 'clientes_cumulativo']].set_index('ANO_MES').to_dict()['clientes_cumulativo']
+
+    # GD temporal
+    if not df_gd_final.empty and 'ANO_MES' in df_gd_final.columns:
+        df_gd_validos = df_gd_final.dropna(subset=['ANO_MES'])
+        if not df_gd_validos.empty:
+            gd_tempo = df_gd_validos.groupby(['ID_SUBESTACAO', 'ANO_MES']).agg(
+                novas_unidades=('TRAFO_LINK', 'count'),
+                nova_potencia=('POT_INST', 'sum')
+            ).reset_index()
+            gd_tempo = gd_tempo.sort_values(['ID_SUBESTACAO', 'ANO_MES'])
+            gd_tempo['mmgd_cumulativo'] = gd_tempo.groupby('ID_SUBESTACAO')['novas_unidades'].cumsum()
+            gd_tempo['potencia_cumulativa'] = gd_tempo.groupby('ID_SUBESTACAO')['nova_potencia'].cumsum()
+            
+            for sub, group in gd_tempo.groupby('ID_SUBESTACAO'):
+                if sub not in df_temporal_sub: df_temporal_sub[sub] = {}
+                df_temporal_sub[sub]['mmgd'] = group[['ANO_MES', 'mmgd_cumulativo']].set_index('ANO_MES').to_dict()['mmgd_cumulativo']
+                df_temporal_sub[sub]['potencia'] = group[['ANO_MES', 'potencia_cumulativa']].set_index('ANO_MES').to_dict()['potencia_cumulativa']
+
+    # Consolida chaves de tempo e preenche buracos
+    for sub, mod_data in df_temporal_sub.items():
+        todos_meses = set()
+        for metric, dict_mes in mod_data.items():
+            todos_meses.update(dict_mes.keys())
+        
+        meses_ordenados = sorted(list(todos_meses))
+        
+        consolidado = []
+        last_cli = 0
+        last_mmgd = 0
+        last_pot = 0.0
+        
+        for mes in meses_ordenados:
+            last_cli = mod_data.get('clientes', {}).get(mes, last_cli)
+            last_mmgd = mod_data.get('mmgd', {}).get(mes, last_mmgd)
+            last_pot = mod_data.get('potencia', {}).get(mes, last_pot)
+            
+            consolidado.append({
+                "mes": mes,
+                "clientes": last_cli,
+                "unidades_mmgd": last_mmgd,
+                "potencia_kw": float(round(last_pot, 2))
+            })
+            
+        df_temporal_sub[sub] = consolidado
+    # -------------------------------------------------------------
 
     for idx, row in gdf_voronoi.iterrows():
         sub_id = row['COD_ID_CLEAN']
@@ -261,6 +336,7 @@ def analisar_mercado():
                 "detalhe_por_classe": {}
             },
             "perfil_consumo": {},
+            "evolucao_temporal": df_temporal_sub.get(sub_id, []),
             "geometry": geom_dict
         }
         

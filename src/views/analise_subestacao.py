@@ -303,6 +303,75 @@ def render_view():
 
         st.divider()
 
+        st.subheader("Evolução Histórica (Série Temporal)")
+        evolucao = dados_raw.get("evolucao_temporal", [])
+        
+        if evolucao:
+            df_evolucao = pd.DataFrame(evolucao)
+            df_evolucao['mes'] = pd.to_datetime(df_evolucao['mes'])
+            
+            filtro_hist = st.radio(
+                "Métrica Histórica:",
+                ["Crescimento de Clientes", "Crescimento de Unidades MMGD", "Evolução da Potência (kW)"],
+                horizontal=True,
+                key="filtro_historico"
+            )
+            
+            if filtro_hist == "Crescimento de Clientes":
+                col_hist = "clientes"
+                titulo_h = "Total de Clientes Acumulados"
+                sufixo_h = ""
+            elif filtro_hist == "Crescimento de Unidades MMGD":
+                col_hist = "unidades_mmgd"
+                titulo_h = "Unidades MMGD Acumuladas"
+                sufixo_h = ""
+            else:
+                col_hist = "potencia_kw"
+                titulo_h = "Potência Instalada (kW)"
+                sufixo_h = " kW"
+
+            if col_hist in ["clientes", "unidades_mmgd"]:
+                text_hist = [f"{int(v)}{sufixo_h}" for v in df_evolucao[col_hist]]
+                hover_th = '<b>%{x|%b/%Y}</b><br>' + titulo_h + ': %{y}<extra></extra>'
+            else:
+                text_hist = [f"{formatar_br(v)}{sufixo_h}" for v in df_evolucao[col_hist]]
+                hover_th = '<b>%{x|%b/%Y}</b><br>' + titulo_h + ': %{y:,.2f}<extra></extra>'
+
+            fig_hist = go.Figure()
+            fig_hist.add_trace(go.Scatter(
+                x=df_evolucao['mes'],
+                y=df_evolucao[col_hist],
+                fill='tozeroy',
+                mode='lines+markers',
+                line=dict(color='#007bff', width=3),
+                marker=dict(size=6, color='white', line=dict(width=2, color='#007bff')),
+                hovertemplate=hover_th
+            ))
+
+            data_max = df_evolucao['mes'].max()
+            data_min_default = data_max - pd.DateOffset(years=10)
+
+            fig_hist.update_layout(
+                height=350,
+                margin=dict(l=10, r=10, t=20, b=10),
+                yaxis_title=titulo_h,
+                xaxis=dict(
+                    title="Mês",
+                    tickformat="%m/%Y",
+                    range=[data_min_default, data_max],
+                    rangeslider=dict(visible=True)
+                ),
+                showlegend=False
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+            st.caption("Nota: Gráfico de dados cumulativos desde a primeira conexão (mês a mês).")
+            
+        else:
+            st.info("Nenhuma série temporal de crescimento registrada para esta Subestação.")
+
+        st.divider()
+
         st.header("Relatório Técnico & Ações")
         col_table, col_actions = st.columns([2, 1])
 

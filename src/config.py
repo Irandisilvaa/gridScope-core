@@ -18,6 +18,10 @@ if _https_proxy:
     os.environ["HTTPS_PROXY"] = _https_proxy
     os.environ["https_proxy"] = _https_proxy
 
+# Bypass de proxy para comunicação local (API FastAPI, etc)
+os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
+os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
+
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5433/gridscope_local")
 
 CIDADE_ALVO = os.getenv("CIDADE_ALVO", "Aracaju, Sergipe, Brazil")
