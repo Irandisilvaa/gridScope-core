@@ -3,13 +3,7 @@ import sys
 import os
 import base64
 from pathlib import Path
-
-st.set_page_config(
-    page_title="GridScope - Inteligência Energética",
-    page_icon="",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+from PIL import Image
 
 CURRENT_FILE_DIR = Path(__file__).parent.absolute()
 
@@ -22,7 +16,20 @@ if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
 path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
+path_icon = BASE_DIR / "src" / "icons" / "logo.png"
 path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
+
+try:
+    img_icon = Image.open(path_icon)
+except Exception:
+    img_icon = None
+
+st.set_page_config(
+    page_title="GridScope - Inteligência Energética",
+    page_icon=img_icon,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 if 'pagina_atual' not in st.session_state:
     st.session_state['pagina_atual'] = "Visão Geral"
@@ -189,7 +196,9 @@ avatar_html = f"""
 """
 st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
-st.sidebar.button("Conversar com Helios", on_click=set_page, args=("Chat IA",))
+col1, col2, col3 = st.sidebar.columns([1, 20, 1])
+with col2:
+    st.button("Conversar com Helios", on_click=set_page, args=("Chat IA",), use_container_width=True)
 
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
