@@ -6,7 +6,7 @@ from pathlib import Path
 
 st.set_page_config(
     page_title="GridScope - Inteligência Energética",
-    page_icon="⚡",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )

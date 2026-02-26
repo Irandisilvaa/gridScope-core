@@ -27,7 +27,7 @@ CAMADAS_ALVO = {
 }
 
 def get_database_engine():
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5433/gridscope_local")
+    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
     return create_engine(db_url, isolation_level="AUTOCOMMIT")
 
 def limpar_dados_antigos(engine):

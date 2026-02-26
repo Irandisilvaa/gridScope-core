@@ -10,7 +10,7 @@ from config import CIDADE_ALVO
 
 def get_engine():
     # Ajuste a senha/porta se necessário, conforme seu .env ou configuração local
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5433/gridscope_local")
+    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
     return create_engine(db_url)
 
 def auditar_subestacoes():

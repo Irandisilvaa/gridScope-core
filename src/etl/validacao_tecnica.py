@@ -19,7 +19,7 @@ logger = logging.getLogger("Auditoria")
 
 def get_database_engine():
     # Ajuste a porta/senha se necessário
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5433/gridscope_local")
+    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
     return create_engine(db_url)
 
 def calcular_validacao():

@@ -179,7 +179,7 @@ def criar_mapa_voronoi_semaforo(gdf, df_mercado):
 
 def render_view():
     """Renderiza a view de Panorama Geral."""
-    st.title("⚡ Panorama Geral do Sistema")
+    st.title("Panorama Geral do Sistema")
     st.markdown("Visão geral de todas as subestações e indicadores agregados")
     
     try:
