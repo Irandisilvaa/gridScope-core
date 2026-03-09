@@ -3,13 +3,7 @@ import sys
 import os
 import base64
 from pathlib import Path
-
-st.set_page_config(
-    page_title="GridScope - Inteligência Energética",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+from PIL import Image
 
 CURRENT_FILE_DIR = Path(__file__).parent.absolute()
 
@@ -22,17 +16,23 @@ if str(BASE_DIR) not in sys.path:
     sys.path.append(str(BASE_DIR))
 
 path_logo = BASE_DIR / "src" / "icons" / "logoGridScope.png"
+path_icon = BASE_DIR / "src" / "icons" / "logo.png"
 path_avatar = BASE_DIR / "src" / "icons" / "helio.png"
 
-print(f"--- DEBUG PATHS ---")
-print(f"Diretório Atual do Arquivo: {CURRENT_FILE_DIR}")
-print(f"Raiz do Projeto Definida (BASE_DIR): {BASE_DIR}")
-print(f"Procurando Logo em: {path_logo}")
-print(f"Existe? {path_logo.exists()}")
-print(f"-------------------")
+try:
+    img_icon = Image.open(path_icon)
+except Exception:
+    img_icon = None
+
+st.set_page_config(
+    page_title="GridScope - Inteligência Energética",
+    page_icon=img_icon,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 if 'pagina_atual' not in st.session_state:
-    st.session_state['pagina_atual'] = "📊 Visão Geral"
+    st.session_state['pagina_atual'] = "Visão Geral"
 
 def get_img_as_base64(file_path):
     if not file_path.exists():
@@ -145,29 +145,24 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- Construção da Sidebar ---
 if path_logo.exists():
     st.sidebar.image(str(path_logo), use_container_width=True)
 else:
-    # Mostra um aviso amigável se não achar
     st.sidebar.warning(f"Logo não encontrado.")
 
 st.sidebar.markdown("<br>", unsafe_allow_html=True) 
 
-opcoes_menu = ["🔍 Análise por Subestação", "📊 Visão Geral", "📄 Relatórios"]
+opcoes_menu = ["Visão Geral", "Análise por Subestação", "Relatórios"]
 
-# --- Função de Navegação Centralizada ---
 def set_page(page_name=None):
     if page_name is None:
         page_name = st.session_state.get('nav_radio')
     
     st.session_state['pagina_atual'] = page_name
     
-    # Se a página não estiver no menu (ex: Chat), limpa a seleção do radio
     if page_name not in opcoes_menu and 'nav_radio' in st.session_state:
         st.session_state['nav_radio'] = None
 
-# Callback para o radio button
 def update_nav():
     set_page(st.session_state['nav_radio'])
 
@@ -190,7 +185,6 @@ navegacao = st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
 
-# Renderiza Avatar HTML apenas se a imagem foi carregada
 avatar_html = f"""
     <div class="profile-container">
         <div class="avatar-frame">
@@ -202,12 +196,13 @@ avatar_html = f"""
 """
 st.sidebar.markdown(avatar_html, unsafe_allow_html=True)
 
-st.sidebar.button("✨ Conversar com Helios", on_click=set_page, args=("Chat IA",))
+col1, col2, col3 = st.sidebar.columns([1, 20, 1])
+with col2:
+    st.button("Conversar com Helios", on_click=set_page, args=("Chat IA",), use_container_width=True)
 
 
 st.sidebar.caption("GridScope v4.9 Enterprise")
 
-# --- Roteamento de Páginas ---
 pagina = st.session_state['pagina_atual']
 
 if pagina == "Chat IA":
@@ -225,21 +220,21 @@ if pagina == "Chat IA":
     except Exception as e:
         st.error(f"Erro no Chat: {e}")
 
-elif pagina == "🔍 Análise por Subestação":
+elif pagina == "Análise por Subestação":
     try:
         if hasattr(analise_subestacao, 'render_view'):
             analise_subestacao.render_view()
     except Exception as e:
         st.error(f"Erro em Análise: {e}")
 
-elif pagina == "📊 Visão Geral":
+elif pagina == "Visão Geral":
     try:
         if hasattr(visao_geral, 'render_view'):
             visao_geral.render_view()
     except Exception as e:
         st.error(f"Erro em Visão Geral: {e}")
 
-elif pagina == "📄 Relatórios":
+elif pagina == "Relatórios":
     try:
         if hasattr(relatorios, 'render_view'):
             relatorios.render_view()

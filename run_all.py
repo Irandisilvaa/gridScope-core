@@ -80,7 +80,7 @@ def verificar_banco_populado():
     from sqlalchemy import create_engine, text
     
     try:
-        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5433/gridscope_local")
+        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5435/gridscope_local")
         engine = create_engine(db_url)
         
         with engine.connect() as conn:
@@ -122,10 +122,11 @@ def run_pipeline():
             logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
             sys.exit(1)
 
-        logger.info("🗺️ Gerando territórios Voronoi...")
-        run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
+    logger.info("🗺️ Gerando territórios Voronoi...")
+    run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
 
-        run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
+    logger.info("📊 Atualizando análise de mercado...")
+    run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
 
     logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
     run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest")

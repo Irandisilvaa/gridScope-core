@@ -301,5 +301,4 @@ def render_view():
         ```
         """)
     
-    # Footer
     st.caption(f"GridScope Enterprise v5.0 | Central de Exportação | {datetime.now().strftime('%d/%m/%Y')}")

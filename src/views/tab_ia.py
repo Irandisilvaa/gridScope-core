@@ -73,7 +73,7 @@ def render_tab_ia(subestacao_obj, data_analise, dados_gd):
     """
     Renderiza todo o conteúdo da aba de Inteligência Artificial.
     """
-    st.subheader(f"☀️ Simulação Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
+    st.subheader(f"Simulação Duck Curve: {data_analise.strftime('%d/%m/%Y')}")
 
     identificador = (subestacao_obj.get("NOME") or 
                      subestacao_obj.get("nome") or 
@@ -146,16 +146,16 @@ def render_tab_ia(subestacao_obj, data_analise, dados_gd):
                 else:
                     st.success(f"**DIAGNÓSTICO:** {analise_texto}", icon="✅")
 
-                st.markdown("##### 🕵️ Detalhar Consumo por Classe")
+                st.markdown("##### Detalhar Consumo por Classe")
                 col_f1, col_f2, col_f3 = st.columns(3)        
                 padrao_res = True if (dna_atual and fator_res > 0.4) else False
                 padrao_ind = True if (dna_atual and fator_ind > 0.4) else False     
-                ver_res = col_f1.checkbox("🏠 Residencial", value=padrao_res)
-                ver_com = col_f2.checkbox("🏢 Comercial", value=False)
-                ver_ind = col_f3.checkbox("🏭 Industrial", value=padrao_ind)
+                ver_res = col_f1.checkbox("Residencial", value=padrao_res)
+                ver_com = col_f2.checkbox("Comercial", value=False)
+                ver_ind = col_f3.checkbox("Industrial", value=padrao_ind)
 
                 st.markdown("**Opções de exibição**")
-                classes_em_graf_separado = st.checkbox("📊 Mostrar classes em gráfico separado (demanda absoluta kW)", value=False)
+                classes_em_graf_separado = st.checkbox("Mostrar classes em gráfico separado (demanda absoluta kW)", value=False)
 
             
                 timeline = res_ia.get('timeline', [f"{h:02d}:00" for h in range(24)])

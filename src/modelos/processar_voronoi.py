@@ -10,7 +10,6 @@ from shapely.ops import voronoi_diagram
 from shapely.geometry import box
 from sqlalchemy import create_engine
 
-# --- CONFIGURAÇÃO INICIAL ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     from config import CIDADE_ALVO, DIR_RAIZ
@@ -23,13 +22,12 @@ except ImportError:
 NOME_IMAGEM_SAIDA = "territorios_voronoi.png"
 NOME_JSON_SAIDA = "subestacoes_logicas.geojson"
 
-# Configuração de Logs
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("GeoProcessor")
 
 def get_database_engine():
     """Conexão resiliente com o banco."""
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5433/gridscope_local")
+    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
     return create_engine(db_url, isolation_level="AUTOCOMMIT")
 
 def gerar_cor_unica(texto_seed):
@@ -42,10 +40,7 @@ def obter_limite_municipal(cidade_alvo):
     logger.info(f"Obtendo limites oficiais de {cidade_alvo}...")
     try:
         gdf_cidade = ox.geocode_to_gdf(cidade_alvo)
-        # Projeção UTM (Sirgas 2000 / UTM zone 24S) para precisão métrica
         gdf_cidade = gdf_cidade.to_crs(epsg=31984)
-        
-        # CORREÇÃO TÉCNICA: Garante que a geometria não tenha nós cruzados
         gdf_cidade['geometry'] = gdf_cidade.geometry.make_valid()
         return gdf_cidade
     except Exception as e:
@@ -56,10 +51,8 @@ def carregar_trafos(gdf_limite):
     """Carrega transformadores garantindo margem de segurança."""
     engine = get_database_engine()
     
-    # Pega bounds em WGS84 para a query SQL
     bbox = gdf_limite.to_crs(epsg=4326).total_bounds
     
-    # Query otimizada: Pega trafos numa área levemente maior que a cidade
     sql = f"""
     SELECT 
         t."SUB" AS cod_id_sub,
@@ -86,34 +79,25 @@ def processar_voronoi_robusto(gdf_limite, gdf_pontos):
     """
     logger.info(f"Calculando topologia para {len(gdf_pontos)} pontos...")
 
-    # 1. ENVELOPE INFINITO: Cria uma área de trabalho gigante (20km de borda)
-    # Isso garante que as células das bordas não "fechem" antes do limite da cidade
     envelope_expandido = gdf_limite.envelope.buffer(20000).union_all()
     
-    # 2. GERAÇÃO DO VORONOI
-    # Usamos todos os pontos disponíveis no buffer
     pontos_uniao = gdf_pontos.union_all()
     voronoi_bruto = voronoi_diagram(pontos_uniao, envelope=envelope_expandido)
     
     gdf_voronoi = gpd.GeoDataFrame(geometry=list(voronoi_bruto.geoms), crs=gdf_limite.crs)
     
-    # 3. SPATIAL JOIN (Atribuição)
-    # Associa cada polígono gigante ao seu transformador dono
     gdf_mapeado = gpd.sjoin(gdf_voronoi, gdf_pontos, how="inner", predicate="contains")
     
-    # 4. DISSOLVE (Fusão)
-    # Junta os pedaços da mesma subestação
+    gdf_territorios = gdf_mapeado.dissolve(by="cod_id_sub", aggfunc={"nome_sub": "first"}).reset_index()
+    gdf_territorios = gdf_territorios.rename(columns={"cod_id_sub": "COD_ID", "nome_sub": "NOM"})
     gdf_territorios = gdf_mapeado.dissolve(by="cod_id_sub", aggfunc={"nome_sub": "first"}).reset_index()
     gdf_territorios = gdf_territorios.rename(columns={"cod_id_sub": "COD_ID", "nome_sub": "NOM"})
     
-    # 5. RECORTE BOOLEANO (O Segredo da Cobertura Total)
-    # Cortamos os territórios "infinitos" exatamente no formato da cidade
     logger.info("Aplicando recorte de precisão (Cookie Cutter)...")
     gdf_final = gpd.clip(gdf_territorios, gdf_limite)
     
-    # Limpezas finais
     gdf_final = gdf_final[~gdf_final.is_empty]
-    # Explode multipartes para garantir que ilhas sejam polígonos válidos, mas mantém o mesmo ID
+    gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
     gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
     
     return gdf_final
@@ -121,16 +105,12 @@ def processar_voronoi_robusto(gdf_limite, gdf_pontos):
 def main():
     print(f"--- INICIANDO PROCESSAMENTO: {CIDADE_ALVO} ---")
     
-    # 1. Obter e Preparar Limites
     limite = obter_limite_municipal(CIDADE_ALVO)
     
-    # 2. Carregar Dados
     pontos = carregar_trafos(limite)
     
-    # 3. Processamento Core
     territorios = processar_voronoi_robusto(limite, pontos)
     
-    # 4. Exportação
     territorios_wgs84 = territorios.to_crs(epsg=4326)
     
     print("Salvando no Banco de Dados...")
@@ -145,15 +125,12 @@ def main():
     territorios_wgs84.to_file(path_json, driver="GeoJSON")
     print(f"Arquivo GeoJSON gerado: {path_json}")
 
-    # 5. Validação Visual
     print("Gerando Mapa de Validação...")
     try:
         fig, ax = plt.subplots(figsize=(14, 14))
         
-        # Fundo: Limite oficial em preto grosso (para ver se sobra algo fora)
         limite.plot(ax=ax, facecolor='none', edgecolor='black', linewidth=4, zorder=5)
         
-        # Territórios
         for _, row in territorios.iterrows():
             gpd.GeoSeries(row.geometry).plot(
                 ax=ax,
@@ -164,7 +141,6 @@ def main():
                 zorder=3
             )
             
-            # Label inteligente: Só coloca nome se o pedaço for grande
             if row.geometry.area > 80000: 
                 centro = row.geometry.centroid
                 ax.annotate(

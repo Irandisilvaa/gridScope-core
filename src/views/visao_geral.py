@@ -164,7 +164,7 @@ def criar_mapa_voronoi_semaforo(gdf, df_mercado):
                 <b>Clientes:</b> {info['clientes']:,}<br>
                 <b>Consumo:</b> {info['consumo']:.2f} MWh<br>
                 <b>Potência GD:</b> {info['potencia']:.2f} kW<br>
-                <b>Painéis:</b> {info['paineis']}
+                <b>Unidades MMGD:</b> {info['paineis']}
             </div>
             """
             
@@ -179,7 +179,7 @@ def criar_mapa_voronoi_semaforo(gdf, df_mercado):
 
 def render_view():
     """Renderiza a view de Panorama Geral."""
-    st.title("⚡ Panorama Geral do Sistema")
+    st.title("Panorama Geral do Sistema")
     st.markdown("Visão geral de todas as subestações e indicadores agregados")
     
     try:
@@ -192,7 +192,7 @@ def render_view():
         gdf, dados_lista = carregar_dados_cache()
         
         if gdf is None or not dados_lista:
-            st.error("❌ Falha ao carregar dados. Verifique se o ETL foi executado.")
+            st.error("Falha ao carregar dados. Verifique se o ETL foi executado.")
             st.stop()
         
         df_mercado = pd.DataFrame(dados_lista)
@@ -216,48 +216,55 @@ def render_view():
         if 'id_tecnico' in df_mercado.columns:
             ids_validos = df_mercado['id_tecnico'].astype(str).tolist()
             gdf = gdf[gdf['COD_ID'].astype(str).isin(ids_validos)]
-        if total_antes > total_depois:
-            st.toast(f"🧹 Filtro aplicado: {total_antes - total_depois} subestações inconsistentes removidas.")
 
     metricas = agregar_metricas_totais(df_mercado)
     
-    st.header("📊 Indicadores Gerais")
+    st.header("Indicadores Gerais")
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     
     with col1:
         st.metric(
-            label="🏢 Subestações",
+            label="Subestações",
             value=f"{metricas['total_subestacoes']}"
         )
     
     with col2:
         st.metric(
-            label="👥 Clientes",
+            label="Clientes",
             value=f"{metricas['total_clientes']:,}".replace(",", ".")
         )
     
     with col3:
         st.metric(
-            label="☀️ Unidades MMGD",
+            label="Unidades MMGD",
             value=f"{metricas['total_paineis']:,}".replace(",", ".")
         )
     
     with col4:
         st.metric(
-            label="⚡ Potência Instalada",
-            value=f"{metricas['total_potencia_kw']:,.0f} kW".replace(",", ".")
+            label="Potência Instalada",
+            value=f"{metricas['total_potencia_kw']:,.2f} kW".replace(",", "X").replace(".", ",").replace("X", ".")
+        )
+    
+    with col5:
+        razao_clientes_mmgd = metricas['total_clientes'] / metricas['total_paineis'] if metricas['total_paineis'] > 0 else 0
+        st.metric(
+            label="Clientes/MMGD",
+            value=f"{razao_clientes_mmgd:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+            help="Relação entre o total de clientes e unidades de MMGD. Indica a densidade de penetração da geração distribuída."
         )
     
     st.divider()
     
-    st.header("🗺️ Mapa de Criticidade das Subestações")
+    st.header("Mapa de Criticidade das Subestações")
     
     st.markdown("""
-    **Legenda de Criticidade** (R = P_GD / D_Média):
-    - 🟢 **NORMAL** (R < 40%): Zona de Segurança - Geração absorvida pela carga base
-    - 🟡 **MÉDIO** (40% ≤ R ≤ 100%): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
-    - 🔴 **CRÍTICO** (R > 100%): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
+    **Legenda de Criticidade** ($R = \\frac{P_{GD}}{D_{Média}}$):
+    
+    - 🟢 **NORMAL** ($R < 40\\%$): Zona de Segurança - Geração absorvida pela carga base
+    - 🟡 **MÉDIO** ($40\\% \\leq R \\leq 100\\%$): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
+    - 🔴 **CRÍTICO** ($R > 100\\%$): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
     """)
     
     try:
@@ -270,7 +277,7 @@ def render_view():
     
     st.divider()
     
-    st.header("📋 Resumo por Subestação")
+    st.header("Resumo por Subestação")
     
     tabela_dados = []
     
@@ -304,9 +311,10 @@ def render_view():
             'Subestação': nome,
             'ID': id_tec,
             'Clientes': clientes,
-            'Consumo (MWh)': round(consumo, 2),
-            'Potência GD (kW)': round(potencia, 2),
-            'Painéis': paineis,
+            'Consumo (MWh)': f"{consumo:,.2f} MWh".replace(",", "X").replace(".", ",").replace("X", "."),
+            'Potência GD (kW)': f"{potencia:,.2f} kW".replace(",", "X").replace(".", ",").replace("X", "."),
+            '_potencia_raw': potencia,
+            'Unidades MMGD': paineis,
             'Status': nivel
         })
     
@@ -325,15 +333,16 @@ def render_view():
             else:
                 return 'background-color: #28a745; color: white'
         
+        colunas_visiveis = [c for c in df_tabela.columns if not c.startswith('_')]
         st.dataframe(
-            df_tabela.style.applymap(colorir_status, subset=['Status']),
+            df_tabela[colunas_visiveis].style.applymap(colorir_status, subset=['Status']),
             use_container_width=True,
             hide_index=True
         )
         
         csv = df_tabela.to_csv(index=False, encoding='utf-8-sig')
         st.download_button(
-            label="📥 Baixar Relatório Completo (CSV)",
+            label="Baixar Relatório Completo (CSV)",
             data=csv,
             file_name="panorama_geral_subestacoes.csv",
             mime="text/csv",
@@ -344,7 +353,7 @@ def render_view():
     
     st.divider()
     
-    st.header("📈 Estatísticas do Sistema")
+    st.header("Estatísticas do Sistema")
     
     col_stat1, col_stat2 = st.columns(2)
     
@@ -383,7 +392,7 @@ def render_view():
         if not df_tabela.empty:
             df_tabela['Identificacao_Unica'] = df_tabela['Subestação'] + " (ID: " + df_tabela['ID'].astype(str) + ")"
 
-            top5 = df_tabela.nlargest(5, 'Potência GD (kW)')
+            top5 = df_tabela.nlargest(5, '_potencia_raw')
 
             import plotly.express as px
             import random
@@ -403,13 +412,12 @@ def render_view():
                 cores_finais = pool_cores[:]
                 for _ in range(qtde - len(pool_cores)):
                     cores_finais.append("#{:06x}".format(random.randint(0, 0xFFFFFF)))
-            # ---------------------------------------------
 
             fig_barras = go.Figure(data=[go.Bar(
                 x=top5['Identificacao_Unica'], 
-                y=top5['Potência GD (kW)'],
+                y=top5['_potencia_raw'],
                 marker_color=cores_finais,
-                text=top5['Potência GD (kW)'].apply(lambda x: f"{x:,.0f} kW".replace(",", "X").replace(".", ",").replace("X", ".")),
+                text=top5['_potencia_raw'].apply(lambda x: f"{x:,.2f} kW".replace(",", "X").replace(".", ",").replace("X", ".")),
                 textposition='auto',
                 hovertemplate='<b>%{x}</b><br>Potência: %{y:,.2f} kW<extra></extra>'
             )])
@@ -428,10 +436,10 @@ def render_view():
     penetracao_media = (metricas['total_potencia_kw'] * 4.5 * 365 / 1000) / metricas['total_consumo_mwh'] * 100 if metricas['total_consumo_mwh'] > 0 else 0
     
     st.info(f"""
-    **📊 Análise Geral do Sistema:**
+    **Análise Geral do Sistema:**
     - Penetração média de GD: **{penetracao_media:.1f}%**
     - Consumo total anual: **{metricas['total_consumo_mwh']:,.2f} MWh**
     - Capacidade de geração instalada: **{metricas['total_potencia_kw']:,.2f} kW**
     """.replace(",", "."))
     
-    st.caption(f"GridScope v5.0 Enterprise | Dashboard ")
+    st.caption(f"GridScope v2.0 Enterprise | Dashboard ")
