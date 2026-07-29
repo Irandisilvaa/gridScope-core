@@ -262,9 +262,9 @@ def render_view():
     st.markdown("""
     **Legenda de Criticidade** ($R = \\frac{P_{GD}}{D_{Média}}$):
     
-    - 🟢 **NORMAL** ($R < 40\\%$): Zona de Segurança - Geração absorvida pela carga base
-    - 🟡 **MÉDIO** ($40\\% \\leq R \\leq 100\\%$): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
-    - 🔴 **CRÍTICO** ($R > 100\\%$): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
+    - **NORMAL** ($R < 40\\%$): Zona de Segurança - Geração absorvida pela carga base
+    - **MÉDIO** ($40\\% \\leq R \\leq 100\\%$): Zona de Atenção - "Duck Curve" - Regulação dinâmica de tensão necessária
+    - **CRÍTICO** ($R > 100\\%$): Risco de Inversão de Fluxo (*Backfeeding*) para a rede
     """)
     
     try:
@@ -321,6 +321,7 @@ def render_view():
     df_tabela = pd.DataFrame(tabela_dados)
     
     if not df_tabela.empty:
+        df_tabela = df_tabela.drop_duplicates(subset=['ID']).copy()
         ordem_criticidade = {'CRÍTICO': 0, 'MÉDIO': 1, 'NORMAL': 2}
         df_tabela['_ordem'] = df_tabela['Status'].map(ordem_criticidade)
         df_tabela = df_tabela.sort_values('_ordem').drop(columns=['_ordem'])
@@ -427,6 +428,7 @@ def render_view():
                 margin=dict(t=20, b=40, l=20, r=20),
                 xaxis_title="",
                 yaxis_title="Potência (kW)",
+                barmode='group',
                 showlegend=False,
                 xaxis=dict(tickangle=-15) 
             )

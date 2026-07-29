@@ -183,6 +183,75 @@ navegacao = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.markdown("### 📍 Cidade Alvo")
+
+CIDADES_SUGERIDAS = [
+    "Lagarto, Sergipe, Brazil",
+    "Aracaju, Sergipe, Brazil",
+    "Itabaiana, Sergipe, Brazil",
+    "Estância, Sergipe, Brazil",
+    "Nossa Senhora do Socorro, Sergipe, Brazil",
+    "Outra Cidade (Customizada)"
+]
+
+try:
+    from src.config import get_cidade_alvo, atualizar_cidade_alvo, get_city_slug, DIR_DADOS
+except ImportError:
+    from config import get_cidade_alvo, atualizar_cidade_alvo, get_city_slug, DIR_DADOS
+
+cidade_atual_config = get_cidade_alvo()
+
+idx_padrao = 0
+if cidade_atual_config in CIDADES_SUGERIDAS:
+    idx_padrao = CIDADES_SUGERIDAS.index(cidade_atual_config)
+else:
+    idx_padrao = len(CIDADES_SUGERIDAS) - 1
+
+cidade_selecionada = st.sidebar.selectbox(
+    "Município Ativo:",
+    CIDADES_SUGERIDAS,
+    index=idx_padrao,
+    key="select_cidade"
+)
+
+if cidade_selecionada == "Outra Cidade (Customizada)":
+    cidade_input = st.sidebar.text_input("Nome do Município:", value=cidade_atual_config)
+    cidade_final = cidade_input.strip()
+else:
+    cidade_final = cidade_selecionada
+
+if cidade_final and cidade_final != cidade_atual_config:
+    slug = get_city_slug(cidade_final)
+    path_geo = os.path.join(DIR_DADOS, f"voronoi_{slug}.geojson")
+    path_mkt = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
+    
+    has_cache = os.path.exists(path_geo) and os.path.exists(path_mkt)
+    
+    if has_cache:
+        atualizar_cidade_alvo(cidade_final)
+        st.cache_data.clear()
+        st.rerun()
+    else:
+        st.sidebar.info(f"💡 {cidade_final.split(',')[0]} precisa ser processada 1ª vez.")
+        if st.sidebar.button("⚡ Processar Cidade", use_container_width=True):
+            with st.spinner(f"Gerando dados para {cidade_final}..."):
+                atualizar_cidade_alvo(cidade_final)
+                try:
+                    try:
+                        from src.modelos.processar_voronoi import main as processar_voronoi
+                        from src.modelos.analise_mercado import analisar_mercado
+                    except ImportError:
+                        from modelos.processar_voronoi import main as processar_voronoi
+                        from modelos.analise_mercado import analisar_mercado
+
+                    processar_voronoi(cidade_final)
+                    analisar_mercado()
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as err:
+                    st.sidebar.error(f"Erro: {err}")
+
+st.sidebar.markdown("---")
 st.sidebar.markdown("**Assistente Inteligente**")
 
 avatar_html = f"""

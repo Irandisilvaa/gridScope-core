@@ -11,6 +11,12 @@ DIR_LOGS = os.path.join(DIR_RAIZ, "logs")
 
 CAMINHO_MODELO_PKL = os.path.join(DIR_SRC, "ai", "modelo_consumo.pkl")
 
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 PYTHON_EXEC = sys.executable
 
 os.makedirs(DIR_LOGS, exist_ok=True)
@@ -33,6 +39,7 @@ def get_env_with_src():
     env = os.environ.copy()
     original_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{DIR_SRC}{os.pathsep}{original_path}"
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 

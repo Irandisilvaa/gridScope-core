@@ -64,10 +64,12 @@ def render_view():
                 return {}
         return {}
 
+    from config import get_cidade_alvo
+
     @st.cache_data
-    def obter_dados_dashboard():
+    def obter_dados_dashboard(cidade=None):
         try:
-            gdf, dados_lista = carregar_dados_cache()
+            gdf, dados_lista = carregar_dados_cache(cidade)
             if gdf is None or not dados_lista:
                 return None, None
             return gdf, pd.DataFrame(dados_lista)
@@ -75,7 +77,7 @@ def render_view():
             st.error(f"Erro ao processar dados de cache: {e}")
             return None, None
         
-    gdf, df_mercado = obter_dados_dashboard()
+    gdf, df_mercado = obter_dados_dashboard(get_cidade_alvo())
 
     if gdf is None or df_mercado is None:
         st.error("❌ Falha crítica: Dados não carregados. Verifique se o ETL rodou.")

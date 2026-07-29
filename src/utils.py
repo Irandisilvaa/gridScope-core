@@ -91,8 +91,24 @@ def limpar_float(val):
         return 0.0
 
 
-def carregar_dados_cache():
+def carregar_dados_cache(cidade_alvo=None):
     try:
+        from config import get_cidade_alvo, get_city_slug, DIR_DADOS
+        cidade = cidade_alvo or get_cidade_alvo()
+        slug = get_city_slug(cidade)
+        
+        path_geojson = os.path.join(DIR_DADOS, f"voronoi_{slug}.geojson")
+        path_json = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
+        
+        if os.path.exists(path_geojson) and os.path.exists(path_json):
+            try:
+                gdf = gpd.read_file(path_geojson)
+                with open(path_json, 'r', encoding='utf-8') as f:
+                    dados_mercado = json.load(f)
+                return gdf, dados_mercado
+            except Exception as e:
+                logger.warning(f"Aviso ao ler cache específico de {cidade}: {e}")
+
         from database import carregar_voronoi, carregar_subestacoes, carregar_cache_mercado
 
         gdf = carregar_voronoi()

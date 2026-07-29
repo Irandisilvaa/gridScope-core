@@ -8,12 +8,18 @@ import shutil
 from datetime import datetime
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from config import DIR_DADOS, ANEEL_API_HUB_URL, DISTRIBUIDORA_ALVO
 
 def baixar_e_extrair(url, destino):
     print(f"\n ⬇INICIANDO DOWNLOAD...")
     print(f"Origem: {url}")
     
+    os.makedirs(destino, exist_ok=True)
     caminho_zip = os.path.join(destino, "temp_download.zip")
     
     try:

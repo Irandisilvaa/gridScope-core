@@ -4,6 +4,10 @@ import os
 import json
 import warnings
 import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
 import gc
 from shapely.geometry import mapping
 
@@ -288,7 +292,8 @@ def analisar_mercado():
         df_temporal_sub[sub] = consolidado
     # -------------------------------------------------------------
 
-    for idx, row in gdf_voronoi.iterrows():
+    gdf_voronoi_unicos = gdf_voronoi.drop_duplicates(subset=['COD_ID_CLEAN']).copy()
+    for idx, row in gdf_voronoi_unicos.iterrows():
         sub_id = row['COD_ID_CLEAN']
         nome = row.get('NOM', f'Subestação {sub_id}')
 
@@ -387,6 +392,13 @@ def analisar_mercado():
         with open(path_saida, 'w', encoding='utf-8') as f:
             json.dump(relatorio, f, indent=4, ensure_ascii=False)
         print(f"✅ Arquivo JSON salvo em {path_saida}")
+        
+        from config import DIR_DADOS, get_city_slug, get_cidade_alvo
+        slug = get_city_slug(get_cidade_alvo())
+        path_cidade_json = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
+        with open(path_cidade_json, 'w', encoding='utf-8') as f:
+            json.dump(relatorio, f, indent=4, ensure_ascii=False)
+        print(f"✅ Cache de mercado salvo para a cidade: {path_cidade_json}")
     except Exception as e:
         print(f"Erro ao salvar JSON local: {e}")
 

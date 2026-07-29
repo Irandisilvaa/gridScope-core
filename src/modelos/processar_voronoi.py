@@ -90,22 +90,20 @@ def processar_voronoi_robusto(gdf_limite, gdf_pontos):
     
     gdf_territorios = gdf_mapeado.dissolve(by="cod_id_sub", aggfunc={"nome_sub": "first"}).reset_index()
     gdf_territorios = gdf_territorios.rename(columns={"cod_id_sub": "COD_ID", "nome_sub": "NOM"})
-    gdf_territorios = gdf_mapeado.dissolve(by="cod_id_sub", aggfunc={"nome_sub": "first"}).reset_index()
-    gdf_territorios = gdf_territorios.rename(columns={"cod_id_sub": "COD_ID", "nome_sub": "NOM"})
     
     logger.info("Aplicando recorte de precisão (Cookie Cutter)...")
     gdf_final = gpd.clip(gdf_territorios, gdf_limite)
     
     gdf_final = gdf_final[~gdf_final.is_empty]
-    gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
-    gdf_final = gdf_final.explode(index_parts=False).reset_index(drop=True)
+    gdf_final = gdf_final.dissolve(by="COD_ID", aggfunc={"NOM": "first"}).reset_index()
     
     return gdf_final
 
-def main():
-    print(f"--- INICIANDO PROCESSAMENTO: {CIDADE_ALVO} ---")
+def main(cidade_alvo=None):
+    cidade = cidade_alvo or os.getenv("CIDADE_ALVO", CIDADE_ALVO)
+    print(f"--- INICIANDO PROCESSAMENTO: {cidade} ---")
     
-    limite = obter_limite_municipal(CIDADE_ALVO)
+    limite = obter_limite_municipal(cidade)
     
     pontos = carregar_trafos(limite)
     
@@ -123,6 +121,16 @@ def main():
 
     path_json = os.path.join(DIR_RAIZ, NOME_JSON_SAIDA)
     territorios_wgs84.to_file(path_json, driver="GeoJSON")
+    
+    try:
+        from config import DIR_DADOS, get_city_slug
+        slug = get_city_slug(cidade)
+        path_cidade_json = os.path.join(DIR_DADOS, f"voronoi_{slug}.geojson")
+        territorios_wgs84.to_file(path_cidade_json, driver="GeoJSON")
+        print(f"GeoJSON salvo para cache da cidade: {path_cidade_json}")
+    except Exception as err:
+        logger.warning(f"Erro ao salvar GeoJSON específico da cidade: {err}")
+        
     print(f"Arquivo GeoJSON gerado: {path_json}")
 
     print("Gerando Mapa de Validação...")

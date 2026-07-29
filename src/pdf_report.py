@@ -105,13 +105,13 @@ def _get_neighborhood_from_coords(substation_id: str) -> str:
         gdf_voronoi = carregar_voronoi()
         
         if gdf_voronoi is None or gdf_voronoi.empty:
-            return "Aracaju - SE"
+            return CIDADE_ALVO
         
         # Filtra pelo COD_ID
         gdf_filtered = gdf_voronoi[gdf_voronoi['COD_ID'].astype(str) == str(substation_id)]
         
         if gdf_filtered.empty:
-            return "Aracaju - SE"
+            return CIDADE_ALVO
         
         # Obtém o centróide da geometria
         centroid = gdf_filtered.geometry.centroid.iloc[0]
