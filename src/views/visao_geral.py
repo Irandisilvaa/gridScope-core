@@ -444,4 +444,4 @@ def render_view():
     - Capacidade de geração instalada: **{metricas['total_potencia_kw']:,.2f} kW**
     """.replace(",", "."))
     
-    st.caption(f"GridScope v2.0 Enterprise | Dashboard ")
+    st.caption(f"GridScope | Dashboard ")

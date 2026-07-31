@@ -301,4 +301,4 @@ def render_view():
         ```
         """)
     
-    st.caption(f"GridScope Enterprise v5.0 | Central de Exportação | {datetime.now().strftime('%d/%m/%Y')}")
+    st.caption(f"GridScope | Central de Exportação | {datetime.now().strftime('%d/%m/%Y')}")

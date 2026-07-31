@@ -183,7 +183,7 @@ navegacao = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
-st.sidebar.markdown("### 📍 Cidade Alvo")
+st.sidebar.markdown("### Cidade Alvo")
 
 CIDADES_SUGERIDAS = [
     "Lagarto, Sergipe, Brazil",
@@ -270,7 +270,7 @@ with col2:
     st.button("Conversar com Helios", on_click=set_page, args=("Chat IA",), use_container_width=True)
 
 
-st.sidebar.caption("GridScope v4.9 Enterprise")
+st.sidebar.caption("GridScope")
 
 pagina = st.session_state['pagina_atual']
 

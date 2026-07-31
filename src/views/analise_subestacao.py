@@ -151,11 +151,11 @@ def render_view():
     st.caption(f"ID Técnico: {id_escolhido}")
     
     if penetracao_calc > 25:
-        st.error(f"🚨 **CRITICIDADE ALTA: RISCO DE INVERSÃO DE FLUXO** | Penetração GD: {penetracao_calc:.1f}%")
+        st.error(f"**CRITICIDADE ALTA: RISCO DE INVERSÃO DE FLUXO** | Penetração GD: {penetracao_calc:.1f}%")
     elif penetracao_calc > 15:
-        st.warning(f"⚠️ **ATENÇÃO: NÍVEL DE ALERTA** | Penetração GD: {penetracao_calc:.1f}%")
+        st.warning(f"**ATENÇÃO: NÍVEL DE ALERTA** | Penetração GD: {penetracao_calc:.1f}%")
     else:
-        st.success(f"✅ **OPERACIONAL: REDE ESTÁVEL** | Penetração GD: {penetracao_calc:.1f}%")
+        st.success(f"**OPERACIONAL: REDE ESTÁVEL** | Penetração GD: {penetracao_calc:.1f}%")
 
     st.markdown(f"**Localização:** {CIDADE_ALVO} | **Status:** Conectado")
 
@@ -172,7 +172,7 @@ def render_view():
 
     st.divider()
 
-    tab_visao_geral, tab_ia_render = st.tabs(["📊 Visão Geral", "🧠 Simulação Duck Curve (IA)"])
+    tab_visao_geral, tab_ia_render = st.tabs(["Visão Geral", "Simulação Duck Curve (IA)"])
 
     with tab_visao_geral:
         st.subheader("Área de Cobertura Geográfica")
@@ -396,9 +396,9 @@ def render_view():
             st.write(f"**Penetração GD:** {penetracao_calc:.1f}%")
             
             if penetracao_calc > 25:
-                st.warning("⚠️ Risco de inversão de fluxo.")
+                st.warning("Risco de inversão de fluxo.")
             else:
-                st.success("✅ **Rede Estável:** Capacidade disponível.")
+                st.success("Rede Estável: Capacidade disponível.")
 
 
                 
@@ -408,4 +408,4 @@ def render_view():
         else:
             st.error("Módulo de IA não carregado.")
 
-    st.caption(f"GridScope v4.9 Enterprise | Dados atualizados em: {date.today().strftime('%d/%m/%Y')}")
+    st.caption(f"GridScope | Dados atualizados em: {date.today().strftime('%d/%m/%Y')}")

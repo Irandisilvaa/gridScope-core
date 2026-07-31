@@ -22,7 +22,7 @@ try:
 except ImportError:
     pass
 
-app = FastAPI(title="GridScope AI - Enterprise Full", version="7.0 Final-Fix")
+app = FastAPI(title="GridScope AI", version="1.0")
 
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(DIR_ATUAL, "modelo_consumo.pkl")
