@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -67,6 +67,21 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-a")
         self.assertEqual(response.json()["row_counts"], {"subestacoes": 1})
+
+    def test_health_nao_depende_do_banco(self) -> None:
+        response = self.client.get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+
+    def test_readiness_retorna_indisponivel_quando_redis_falha(self) -> None:
+        with patch.object(api_module, "get_engine", return_value=MagicMock()), patch.object(
+            api_module, "is_redis_available", return_value=False
+        ):
+            response = self.client.get("/ready")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["checks"]["redis"], "unavailable")
 
 
 if __name__ == "__main__":

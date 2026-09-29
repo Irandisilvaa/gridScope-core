@@ -230,6 +230,27 @@ fonte primária planejada sem inventar um endpoint ainda não fornecido.
 - `docker compose build frontend`: aprovado após a remoção do Leaflet e do
   stylesheet bruto.
 
+## 2026-09-29 — readiness da API e inicialização coordenada
+
+### Alterações
+
+- Adicionados `GET /health` (liveness) e `GET /ready` (database/Redis) em
+  `src/api.py`.
+- O endpoint de readiness retorna HTTP 503 e os checks individuais quando uma
+  dependência ainda não está disponível.
+- Adicionados healthchecks para PostgreSQL, Redis e API em
+  `docker-compose.yml`.
+- O frontend agora depende da API saudável, e a API depende de banco e Redis
+  saudáveis antes de iniciar.
+- Adicionados testes de contrato para liveness e falha de readiness.
+
+### Validação
+
+- `docker compose config`: aprovado com condições `service_healthy`.
+- `docker compose build gridscope`: aprovado.
+- Testes Python no container: 11 aprovados.
+- Compilação Python e `git diff --check`: aprovados.
+
 ### Regra para as próximas alterações
 
 Antes de finalizar qualquer alteração, atualizar este arquivo com:

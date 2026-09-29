@@ -12,8 +12,9 @@ from shapely.geometry import mapping
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from utils import carregar_dados_cache, fundir_dados_geo_mercado
-    from cache_redis import cache_json
+    from cache_redis import cache_json, is_redis_available
     from config import DATA_SOURCE, DIR_DADOS
+    from database import get_engine
 except ImportError as e:
     print(f"CRITICAL API ERROR: {e}")
     sys.exit(1)
@@ -95,6 +96,11 @@ class DataStatus(BaseModel):
     row_counts: Dict[str, int] = Field(default_factory=dict)
 
 
+class ReadinessResponse(BaseModel):
+    status: str
+    checks: Dict[str, str]
+
+
 def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
     hoje = date.today()
     
@@ -142,6 +148,35 @@ def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
 @app.get("/", tags=["Status"])
 def home():
     return {"status": "online", "system": "GridScope Core 4.7"}
+
+
+@app.get("/health", tags=["Status"])
+def health():
+    """Liveness: o processo HTTP está executando."""
+
+    return {"status": "ok", "service": "gridscope-api", "version": app.version}
+
+
+@app.get("/ready", response_model=ReadinessResponse, tags=["Status"])
+def readiness():
+    """Readiness: dependências necessárias para servir dados estão disponíveis."""
+
+    checks: Dict[str, str] = {}
+    engine = None
+    try:
+        engine = get_engine()
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "unavailable"
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+    checks["redis"] = "ok" if is_redis_available() else "unavailable"
+    if all(value == "ok" for value in checks.values()):
+        return {"status": "ready", "checks": checks}
+
+    raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
 
 
 @app.get("/data/status", response_model=DataStatus, tags=["Status"])
