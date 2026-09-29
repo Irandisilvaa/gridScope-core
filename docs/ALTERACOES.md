@@ -180,6 +180,36 @@ fonte primária planejada sem inventar um endpoint ainda não fornecido.
 - Ainda falta validar a troca completa com GDB real e PostgreSQL/PostGIS; os
   testes atuais isolam o orquestrador e não substituem o teste integrado.
 
+## 2026-09-29 — detalhe operacional de subestação
+
+### Alterações
+
+- Criado `frontend/src/components/SubstationDetail.tsx` com métricas, perfil
+  de consumo, classes de GD e série temporal da subestação selecionada.
+- A tabela de subestações passou a usar o ID técnico como seleção estável e
+  oferece navegação acessível para abrir/fechar o detalhe.
+- O estado selecionado é compartilhado entre Panorama e Subestações; clicar em
+  um ativo no resumo abre a visão detalhada.
+- Adicionados estados visuais responsivos para seleção, barras por classe,
+  histórico e ausência de dados.
+- Tipos TypeScript de perfil e evolução foram alinhados ao contrato da API.
+
+### Validação
+
+- `npm run typecheck`: aprovado.
+- `npm run build`: aprovado com mapa e detalhe de subestação.
+
+## 2026-09-29 — adoção de Tailwind CSS
+
+- Adicionado Tailwind CSS v4 com `@tailwindcss/vite` ao build Vite.
+- Aplicada a camada Tailwind em `frontend/src/styles.css` e utilizados
+  utilitários Tailwind nos componentes de detalhe, tabela, mapa, métricas e
+  foco acessível dos controles.
+- Mantidos apenas estilos semânticos e específicos do domínio/Leaflet onde a
+  migração direta não reduziria complexidade nesta etapa.
+- `frontend/package-lock.json` atualizado.
+- `npm run typecheck` e `npm run build`: aprovados após a integração.
+
 ### Regra para as próximas alterações
 
 Antes de finalizar qualquer alteração, atualizar este arquivo com:

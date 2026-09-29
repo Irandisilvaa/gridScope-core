@@ -3,6 +3,7 @@ import { MetricCard } from "./components/MetricCard";
 import { StatusPill } from "./components/StatusPill";
 import { SubstationTable } from "./components/SubstationTable";
 import { TerritoryMap } from "./components/TerritoryMap";
+import { SubstationDetail } from "./components/SubstationDetail";
 import { api, type DataStatus, type Substation, type Territories } from "./lib/api";
 
 type View = "overview" | "substations" | "reports" | "assistant";
@@ -34,6 +35,7 @@ function sourceLabel(source: string) {
 function App() {
   const [view, setView] = useState<View>("overview");
   const [rows, setRows] = useState<Substation[]>([]);
+  const [selectedSubstationId, setSelectedSubstationId] = useState<string | null>(null);
   const [territories, setTerritories] = useState<Territories | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -83,9 +85,19 @@ function App() {
     [rows],
   );
 
+  const selectedSubstation = useMemo(
+    () => rows.find((row) => row.id_tecnico === selectedSubstationId) ?? null,
+    [rows, selectedSubstationId],
+  );
+
+  const selectSubstation = (row: Substation) => {
+    setSelectedSubstationId(row.id_tecnico);
+    setView("substations");
+  };
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div className="app-shell min-h-dvh">
+      <aside className="sidebar min-h-dvh">
         <div className="brand-lockup">
           <div className="brand-mark" aria-hidden="true">
             <span />
@@ -146,9 +158,9 @@ function App() {
         {error && !isLoading ? <ErrorState message={error} /> : null}
 
         {!isLoading && !error && view === "overview" ? (
-          <Overview rows={rows} metrics={metrics} criticalRows={criticalRows} dataStatus={dataStatus} territories={territories} />
+          <Overview rows={rows} metrics={metrics} criticalRows={criticalRows} dataStatus={dataStatus} territories={territories} onSelectSubstation={selectSubstation} />
         ) : null}
-        {!isLoading && !error && view === "substations" ? <Substations rows={rows} /> : null}
+        {!isLoading && !error && view === "substations" ? <Substations rows={rows} selected={selectedSubstation} selectedId={selectedSubstationId} onSelect={setSelectedSubstationId} onClose={() => setSelectedSubstationId(null)} /> : null}
         {!isLoading && !error && view === "reports" ? <EmptyFeature title="Relatórios técnicos" text="A geração de CSV e PDF será conectada ao contrato de exportação da API." /> : null}
         {!isLoading && !error && view === "assistant" ? <EmptyFeature title="Assistente de rede" text="O chat será migrado após a camada de identidade e autorização estar pronta." /> : null}
       </main>
@@ -156,7 +168,7 @@ function App() {
   );
 }
 
-function Overview({ rows, metrics, criticalRows, dataStatus, territories }: { rows: Substation[]; metrics: { substations: number; clients: number; consumption: number; gdPower: number }; criticalRows: Substation[]; dataStatus: DataStatus | null; territories: Territories | null }) {
+function Overview({ rows, metrics, criticalRows, dataStatus, territories, onSelectSubstation }: { rows: Substation[]; metrics: { substations: number; clients: number; consumption: number; gdPower: number }; criticalRows: Substation[]; dataStatus: DataStatus | null; territories: Territories | null; onSelectSubstation: (row: Substation) => void }) {
   return (
     <div className="content-stack">
       <section className="intro-panel">
@@ -187,7 +199,7 @@ function Overview({ rows, metrics, criticalRows, dataStatus, territories }: { ro
           </div>
           <StatusPill label={`${criticalRows.length} identificadas`} tone={criticalRows.length ? "warn" : "good"} />
         </div>
-        {criticalRows.length ? <SubstationTable rows={criticalRows} /> : <p className="empty-copy">Nenhuma subestação fora do nível normal na carga atual.</p>}
+        {criticalRows.length ? <SubstationTable rows={criticalRows} onSelect={onSelectSubstation} /> : <p className="empty-copy">Nenhuma subestação fora do nível normal na carga atual.</p>}
       </section>
 
       <section className="section-block">
@@ -213,13 +225,13 @@ function Overview({ rows, metrics, criticalRows, dataStatus, territories }: { ro
           </div>
           <span className="section-meta">{formatDate(dataStatus?.published_at)}</span>
         </div>
-        <SubstationTable rows={rows.slice(0, 12)} />
+        <SubstationTable rows={rows.slice(0, 12)} onSelect={onSelectSubstation} />
       </section>
     </div>
   );
 }
 
-function Substations({ rows }: { rows: Substation[] }) {
+function Substations({ rows, selected, selectedId, onSelect, onClose }: { rows: Substation[]; selected: Substation | null; selectedId: string | null; onSelect: (id: string) => void; onClose: () => void }) {
   return (
     <div className="content-stack">
       <section className="section-block section-block--large">
@@ -230,8 +242,9 @@ function Substations({ rows }: { rows: Substation[] }) {
           </div>
           <span className="section-meta">{rows.length} registros</span>
         </div>
-        <SubstationTable rows={rows} />
+        <SubstationTable rows={rows} selectedId={selectedId ?? undefined} onSelect={(row) => onSelect(row.id_tecnico)} />
       </section>
+      {selected ? <SubstationDetail row={selected} onClose={onClose} /> : <p className="detail-hint">Selecione uma subestação para abrir o detalhe operacional.</p>}
     </div>
   );
 }

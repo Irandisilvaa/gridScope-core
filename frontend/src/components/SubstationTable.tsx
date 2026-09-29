@@ -3,6 +3,8 @@ import { StatusPill } from "./StatusPill";
 
 type SubstationTableProps = {
   rows: Substation[];
+  onSelect?: (row: Substation) => void;
+  selectedId?: string;
 };
 
 function formatNumber(value: number, maximumFractionDigits = 0) {
@@ -15,7 +17,7 @@ function toneFor(criticality: string): "good" | "warn" | "muted" {
   return "good";
 }
 
-export function SubstationTable({ rows }: SubstationTableProps) {
+export function SubstationTable({ rows, onSelect, selectedId }: SubstationTableProps) {
   return (
     <div className="table-wrap">
       <table>
@@ -30,8 +32,16 @@ export function SubstationTable({ rows }: SubstationTableProps) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id_tecnico}>
-              <th scope="row">{row.subestacao.split(" (ID:")[0]}</th>
+            <tr className={selectedId === row.id_tecnico ? "table-row--selected" : ""} key={row.id_tecnico}>
+              <th scope="row">
+                {onSelect ? (
+                  <button className="table-link rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]" onClick={() => onSelect(row)} type="button">
+                    {row.subestacao.split(" (ID:")[0]}
+                  </button>
+                ) : (
+                  row.subestacao.split(" (ID:")[0]
+                )}
+              </th>
               <td>{formatNumber(row.metricas_rede.total_clientes)}</td>
               <td>{formatNumber(row.metricas_rede.consumo_anual_mwh, 2)} MWh</td>
               <td>{formatNumber(row.geracao_distribuida.potencia_total_kw, 2)} kW</td>

@@ -4,6 +4,12 @@ export type MetricasRede = {
   nivel_criticidade_gd: string;
 };
 
+export type PerfilClasse = {
+  qtd_clientes: number;
+  pct: number;
+  consumo_anual_mwh?: number;
+};
+
 export type GeracaoDistribuida = {
   total_unidades: number;
   potencia_total_kw: number;
@@ -22,7 +28,7 @@ export type Substation = {
   id_tecnico: string;
   metricas_rede: MetricasRede;
   geracao_distribuida: GeracaoDistribuida;
-  perfil_consumo: Record<string, unknown>;
+  perfil_consumo: Record<string, PerfilClasse>;
   evolucao_temporal: EvolucaoTemporal[];
   geometry?: Record<string, unknown> | null;
 };

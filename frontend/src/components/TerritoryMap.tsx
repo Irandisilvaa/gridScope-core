@@ -20,7 +20,7 @@ const territoryStyle: StyleFunction = (feature) => {
 
 export function TerritoryMap({ data }: TerritoryMapProps) {
   return (
-    <div className="territory-map" aria-label="Mapa dos territórios das subestações">
+    <div className="territory-map rounded-lg" aria-label="Mapa dos territórios das subestações">
       <MapContainer
         center={[-10.95, -37.07]}
         zoom={11}
