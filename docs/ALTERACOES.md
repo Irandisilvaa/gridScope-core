@@ -210,6 +210,26 @@ fonte primária planejada sem inventar um endpoint ainda não fornecido.
 - `frontend/package-lock.json` atualizado.
 - `npm run typecheck` e `npm run build`: aprovados após a integração.
 
+## 2026-09-29 — Tailwind como única camada visual do frontend
+
+- Removidas todas as regras CSS próprias de `frontend/src/tailwind.css`; o
+  arquivo agora contém somente a entrada `@import "tailwindcss"`.
+- Reescritos o shell, navegação, tabelas, cartões, estados, detalhe e
+  responsividade usando classes utilitárias Tailwind diretamente nos
+  componentes React.
+- Removidos `leaflet`, `react-leaflet` e seus tipos para evitar dependência de
+  CSS externo obrigatório.
+- `TerritoryMap` passou a renderizar o GeoJSON em SVG, com projeção simples e
+  estilos Tailwind, mantendo o mapa sem stylesheet bruto.
+- `index.html` passou a declarar a base visual mínima com classes Tailwind no
+  elemento `body`.
+- O entrypoint visual foi renomeado para `frontend/src/tailwind.css` e não há
+  regras CSS próprias nem `style` inline nos componentes.
+- `npm run typecheck` e `npm run build`: aprovados; o bundle caiu para cerca
+  de 168 kB antes da compressão.
+- `docker compose build frontend`: aprovado após a remoção do Leaflet e do
+  stylesheet bruto.
+
 ### Regra para as próximas alterações
 
 Antes de finalizar qualquer alteração, atualizar este arquivo com:
