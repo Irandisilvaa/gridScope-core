@@ -1,5 +1,8 @@
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+import csv
+import io
 import json
 import os
 import sys
@@ -36,6 +39,25 @@ def limpar_float(valor):
         except ValueError:
             return 0.0
     return 0.0
+
+
+CSV_COLUNAS_RANKING = (
+    "id_tecnico",
+    "subestacao",
+    "total_clientes",
+    "consumo_anual_mwh",
+    "nivel_criticidade_gd",
+    "total_unidades_gd",
+    "potencia_total_kw_gd",
+)
+
+
+def proteger_celula_csv(valor: object) -> object:
+    """Evita que planilhas interpretem texto exportado como fórmula."""
+
+    if isinstance(valor, str) and valor.startswith(("=", "+", "-", "@")):
+        return f"'{valor}"
+    return valor
 
 class MetricasRede(BaseModel):
     total_clientes: int
@@ -226,6 +248,42 @@ def obter_dados_completos():
     except Exception as e:
         print(f"Erro detalhado API: {e}") 
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+
+@app.get("/mercado/ranking.csv", tags=["Exportações"])
+def exportar_ranking_csv():
+    """Exporta o ranking atual sem incluir geometria ou dados pessoais."""
+
+    try:
+        rows = obter_dados_completos()
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=CSV_COLUNAS_RANKING, extrasaction="ignore")
+        writer.writeheader()
+        for row in rows:
+            metricas = row.get("metricas_rede", {})
+            geracao = row.get("geracao_distribuida", {})
+            writer.writerow(
+                {
+                    "id_tecnico": proteger_celula_csv(row.get("id_tecnico", "")),
+                    "subestacao": proteger_celula_csv(row.get("subestacao", "")),
+                    "total_clientes": metricas.get("total_clientes", 0),
+                    "consumo_anual_mwh": metricas.get("consumo_anual_mwh", 0),
+                    "nivel_criticidade_gd": proteger_celula_csv(metricas.get("nivel_criticidade_gd", "")),
+                    "total_unidades_gd": geracao.get("total_unidades", 0),
+                    "potencia_total_kw_gd": geracao.get("potencia_total_kw", 0),
+                }
+            )
+
+        content = "\ufeff" + output.getvalue()
+        return StreamingResponse(
+            iter([content]),
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": "attachment; filename=gridscope-ranking.csv"},
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Exportação indisponível") from exc
 
 @app.get("/mercado/geojson", tags=["Core"])
 @cache_json(ttl_seconds=3600)

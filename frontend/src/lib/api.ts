@@ -76,6 +76,10 @@ export class GridScopeApi {
     return this.get<Territories>("/mercado/geojson", signal);
   }
 
+  getRankingCsvUrl() {
+    return `${this.baseUrl}/mercado/ranking.csv`;
+  }
+
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: { Accept: "application/json" },

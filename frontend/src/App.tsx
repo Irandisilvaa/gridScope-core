@@ -163,7 +163,7 @@ function App() {
         {!isLoading && !error && view === "substations" ? (
           <Substations rows={rows} selected={selectedSubstation} selectedId={selectedSubstationId} onSelect={setSelectedSubstationId} onClose={() => setSelectedSubstationId(null)} />
         ) : null}
-        {!isLoading && !error && view === "reports" ? <EmptyFeature title="Relatórios técnicos" text="A geração de CSV e PDF será conectada ao contrato de exportação da API." /> : null}
+        {!isLoading && !error && view === "reports" ? <Reports /> : null}
         {!isLoading && !error && view === "assistant" ? <EmptyFeature title="Assistente de rede" text="O chat será migrado após a camada de identidade e autorização estar pronta." /> : null}
       </main>
     </div>
@@ -253,6 +253,38 @@ function ErrorState({ message }: { message: string }) {
 
 function EmptyFeature({ title, text }: { title: string; text: string }) {
   return <div className="mx-auto mt-20 grid max-w-[500px] justify-items-center gap-2 rounded-lg border border-white/10 bg-[#0d202c]/70 p-8 text-center"><span className={eyebrow}>Próxima etapa</span><strong>{title}</strong><p className="m-0 text-[#8ea4a7]">{text}</p></div>;
+}
+
+function Reports() {
+  return (
+    <div className="grid gap-[22px] pt-7">
+      <section className={`${panel} grid gap-5 p-5 sm:p-7`}>
+        <div>
+          <span className={eyebrow}>Exportação técnica</span>
+          <h2 className="mt-2 text-[clamp(1.5rem,3vw,2.4rem)] font-semibold tracking-[-0.05em]">Ranking da carga atual</h2>
+          <p className="mt-3 max-w-[620px] text-sm leading-relaxed text-[#8ea4a7]">Baixe um CSV com indicadores agregados por subestação. O arquivo não inclui geometrias nem dados pessoais dos consumidores.</p>
+        </div>
+        <div className="flex flex-col gap-4 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <strong className="block text-sm text-[#eef6f3]">Formato CSV UTF-8</strong>
+            <span className="mt-1 block text-xs text-[#8ea4a7]">A exportação representa a última carga publicada.</span>
+          </div>
+          <a
+            className="inline-flex w-fit items-center justify-center rounded-lg border border-[#6fe7d2]/35 bg-[#6fe7d2]/10 px-4 py-3 text-sm font-bold text-[#6fe7d2] transition-colors hover:border-[#6fe7d2]/60 hover:bg-[#6fe7d2]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]"
+            download="gridscope-ranking.csv"
+            href={api.getRankingCsvUrl()}
+          >
+            Baixar ranking CSV
+          </a>
+        </div>
+      </section>
+      <section className={`${panel} p-5 sm:p-7`}>
+        <span className={eyebrow}>Próximas exportações</span>
+        <h2 className="mt-2 text-lg font-semibold">PDF e filtros por ativo</h2>
+        <p className="mt-2 max-w-[620px] text-sm leading-relaxed text-[#8ea4a7]">Serão habilitados quando o contrato de relatórios e o serviço de geração estiverem definidos.</p>
+      </section>
+    </div>
+  );
 }
 
 export default App;

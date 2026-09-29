@@ -83,6 +83,18 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()["detail"]["checks"]["redis"], "unavailable")
 
+    def test_exportacao_csv_protege_texto_de_formula(self) -> None:
+        snapshot = [dict(self.snapshot[0], subestacao="=SUM(1,1)")]
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=snapshot
+        ):
+            response = self.client.get("/mercado/ranking.csv")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment; filename=gridscope-ranking.csv", response.headers["content-disposition"])
+        self.assertIn("'=SUM(1,1)", response.content.decode("utf-8-sig"))
+        self.assertNotIn("geometry", response.content.decode("utf-8-sig"))
+
 
 if __name__ == "__main__":
     unittest.main()

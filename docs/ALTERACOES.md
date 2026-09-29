@@ -251,6 +251,28 @@ fonte primária planejada sem inventar um endpoint ainda não fornecido.
 - Testes Python no container: 11 aprovados.
 - Compilação Python e `git diff --check`: aprovados.
 
+## 2026-09-29 — primeira exportação técnica
+
+### Alterações
+
+- Criado `GET /mercado/ranking.csv` em `src/api.py`.
+- A exportação contém somente indicadores agregados por subestação, sem
+  geometria ou dados pessoais.
+- Adicionada proteção contra fórmulas de planilha para células textuais que
+  começam com `=`, `+`, `-` ou `@`.
+- O frontend passou a oferecer o download em Relatórios usando a mesma origem
+  `/api`, sem duplicar a lógica de consulta.
+- Relatórios PDF e filtros avançados permanecem explicitamente pendentes do
+  contrato de exportação correspondente.
+
+### Validação
+
+- `npm run typecheck` e `npm run build`: aprovados.
+- `docker compose build gridscope`: aprovado.
+- Testes Python no container: 12 aprovados, incluindo proteção contra fórmula
+  CSV.
+- Compilação Python e `git diff --check`: aprovados.
+
 ### Regra para as próximas alterações
 
 Antes de finalizar qualquer alteração, atualizar este arquivo com:
