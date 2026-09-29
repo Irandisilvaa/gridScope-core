@@ -30,7 +30,7 @@ export function SubstationTable({ rows }: SubstationTableProps) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.subestacao}>
+            <tr key={row.id_tecnico}>
               <th scope="row">{row.subestacao.split(" (ID:")[0]}</th>
               <td>{formatNumber(row.metricas_rede.total_clientes)}</td>
               <td>{formatNumber(row.metricas_rede.consumo_anual_mwh, 2)} MWh</td>

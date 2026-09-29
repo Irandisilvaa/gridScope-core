@@ -78,6 +78,10 @@ h2 { margin-bottom: 0; font-size: clamp(1.1rem, 2vw, 1.45rem); letter-spacing: -
 .status-pill--warn { border-color: rgba(255, 200, 87, .35); color: var(--amber); background: rgba(255, 200, 87, .08); }
 .status-pill--muted { color: var(--muted); background: rgba(255, 255, 255, .04); }
 .table-wrap { overflow-x: auto; }
+.territory-map { min-height: 360px; overflow: hidden; border: 1px solid var(--line); background: #d6e2df; }
+.territory-map__canvas { width: 100%; min-height: 360px; }
+.territory-map .leaflet-control-attribution { font-size: 9px; }
+.territory-map .leaflet-tile-pane { filter: saturate(.55) contrast(.9); }
 table { width: 100%; border-collapse: collapse; min-width: 680px; }
 th, td { padding: 13px 12px; border-top: 1px solid var(--line); text-align: left; font-size: .77rem; white-space: nowrap; }
 thead th { border-top: 0; color: #688287; font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }

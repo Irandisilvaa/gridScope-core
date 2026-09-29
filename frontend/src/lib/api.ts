@@ -7,14 +7,23 @@ export type MetricasRede = {
 export type GeracaoDistribuida = {
   total_unidades: number;
   potencia_total_kw: number;
-  detalhe_por_classe: Record<string, unknown>;
+  detalhe_por_classe: Record<string, { potencia_kw: number; qtd: number }>;
+};
+
+export type EvolucaoTemporal = {
+  mes: string;
+  clientes: number;
+  unidades_mmgd: number;
+  potencia_kw: number;
 };
 
 export type Substation = {
   subestacao: string;
+  id_tecnico: string;
   metricas_rede: MetricasRede;
   geracao_distribuida: GeracaoDistribuida;
   perfil_consumo: Record<string, unknown>;
+  evolucao_temporal: EvolucaoTemporal[];
   geometry?: Record<string, unknown> | null;
 };
 
@@ -25,6 +34,11 @@ export type DataStatus = {
   reference_period?: string | null;
   published_at?: string | null;
   row_counts: Record<string, number>;
+};
+
+export type Territories = {
+  type: "FeatureCollection";
+  features: Array<Record<string, unknown>>;
 };
 
 export class ApiError extends Error {
@@ -50,6 +64,10 @@ export class GridScopeApi {
 
   async getRanking(signal?: AbortSignal): Promise<Substation[]> {
     return this.get<Substation[]>("/mercado/ranking", signal);
+  }
+
+  async getTerritories(signal?: AbortSignal): Promise<Territories> {
+    return this.get<Territories>("/mercado/geojson", signal);
   }
 
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {

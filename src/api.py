@@ -46,16 +46,31 @@ class PerfilClasse(BaseModel):
     pct: float
     consumo_anual_mwh: Optional[float] = 0.0 
 
+
+class DetalheGeracao(BaseModel):
+    potencia_kw: float
+    qtd: int
+
+
 class GeracaoDistribuida(BaseModel):
     total_unidades: int
     potencia_total_kw: float
-    detalhe_por_classe: Dict[str, float]
+    detalhe_por_classe: Dict[str, DetalheGeracao]
+
+
+class EvolucaoTemporal(BaseModel):
+    mes: str
+    clientes: int
+    unidades_mmgd: int
+    potencia_kw: float
 
 class SubestacaoData(BaseModel):
     subestacao: str
+    id_tecnico: str
     metricas_rede: MetricasRede
     geracao_distribuida: GeracaoDistribuida
     perfil_consumo: Dict[str, PerfilClasse]
+    evolucao_temporal: List[EvolucaoTemporal] = Field(default_factory=list)
     geometry: Optional[Dict[str, Any]] = None
 
 class SimulacaoSolar(BaseModel):

@@ -147,6 +147,39 @@ fonte primária planejada sem inventar um endpoint ainda não fornecido.
 - `git diff --check`: sem erros de conteúdo; permanecem apenas avisos de
   normalização CRLF em arquivos preexistentes/modificados.
 
+## 2026-09-29 — contrato da API, testes de corte e mapa
+
+### Alterações
+
+- Corrigido o contrato Pydantic de `src/api.py`: `detalhe_por_classe` agora
+  representa os objetos aninhados produzidos pelo ETL (`potencia_kw` e `qtd`).
+- Adicionados `id_tecnico` e `evolucao_temporal` ao contrato de subestação.
+- Criado `tests/test_api_contract.py` para validar o ranking e os metadados da
+  carga pela API.
+- Criado `tests/test_importador.py` cobrindo preparação de derivados, bloqueio
+  de publicação em falha e rejeição de camada vazia.
+- O cliente TypeScript foi atualizado para o mesmo contrato e a tabela passou
+  a usar o ID técnico como chave estável.
+- Adicionado mapa Leaflet em `frontend/src/components/TerritoryMap.tsx`, usando
+  o GeoJSON da API e falha isolada quando o endpoint geográfico não responde.
+- Adicionadas dependências Leaflet e `react-leaflet`; o mapa mantém a política
+  PWA de não armazenar respostas de API offline.
+
+### Validação
+
+- `npm run typecheck` e `npm run build`: aprovados com mapa e PWA.
+- `docker compose build gridscope`: aprovado.
+- `docker compose build frontend`: aprovado.
+- Testes no container Python: 9 aprovados.
+- Compilação Python e `git diff --check`: aprovados.
+
+### Pendências
+
+- O mapa usa tiles públicos do OpenStreetMap; em produção devem ser definidos
+  política de atribuição, disponibilidade e provedor de tiles.
+- Ainda falta validar a troca completa com GDB real e PostgreSQL/PostGIS; os
+  testes atuais isolam o orquestrador e não substituem o teste integrado.
+
 ### Regra para as próximas alterações
 
 Antes de finalizar qualquer alteração, atualizar este arquivo com:

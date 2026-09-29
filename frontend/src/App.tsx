@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { MetricCard } from "./components/MetricCard";
 import { StatusPill } from "./components/StatusPill";
 import { SubstationTable } from "./components/SubstationTable";
-import { api, type DataStatus, type Substation } from "./lib/api";
+import { TerritoryMap } from "./components/TerritoryMap";
+import { api, type DataStatus, type Substation, type Territories } from "./lib/api";
 
 type View = "overview" | "substations" | "reports" | "assistant";
 
@@ -33,6 +34,7 @@ function sourceLabel(source: string) {
 function App() {
   const [view, setView] = useState<View>("overview");
   const [rows, setRows] = useState<Substation[]>([]);
+  const [territories, setTerritories] = useState<Territories | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +47,7 @@ function App() {
         setRows(ranking);
         setDataStatus(status);
         setError(null);
+        api.getTerritories(controller.signal).then(setTerritories).catch(() => setTerritories(null));
       })
       .catch(() => setError("Não foi possível consultar os dados atuais da rede."))
       .finally(() => setIsLoading(false));
@@ -143,7 +146,7 @@ function App() {
         {error && !isLoading ? <ErrorState message={error} /> : null}
 
         {!isLoading && !error && view === "overview" ? (
-          <Overview rows={rows} metrics={metrics} criticalRows={criticalRows} dataStatus={dataStatus} />
+          <Overview rows={rows} metrics={metrics} criticalRows={criticalRows} dataStatus={dataStatus} territories={territories} />
         ) : null}
         {!isLoading && !error && view === "substations" ? <Substations rows={rows} /> : null}
         {!isLoading && !error && view === "reports" ? <EmptyFeature title="Relatórios técnicos" text="A geração de CSV e PDF será conectada ao contrato de exportação da API." /> : null}
@@ -153,7 +156,7 @@ function App() {
   );
 }
 
-function Overview({ rows, metrics, criticalRows, dataStatus }: { rows: Substation[]; metrics: { substations: number; clients: number; consumption: number; gdPower: number }; criticalRows: Substation[]; dataStatus: DataStatus | null }) {
+function Overview({ rows, metrics, criticalRows, dataStatus, territories }: { rows: Substation[]; metrics: { substations: number; clients: number; consumption: number; gdPower: number }; criticalRows: Substation[]; dataStatus: DataStatus | null; territories: Territories | null }) {
   return (
     <div className="content-stack">
       <section className="intro-panel">
@@ -185,6 +188,21 @@ function Overview({ rows, metrics, criticalRows, dataStatus }: { rows: Substatio
           <StatusPill label={`${criticalRows.length} identificadas`} tone={criticalRows.length ? "warn" : "good"} />
         </div>
         {criticalRows.length ? <SubstationTable rows={criticalRows} /> : <p className="empty-copy">Nenhuma subestação fora do nível normal na carga atual.</p>}
+      </section>
+
+      <section className="section-block">
+        <div className="section-heading">
+          <div>
+            <span className="eyebrow">Geografia operacional</span>
+            <h2>Territórios publicados</h2>
+          </div>
+          <span className="section-meta">{territories?.features.length ?? 0} áreas</span>
+        </div>
+        {territories ? (
+          <TerritoryMap data={territories} />
+        ) : (
+          <p className="empty-copy">O mapa ficará disponível quando o GeoJSON da carga atual puder ser consultado.</p>
+        )}
       </section>
 
       <section className="section-block">
