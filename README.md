@@ -10,8 +10,8 @@ O sistema utiliza uma arquitetura moderna orientada a serviços para processar d
 - **API RESTful (FastAPI)**  
   Endpoints otimizados para consulta do status da rede com **Cache L1 (Redis)**.
 
-- **Dashboard Interativo (Streamlit)**  
-  Visualização de dados em mapas, análise de mercado e simulação solar.
+- **Frontend responsivo (React + Vite + PWA)**
+  Visualização operacional da rede, análise de mercado e acesso aos serviços da API.
 
 - **Processamento Geoespacial (PostGIS)**  
   Cálculo de territórios Voronoi e junções espaciais realizadas diretamente no banco de dados.
@@ -28,14 +28,14 @@ O sistema foi migrado para uma arquitetura robusta baseada em banco de dados:
 - **Database:** PostgreSQL 15 + PostGIS (Armazenamento Centralizado)
 - **Cache:** Redis 7 (Aceleração de API - Respostas em <50ms)
 - **Backend:** Python 3.10+, FastAPI
-- **Frontend:** Streamlit
+- **Frontend:** React, TypeScript, Vite e PWA
 - **Infraestrutura:** Docker Compose
 
 ---
 
 ## ⚙️ Instalação (Docker - Recomendado)
 
-A forma padrão de execução é via Docker, que sobe automaticamente o Banco, Redis, API e Dashboard.
+A forma padrão de execução é via Docker, que sobe automaticamente o Banco, Redis, API e frontend.
 
 ### 1. Configuração
 
@@ -56,7 +56,7 @@ docker-compose up --build
 
 ### 3. Acessos
 
-- **Dashboard:** [http://localhost:8501](http://localhost:8501)
+- **Frontend:** [http://localhost:3000](http://localhost:3000)
 - **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
@@ -74,6 +74,7 @@ O projeto inclui scripts utilitários para gerenciamento do banco de dados:
 
 ```text
 gridScope-core/
+├── frontend/              # Aplicação React/Vite/PWA
 ├── src/
 │   ├── api.py            # API com Cache Redis
 │   ├── database.py       # Camada de Acesso a Dados (PostgreSQL)
@@ -82,7 +83,7 @@ gridScope-core/
 │   └── modelos/          # Regras de Negócio (Voronoi, Mercado)
 │
 ├── dados/                # (Obsoleto - Dados migrados para o Banco)
-├── docker-compose.yml    # Orquestração (App, DB, Redis)
+├── docker-compose.yml    # Orquestração (API, frontend, DB, Redis)
 ├── requirements.txt
 └── README.md
 ```

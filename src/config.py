@@ -24,6 +24,26 @@ os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
 os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5435/gridscope_local")
+DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "public").strip()
+
+# Alimentação de dados. Em desenvolvimento, o adaptador local mantém a execução
+# com um GDB já disponível. Em operação, configurar um adaptador da distribuidora
+# somente após o contrato de acesso e formato ser confirmado.
+DATA_SOURCE = os.getenv("DATA_SOURCE", "local_file").strip().lower()
+FILE_GDB = os.getenv(
+    "FILE_GDB",
+    "Energisa_SE_6587_2024-12-31_V11_20250902-1412.gdb",
+)
+DISTRIBUTOR_SOURCE_URL = os.getenv("DISTRIBUTOR_SOURCE_URL")
+DISTRIBUTOR_API_TOKEN = os.getenv("DISTRIBUTOR_API_TOKEN")
+DATA_SOURCE_TIMEOUT_SECONDS = int(os.getenv("DATA_SOURCE_TIMEOUT_SECONDS", "120"))
+DATA_MAX_DOWNLOAD_BYTES = int(os.getenv("DATA_MAX_DOWNLOAD_BYTES", str(2 * 1024 * 1024 * 1024)))
+DATA_MAX_ARCHIVE_ENTRIES = int(os.getenv("DATA_MAX_ARCHIVE_ENTRIES", "100000"))
+DATA_INGEST_ON_STARTUP = os.getenv("DATA_INGEST_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
+TRAIN_MODEL_ON_STARTUP = os.getenv("TRAIN_MODEL_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
 
 import re
 

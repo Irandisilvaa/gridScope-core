@@ -8,15 +8,16 @@ import logging
 import numpy as np
 from shapely.ops import voronoi_diagram
 from shapely.geometry import box
-from sqlalchemy import create_engine
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     from config import CIDADE_ALVO, DIR_RAIZ
-    from database import salvar_voronoi 
+    from database import get_engine, salvar_voronoi
 except ImportError:
     CIDADE_ALVO = "Aracaju, Brazil"
     DIR_RAIZ = os.getcwd()
+    def get_engine():
+        raise RuntimeError("Camada de banco indisponível")
     def salvar_voronoi(gdf): pass
 
 NOME_IMAGEM_SAIDA = "territorios_voronoi.png"
@@ -27,8 +28,7 @@ logger = logging.getLogger("GeoProcessor")
 
 def get_database_engine():
     """Conexão resiliente com o banco."""
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
-    return create_engine(db_url, isolation_level="AUTOCOMMIT")
+    return get_engine()
 
 def gerar_cor_unica(texto_seed):
     """Gera uma cor HEX consistente baseada no ID."""

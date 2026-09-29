@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import json
 import os
 import sys
@@ -13,6 +13,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
     from utils import carregar_dados_cache, fundir_dados_geo_mercado
     from cache_redis import cache_json
+    from config import DATA_SOURCE, DIR_DADOS
 except ImportError as e:
     print(f"CRITICAL API ERROR: {e}")
     sys.exit(1)
@@ -70,6 +71,15 @@ class SimulacaoSolar(BaseModel):
     impacto_na_rede: str
 
 
+class DataStatus(BaseModel):
+    status: str
+    source: str
+    delivery_id: Optional[str] = None
+    reference_period: Optional[str] = None
+    published_at: Optional[str] = None
+    row_counts: Dict[str, int] = Field(default_factory=dict)
+
+
 def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
     hoje = date.today()
     
@@ -117,6 +127,29 @@ def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
 @app.get("/", tags=["Status"])
 def home():
     return {"status": "online", "system": "GridScope Core 4.7"}
+
+
+@app.get("/data/status", response_model=DataStatus, tags=["Status"])
+def data_status():
+    """Expõe a proveniência da carga publicada sem devolver dados do arquivo."""
+
+    metadata_path = os.path.join(DIR_DADOS, "metadata_carga_atual.json")
+    if not os.path.exists(metadata_path):
+        return {"status": "unavailable", "source": DATA_SOURCE, "row_counts": {}}
+
+    try:
+        with open(metadata_path, "r", encoding="utf-8") as metadata_file:
+            metadata = json.load(metadata_file)
+        return {
+            "status": metadata.get("status", "unknown"),
+            "source": metadata.get("source", DATA_SOURCE),
+            "delivery_id": metadata.get("delivery_id"),
+            "reference_period": metadata.get("reference_period"),
+            "published_at": metadata.get("published_at"),
+            "row_counts": metadata.get("row_counts", {}),
+        }
+    except (OSError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=503, detail="Metadados da carga indisponíveis") from exc
 
 @app.get("/mercado/ranking", response_model=List[SubestacaoData], tags=["Core"])
 @cache_json(ttl_seconds=300)

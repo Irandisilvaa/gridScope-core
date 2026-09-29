@@ -25,6 +25,9 @@ perfil_mercado.json
 # Imagens geradas pela validação da IA
 src/ai/validacao/
 
+frontend/dist/
+frontend/node_modules/
+
 # Logs do Sistema
 logs/
 *.log

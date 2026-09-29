@@ -1,0 +1,139 @@
+"""Adaptador HTTP para uma entrega de arquivo da distribuidora.
+
+O adaptador não presume o endpoint real. URL, token e limites são fornecidos
+por configuração somente depois que o contrato com a distribuidora existir.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+from pathlib import PurePosixPath
+
+import requests
+
+from .contratos import DataDelivery
+from .exceptions import DataSourceError, UnsafeArchiveError
+
+
+class HttpFileSource:
+    """Baixa uma entrega ZIP e expõe o GDB extraído em uma área temporária."""
+
+    def __init__(
+        self,
+        url: str,
+        *,
+        token: str | None = None,
+        timeout_seconds: int = 120,
+        max_download_bytes: int = 2 * 1024 * 1024 * 1024,
+        max_archive_entries: int = 100_000,
+    ) -> None:
+        if not url:
+            raise DataSourceError("DISTRIBUTOR_SOURCE_URL não foi configurada")
+        self._url = url
+        self._token = token
+        self._timeout = timeout_seconds
+        self._max_download_bytes = max_download_bytes
+        self._max_archive_entries = max_archive_entries
+
+    def fetch(self) -> DataDelivery:
+        temporary_root = Path(tempfile.mkdtemp(prefix="gridscope-delivery-"))
+        archive_path = temporary_root / "delivery.zip"
+
+        try:
+            delivery_id = self._download(archive_path)
+            gdb_path = self._extract_archive(archive_path, temporary_root / "extracted")
+            return DataDelivery(
+                local_path=gdb_path,
+                source="distributor_http",
+                delivery_id=delivery_id,
+                format="gdb_zip",
+                cleanup=lambda: shutil.rmtree(temporary_root, ignore_errors=True),
+            )
+        except Exception:
+            shutil.rmtree(temporary_root, ignore_errors=True)
+            raise
+
+    def _download(self, destination: Path) -> str:
+        headers = {"User-Agent": "GridScope/1.0", "Accept": "application/zip"}
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+
+        digest = hashlib.sha256()
+        downloaded = 0
+        try:
+            with requests.get(
+                self._url,
+                headers=headers,
+                stream=True,
+                timeout=(10, self._timeout),
+            ) as response:
+                response.raise_for_status()
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > self._max_download_bytes:
+                    raise DataSourceError("Entrega excede o limite de download configurado")
+
+                with destination.open("wb") as output:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if not chunk:
+                            continue
+                        downloaded += len(chunk)
+                        if downloaded > self._max_download_bytes:
+                            raise DataSourceError("Entrega excede o limite de download configurado")
+                        digest.update(chunk)
+                        output.write(chunk)
+        except requests.RequestException as exc:
+            raise DataSourceError(f"Falha ao obter entrega da distribuidora: {exc}") from exc
+
+        if not zipfile.is_zipfile(destination):
+            raise DataSourceError("A entrega HTTP não é um ZIP válido")
+        return digest.hexdigest()
+
+    def _extract_archive(self, archive: Path, destination: Path) -> Path:
+        destination.mkdir(parents=True, exist_ok=True)
+        try:
+            with zipfile.ZipFile(archive) as zip_file:
+                entries = zip_file.infolist()
+                if len(entries) > self._max_archive_entries:
+                    raise UnsafeArchiveError("ZIP contém entradas demais")
+
+                expanded_size = sum(info.file_size for info in entries)
+                if expanded_size > self._max_download_bytes:
+                    raise UnsafeArchiveError("Conteúdo expandido excede o limite configurado")
+
+                root = destination.resolve()
+                for info in entries:
+                    normalized_name = info.filename.replace("\\", "/")
+                    member = PurePosixPath(normalized_name)
+                    if member.is_absolute() or ".." in member.parts:
+                        raise UnsafeArchiveError(f"Caminho inválido no ZIP: {info.filename}")
+                    target = (destination.joinpath(*member.parts)).resolve()
+                    if root != target and root not in target.parents:
+                        raise UnsafeArchiveError(f"Caminho inválido no ZIP: {info.filename}")
+                    if self._is_symlink(info):
+                        raise UnsafeArchiveError(f"Symlink não permitido no ZIP: {info.filename}")
+                    if not info.is_dir():
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with zip_file.open(info) as source, target.open("wb") as output:
+                            shutil.copyfileobj(source, output, length=1024 * 1024)
+        except zipfile.BadZipFile as exc:
+            raise DataSourceError("ZIP inválido") from exc
+
+        gdb_candidates = sorted(
+            candidate
+            for candidate in destination.rglob("*")
+            if candidate.is_dir() and candidate.suffix.lower() == ".gdb"
+        )
+        if len(gdb_candidates) != 1:
+            raise DataSourceError(
+                f"A entrega deve conter exatamente um GDB; encontrados {len(gdb_candidates)}"
+            )
+        return gdb_candidates[0]
+
+    @staticmethod
+    def _is_symlink(info: zipfile.ZipInfo) -> bool:
+        mode = (info.external_attr >> 16) & 0o170000
+        return mode == 0o120000

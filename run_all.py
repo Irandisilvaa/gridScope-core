@@ -57,9 +57,26 @@ def run_script(script_path, description):
     if resultado.returncode == 0:
         logger.info(f"✅ SUCESSO: {description} ({duracao}s)")
         return True
-    else:
-        logger.error(f"❌ FALHA: {description} (Código {resultado.returncode})")
-        return False
+    logger.error(f"❌ FALHA: {description} (Código {resultado.returncode})")
+    return False
+
+
+def run_module(module_name, description):
+    """Executa um job Python empacotado com o mesmo ambiente do sistema."""
+
+    inicio = time.time()
+    logger.info(f"▶️ INICIANDO: {description}")
+    resultado = subprocess.run(
+        [PYTHON_EXEC, "-m", module_name],
+        cwd=DIR_RAIZ,
+        env=get_env_with_src(),
+    )
+    duracao = round(time.time() - inicio, 2)
+    if resultado.returncode == 0:
+        logger.info(f"✅ SUCESSO: {description} ({duracao}s)")
+        return True
+    logger.error(f"❌ FALHA: {description} (Código {resultado.returncode})")
+    return False
 
 
 def start_api_process(module_name, port, log_filename, description):
@@ -111,32 +128,25 @@ def verificar_banco_populado():
 
 
 def run_pipeline():
-    logger.info("📡 Verificando atualizações na ANEEL...")
-    resultado_monitor = run_script(os.path.join(DIR_SRC, "etl", "monitor_aneel.py"), "Monitor ANEEL")
-    
+    from src.config import DATA_INGEST_ON_STARTUP, TRAIN_MODEL_ON_STARTUP
+
     banco_populado = verificar_banco_populado()
-    
-    if banco_populado:
-        logger.info("✅ Banco de dados já populado. Pulando migração e usando cache existente.")
-        precisa_migrar = False
-    else:
-        logger.info("📦 Banco vazio ou incompleto. Iniciando migração...")
-        precisa_migrar = True
-    
-    if precisa_migrar:
-        logger.info("📦 Migrando dados do GDB para PostgreSQL...")
-        if not run_script(os.path.join(DIR_SRC, "etl", "migracao_db.py"), "Migração Database (GDB -> SQL)"):
-            logger.error("🛑 Falha crítica na migração. Abortando inicialização.")
+
+    precisa_ingestao = DATA_INGEST_ON_STARTUP or not banco_populado
+    if precisa_ingestao:
+        logger.info("📦 Executando ingestão da fonte de dados configurada...")
+        if not run_module("src.etl.pipeline", "Ingestão e publicação do snapshot"):
+            logger.error("🛑 Falha crítica na ingestão. Abortando inicialização.")
             sys.exit(1)
+    else:
+        logger.info("✅ Banco de dados já populado. Pulando ingestão no boot.")
 
-    logger.info("🗺️ Gerando territórios Voronoi...")
-    run_script(os.path.join(DIR_SRC, "modelos", "processar_voronoi.py"), "Gerando Territórios (Voronoi)")
-
-    logger.info("📊 Atualizando análise de mercado...")
-    run_script(os.path.join(DIR_SRC, "modelos", "analise_mercado.py"), "Análise de Mercado")
-
-    logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
-    run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest")
+    if TRAIN_MODEL_ON_STARTUP or not os.path.exists(CAMINHO_MODELO_PKL):
+        logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
+        if not run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest"):
+            sys.exit(1)
+    else:
+        logger.info("✅ Modelo de IA existente. Pulando treinamento no boot.")
 
 if __name__ == "__main__":
     logger.info("--- ⚡ INICIANDO SISTEMA GRIDSCOPE (HACKATHON MODE) ⚡ ---")
@@ -155,15 +165,7 @@ if __name__ == "__main__":
         logger.info("⏳ Aguardando 12 segundos para carga completa dos modelos de IA...")
         time.sleep(12)
 
-        logger.info("📊 Abrindo Dashboard...")
-        dash_proc = subprocess.Popen(
-            [PYTHON_EXEC, "-m", "streamlit", "run", os.path.join(DIR_SRC, "dashboard.py"), "--server.runOnSave",
-            "false"],
-            cwd=DIR_RAIZ,
-            env=get_env_with_src()
-        )
-
-        logger.info("\n✅ SISTEMA TOTALMENTE ONLINE")
+        logger.info("\n✅ APIs ONLINE — frontend Vite/PWA deve ser servido separadamente")
         logger.info("📝 Logs detalhados disponíveis na pasta /logs")
         logger.info("Press Ctrl+C para encerrar tudo.\n")
 
@@ -179,17 +181,12 @@ if __name__ == "__main__":
             if api_chat_proc.poll() is not None:
                 logger.warning("⚠️ API Chat (8002) morreu! O Chat IA não vai funcionar. Verifique logs/api_chat.log")
                 break
-            if dash_proc.poll() is not None:
-                logger.warning("ℹ️ Dashboard fechado pelo usuário.")
-                break
-
     except KeyboardInterrupt:
         logger.info("\n🛑 Encerrando serviços...")
         try:
             api_proc.terminate()
             api_ai_proc.terminate()
             api_chat_proc.terminate()
-            dash_proc.terminate()
         except:
             pass
         logger.info("GridScope encerrado com sucesso.")

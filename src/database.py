@@ -9,9 +9,10 @@ import geopandas as gpd
 import pandas as pd
 from sqlalchemy import create_engine, text
 from typing import Optional, List
+import re
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from config import DATABASE_URL
+from config import DATABASE_SCHEMA, DATABASE_URL
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Database")
@@ -25,7 +26,13 @@ def get_engine():
         Engine: SQLAlchemy engine configurado
     """
     try:
-        engine = create_engine(DATABASE_URL)
+        connect_args = {}
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", DATABASE_SCHEMA):
+            raise ValueError(f"Schema de banco inválido: {DATABASE_SCHEMA}")
+        if DATABASE_SCHEMA != "public":
+            connect_args["options"] = f"-csearch_path={DATABASE_SCHEMA},public"
+
+        engine = create_engine(DATABASE_URL, connect_args=connect_args)
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         logger.info("✅ Conexão com banco de dados estabelecida")
