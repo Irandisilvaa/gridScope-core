@@ -49,3 +49,39 @@ class StartupTests(unittest.TestCase):
                 timeout_seconds=1,
                 interval_seconds=0,
             )
+
+    @patch("run_all.modelo_artefato_compativel", return_value=True)
+    @patch("run_all.run_script")
+    @patch("run_all.verificar_banco_populado", return_value=False)
+    @patch("run_all.run_module")
+    @patch("src.config.DATA_INGEST_ON_STARTUP", False)
+    def test_banco_vazio_dispara_ingestao_no_boot(
+        self,
+        run_module,
+        _verificar_banco,
+        _run_script,
+        _modelo_compativel,
+    ):
+        run_module.return_value = True
+
+        run_all.run_pipeline()
+
+        run_module.assert_called_once_with(
+            "src.etl.pipeline", "Ingestão e publicação do snapshot"
+        )
+
+    @patch("run_all.modelo_artefato_compativel", return_value=True)
+    @patch("run_all.run_script")
+    @patch("run_all.verificar_banco_populado", return_value=True)
+    @patch("run_all.run_module")
+    @patch("src.config.DATA_INGEST_ON_STARTUP", False)
+    def test_banco_populado_pula_ingestao_no_boot(
+        self,
+        run_module,
+        _verificar_banco,
+        _run_script,
+        _modelo_compativel,
+    ):
+        run_all.run_pipeline()
+
+        run_module.assert_not_called()

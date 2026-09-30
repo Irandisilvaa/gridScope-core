@@ -84,6 +84,11 @@ O projeto inclui scripts utilitários para gerenciamento do banco de dados:
   (salva em `backups/`).
 - `python scripts/criar_indices.py`: Recria índices de performance nas tabelas
   do banco.
+- `python -m src.etl.pipeline`: Publica um snapshot completo (bruto, Voronoi,
+  mercado e metadados transacionais) a partir da fonte configurada em
+  `DATA_SOURCE`, que aceita `local_file` ou `distributor_http`.
+- `python -m src.etl.atualizar_banco --only-cache`: Regenera apenas o cache de
+  mercado a partir do banco já publicado.
 - `python -m unittest discover -s tests -v`: Executa a suíte de regressão.
 
 ---

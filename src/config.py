@@ -41,6 +41,7 @@ DATA_MAX_DOWNLOAD_BYTES = int(os.getenv("DATA_MAX_DOWNLOAD_BYTES", str(2 * 1024 
 DATA_MAX_ARCHIVE_ENTRIES = int(os.getenv("DATA_MAX_ARCHIVE_ENTRIES", "100000"))
 DATA_INGEST_ON_STARTUP = os.getenv("DATA_INGEST_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
 TRAIN_MODEL_ON_STARTUP = os.getenv("TRAIN_MODEL_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
+ALLOW_FILE_CACHE = os.getenv("ALLOW_FILE_CACHE", "true").lower() in {"1", "true", "yes"}
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))

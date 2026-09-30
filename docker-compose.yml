@@ -44,6 +44,7 @@ services:
       DATA_MAX_ARCHIVE_ENTRIES: "${DATA_MAX_ARCHIVE_ENTRIES:-100000}"
       DATA_INGEST_ON_STARTUP: "${DATA_INGEST_ON_STARTUP:-false}"
       TRAIN_MODEL_ON_STARTUP: "${TRAIN_MODEL_ON_STARTUP:-false}"
+      ALLOW_FILE_CACHE: "${ALLOW_FILE_CACHE:-true}"
 
   frontend:
     build: ./frontend
