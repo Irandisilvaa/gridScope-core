@@ -53,6 +53,20 @@ def _write_metadata(delivery, result) -> None:
     temporary_path.replace(METADATA_PATH)
 
 
+def _invalidate_runtime_cache() -> int:
+    """Remove respostas Redis que poderiam refletir a carga anterior."""
+
+    try:
+        from src.cache_redis import limpar_cache
+
+        removidas = limpar_cache()
+        logger.info("Cache Redis invalidado: %s chaves removidas", removidas)
+        return int(removidas)
+    except Exception:
+        logger.exception("Falha ao invalidar cache Redis após publicação")
+        return 0
+
+
 def _build_derived_tables(staging_schema: str) -> dict[str, int]:
     """Gera os derivados usando o mesmo schema temporário do snapshot."""
 
@@ -105,6 +119,7 @@ def ingest_current_delivery() -> dict:
             delivery_id=delivery.delivery_id,
         ).run(prepare_publish=_build_derived_tables)
         _write_metadata(delivery, result)
+        _invalidate_runtime_cache()
         logger.info("Entrega %s publicada: %s", delivery.delivery_id, result.row_counts)
         return {"delivery_id": delivery.delivery_id, "row_counts": result.row_counts}
     finally:

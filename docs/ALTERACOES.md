@@ -693,6 +693,23 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - A ANEEL permanece somente como referência até existir contrato/autorização da
   distribuidora; o conector de produção continua bloqueado por FONTE-01.
 
+## 2026-09-30 — invalidação do cache após publicação
+
+### Alterações
+
+- `src/etl/pipeline.py` agora invalida as chaves `api_cache:*` do Redis depois
+  do corte bem-sucedido e da gravação dos metadados da entrega.
+- Falha no Redis é registrada sem transformar uma publicação já concluída em
+  falsa falha operacional; a base e os metadados continuam sendo a fonte de
+  verdade.
+- Adicionado teste de regressão para garantir que a invalidação ocorre após o
+  corte do snapshot.
+
+### Validação
+
+- Testes Python no container: 43 aprovados.
+- Compilação Python no container: aprovada.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações
