@@ -834,3 +834,133 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Autenticação, titularidade de conversas, rate limit por identidade e política
   de retenção continuam pendentes até a definição do ambiente-alvo e da sessão
   verificável.
+
+## 2026-09-30 — proveniência operacional dos artefatos derivados
+
+### Alterações
+
+- O pipeline marca os jobs derivados com `GRIDSCOPE_DERIVED_STAGING=1`; durante
+  a preparação no schema temporário, Voronoi e análise de mercado não publicam
+  GeoJSON, imagens ou JSONs locais.
+- Falha ao persistir o Voronoi agora interrompe o job em vez de continuar com
+  um artefato parcial.
+- O cache de arquivos passou a ser opt-in (`ALLOW_FILE_CACHE=false`); a API e
+  os relatórios usam o PostgreSQL como fonte operacional e retornam
+  indisponibilidade quando não há dados, sem publicar lista vazia como sucesso.
+- As chaves Redis incorporam o `delivery_id` publicado, evitando servir cache de
+  um snapshot anterior depois da troca das tabelas.
+- Adicionados testes para o modo staging, cache versionado, ranking vazio e
+  falha de carga em relatórios.
+
+### Validação
+
+- Suíte Python no container: 63 aprovados.
+- Compilação Python e `git diff --check`: aprovados.
+- Build da imagem backend e `docker compose config` dos perfis padrão e dev:
+  aprovados.
+- Smoke real: `/health` e `/ready` aprovados; serviço operacional sem cache de
+  arquivo e executando como UID 1000.
+
+### Pendências
+
+- O corte integrado ainda precisa ser validado contra GDB real/anonimizado e
+  PostgreSQL/PostGIS representativo.
+
+## 2026-09-30 — corte transacional, proveniência e correção do ranking
+
+### Objetivo
+
+Fechar a proveniência da carga (DATA-01/DATA-05) e restaurar a leitura do
+ranking, que havia quebrado para dados vindos do banco. Nenhum fluxo que
+funcionava antes foi removido: as melhorias só se somam ao comportamento
+existente.
+
+### Publicação e proveniência
+
+- `SnapshotImporter` passou a validar colunas obrigatórias e CRS das camadas
+  antes de gravá-las no staging.
+- O corte registra `delivery_id`, origem, período, horário e contagens em
+  `public.grid_scope_publication` dentro da mesma transação que promove tabelas
+  brutas e derivadas.
+- O corte descarta a tabela antiga antes de promover a nova. Com a ordem
+  anterior, o índice `cache_mercado_pkey` da tabela antiga colidia com o da nova
+  e a segunda publicação falhava com `relation already exists`.
+- `GET /data/status` prioriza os metadados transacionais do banco e usa o JSON
+  somente como espelho auxiliar quando necessário.
+- Falha ao escrever o espelho JSON não desfaz nem oculta a publicação confirmada
+  no banco.
+- `src/cache_redis.py` deixou de depender do JSON local para nomear o cache:
+  quando o Redis perde a chave de versão, ela é recuperada do registro
+  transacional e reassinada. Falha transitória de Redis não vira erro HTTP.
+
+### Correção do ranking (`Erro interno ao carregar o ranking`)
+
+- `sanitizar_dados` chamava `pd.isna` sobre a lista inteira de subestações. Em
+  listas o pandas devolve um array, o `if` estourava `ValueError` e o `except`
+  devolvia a lista como `string`. O endpoint então iterava sobre caracteres e
+  terminava em `AttributeError: 'str' object has no attribute 'get'`.
+  Agora a checagem de nulo só é aplicada a escalares.
+- `obter_dados_completos` convertia a geometria com `mapping()` mesmo já
+  having-a como dicionário, o que também estourava. A normalização agora só
+  age quando a geometria ainda é um objeto espacial.
+- Ambos os defeitos eram anteriores a este trabalho e não eram cobertos: os
+  testes substituíam a fusão por um mock. `tests/test_dados_cache.py` e
+  `test_ranking_com_fusao_real_nao_quebra_a_geometria` exercitam o caminho real.
+
+### Compatibilidade preservada
+
+- `ALLOW_FILE_CACHE` voltou ao padrão `true`: os arquivos locais continuam sendo
+  lidos quando existem e nenhuma entrega foi publicada pelo pipeline. Depois de
+  uma publicação canônica o banco prevalece, porque os arquivos não são
+  reescritos pelo staging.
+- O boot volta a ingerir quando o banco está vazio, como antes;
+  `DATA_INGEST_ON_STARTUP` apenas força a ingestão.
+- `python -m src.etl.atualizar_banco` aceitou novamente `--only-cache` e
+  `--skip-voronoi`. `--only-cache` regenera o cache de mercado a partir do banco
+  publicado; `--skip-voronoi` é aceito e informado, mas o corte atômico sempre
+  calcula o Voronoi.
+- `processar_voronoi.py` e `analise_mercado.py` continuam executando
+  isoladamente (dashboard e uso manual). A publicação direta fora do corte não é
+  mais bloqueada: apenas registra aviso de que metadados e cache não serão
+  atualizados. Dentro do staging, a falha de persistência do Voronoi continua
+  fatal para que uma entrega não seja publicada com derivados vazios.
+- As duas fontes seguem disponíveis e selecionáveis: `DATA_SOURCE=local_file`
+  e `DATA_SOURCE=distributor_http` (alias `http`).
+
+### Validação
+
+- Suíte Python no container: 84 aprovados (82 na suíte padrão e 2 do corte
+  transacional, que são ignorados sem `TEST_DATABASE_URL`).
+- Build da imagem backend e `docker compose up` sem erros.
+- Verificação no serviço em execução: `/health`, `/mercado/ranking` (200 com 13
+  subestações e geometria), `/data/status`, `/mercado/geojson` e
+  `/mercado/ranking.csv` respondem 200, que é o contrato usado pelo frontend.
+- Sintaxe SQL da tabela/registro de publicação e da ordem do corte validadas em
+  PostgreSQL com transação revertida.
+
+### Validações de integridade e teste de corte real
+
+- `SnapshotImporter` passou a bloquear identificadores nulos, duplicados,
+  geometrias inválidas e referências órfãs entre camadas
+  (`consumidores`/`geracao_gd` → `transformadores` → `subestacoes`,
+  `rede_mt` → `subestacoes`). Mensagens incluem contagem e exemplos.
+- Criado `tests/test_corte_transacional_postgis.py`, o teste "indispensável" do
+  DATA-01, executado contra PostgreSQL/PostGIS real: publica A, publica B e
+  exige que sobre **somente** B em brutas, derivados e registro de publicação;
+  depois tenta publicar B corrompida (referência órfã e ID duplicado) e exige
+  que nada mude e que o registro de publicação continue sendo o anterior.
+- O teste só roda com `TEST_DATABASE_URL` explícita e nunca reaproveita
+  `DATABASE_URL`, porque substitui tabelas inteiras.
+- Conferido o resultado no banco: após a sequência ficam apenas `SUB-b-1` e
+  `SUB-b-2`, com `grid_scope_publication` apontando para `delivery-b-*`.
+- Verificado também que o teste falha contra a versão anterior do importador,
+  confirmando que ele cobre o defeito e não apenas o código novo.
+
+### Pendências
+
+- Executar uma publicação completa com GDB real ou anonimizado para validar
+  colunas, CRS, vínculos e derivados contra o dataset representativo.
+- `SnapshotImporter` ainda não valida unicidade/nulos de identificadores,
+  integridade referencial entre camadas nem validade geométrica.
+- Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
+  publicam derivados diretamente.
