@@ -618,6 +618,22 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - A política de quais APIs são obrigatórias/opcionais e o gerenciamento
   independente dos jobs de ingestão/treino continuam pendentes em `OPS-02`.
 
+## 2026-09-30 — verificação operacional de backup e restore
+
+### Validação executada
+
+- `python3 scripts/backup_db.py`: backup PostgreSQL criado com sucesso usando
+  o serviço `db` e arquivo temporário atômico.
+- O dump foi restaurado em um banco descartável `gridscope_restore_test`;
+  PostgreSQL/PostGIS executaram o SQL sem erro e a tabela `subestacoes` foi
+  restaurada com 44 registros.
+- O banco descartável foi removido ao final do teste.
+
+### Pendências
+
+- Definir RPO/RTO, retenção e agendamento do backup para o ambiente de
+  operação; o script local continua limitado à política dos cinco arquivos.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações
