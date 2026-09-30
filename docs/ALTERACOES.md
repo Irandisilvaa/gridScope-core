@@ -901,7 +901,7 @@ existente.
   terminava em `AttributeError: 'str' object has no attribute 'get'`.
   Agora a checagem de nulo só é aplicada a escalares.
 - `obter_dados_completos` convertia a geometria com `mapping()` mesmo já
-  having-a como dicionário, o que também estourava. A normalização agora só
+  tendo-a como dicionário, o que também estourava. A normalização agora só
   age quando a geometria ainda é um objeto espacial.
 - Ambos os defeitos eram anteriores a este trabalho e não eram cobertos: os
   testes substituíam a fusão por um mock. `tests/test_dados_cache.py` e
@@ -958,9 +958,50 @@ existente.
 
 ### Pendências
 
-- Executar uma publicação completa com GDB real ou anonimizado para validar
-  colunas, CRS, vínculos e derivados contra o dataset representativo.
-- `SnapshotImporter` ainda não valida unicidade/nulos de identificadores,
-  integridade referencial entre camadas nem validade geométrica.
+- Executar o pipeline completo com os jobs reais de Voronoi e mercado usando o
+  GDB representativo; o importador e o corte já foram executados isoladamente
+  em PostgreSQL/PostGIS, com derivados mínimos no banco scratch.
 - Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
   publicam derivados diretamente.
+
+## 2026-09-30 — descarte auditável de registros incompletos
+
+### Objetivo
+
+Permitir a publicação do GDB real sem transformar cinco registros incompletos
+em bloqueio da entrega inteira, mantendo o bloqueio para referências textuais
+que apontem para uma camada inexistente.
+
+### Alterações
+
+- Transformadores com `SUB` nulo ou vazio são descartados antes do staging; os
+  IDs técnicos e a contagem são registrados em `quality_report`.
+- Consumidores e geração distribuída ligados a transformadores descartados, ou
+  sem `UNI_TR_MT`, também são descartados e auditados por motivo separado.
+- Uma referência não vazia para transformador/subestação inexistente continua
+  bloqueando o corte; o teste de entrega corrompida mantém essa garantia.
+- `quality_report` passou a acompanhar `row_counts` em
+  `public.grid_scope_publication`, no espelho JSON e em `GET /data/status`.
+  Bancos com a tabela antiga continuam legíveis e recebem a coluna na próxima
+  publicação.
+- A leitura do GDB projeta somente as colunas consumidas pelo sistema. No
+  GDB real, `UCBT_tab` caiu de 65 para 16 colunas e o pico do snapshot caiu de
+  1.731 MB para 734 MB.
+- Unicidade deixou de ser exigida em `UCBT_tab`/`UGBT_tab`, onde o mesmo
+  transformador e `PN_CON` se repetem legitimamente; permanece apenas onde a
+  entrega garante chave única.
+
+### Validação
+
+- Suíte Python no container: 89 testes executados, 86 aprovados e 3 testes
+  PostGIS ignorados sem `TEST_DATABASE_URL`.
+- Testes PostGIS explícitos: 3 aprovados, incluindo descarte auditado,
+  publicação A/B e rejeição de referência textual órfã.
+- GDB real publicado em `gridscope_e2e` isolado com derivados mínimos:
+  55.728 transformadores, 1.066.331 consumidores, 15.413 registros de GD,
+  44 subestações e 310.744 trechos de rede.
+- O `quality_report` real registrou 5 transformadores sem `SUB`, 3
+  consumidores ligados a eles, 24 consumidores sem transformador e 8
+  registros de GD sem transformador.
+- Leitura dos metadados transacionais confirmou a entrega, contagens e o
+  relatório de qualidade; banco operacional não foi usado para a publicação.
