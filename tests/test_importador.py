@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import geopandas as gpd
 import pandas as pd
+import pyogrio
 from shapely.geometry import Point, Polygon
 
 from src.etl.importador import SnapshotImportError, SnapshotImporter
@@ -129,6 +132,40 @@ class SnapshotImporterTests(unittest.TestCase):
                 ),
             )
 
+    def test_consumidor_repetido_nao_bloqueia_o_corte(self) -> None:
+        """Vários consumidores legítimos apontam para o mesmo transformador.
+
+        A entrega real repete UNI_TR_MT e PN_CON de forma normal, então exigir
+        chave única aqui rejeitaria o único dado real disponível.
+        """
+        importer = self._make_importer()
+        repetidos = pd.DataFrame(
+            {
+                "UNI_TR_MT": ["TRAFO-1", "TRAFO-1", "TRAFO-1"],
+                "CLAS_SUB": ["R1", "R1", "R2"],
+                "PN_CON": ["111", "111", "222"],
+                "DAT_CON": [1, 1, 1],
+                **{f"ENE_{mes:02d}": [0, 0, 0] for mes in range(1, 13)},
+            }
+        )
+
+        importer._validate_layer_schema("UCBT_tab", repetidos)
+
+    def test_consumidor_sem_identificador_bloqueia_o_corte(self) -> None:
+        importer = self._make_importer()
+        sem_transformador = pd.DataFrame(
+            {
+                "UNI_TR_MT": [None],
+                "CLAS_SUB": ["R1"],
+                "PN_CON": ["111"],
+                "DAT_CON": [1],
+                **{f"ENE_{mes:02d}": [0] for mes in range(1, 13)},
+            }
+        )
+
+        with self.assertRaisesRegex(SnapshotImportError, "nulo"):
+            importer._validate_layer_schema("UCBT_tab", sem_transformador)
+
     def test_geometria_invalida_bloqueia_o_corte(self) -> None:
         importer = self._make_importer()
 
@@ -167,6 +204,50 @@ class SnapshotImporterTests(unittest.TestCase):
         }
 
         importer._validate_references(tabelas)
+
+    def test_le_apenas_as_colunas_efetivamente_usadas(self) -> None:
+        pasta = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, pasta, ignore_errors=True)
+        entrega = pasta / "entrega.gpkg"
+
+        gpd.GeoDataFrame(
+            {
+                "COD_ID": ["SUB-1"],
+                "NOME": ["SE-A"],
+                "DESCRICAO": ["texto que ninguem le"],
+                "geometry": [Point(-37.0, -10.0)],
+            },
+            crs="EPSG:4326",
+        ).to_file(entrega, layer="SUB", driver="GPKG")
+        pd.DataFrame(
+            {
+                "UNI_TR_MT": ["TRAFO-1"],
+                "CLAS_SUB": ["R1"],
+                "PN_CON": ["12345"],
+                "DAT_CON": [1],
+                **{f"ENE_{mes:02d}": [0] for mes in range(1, 13)},
+                "SEMRED": ["nao lido"],
+                "DESCR": ["nao lido"],
+            }
+        ).rename_axis("fid").pipe(
+            pyogrio.write_dataframe, entrega, layer="UCBT_tab", driver="GPKG"
+        )
+
+        importer = SnapshotImporter("postgresql://unused", entrega, delivery_id="delivery-a")
+
+        subestacoes = importer._read_layer("SUB")
+        consumidores = importer._read_layer("UCBT_tab")
+
+        self.assertEqual(set(subestacoes.columns), {"COD_ID", "NOME", "geometry"})
+        self.assertEqual("EPSG:4326", subestacoes.crs.to_string())
+        self.assertNotIn("SEMRED", consumidores.columns)
+        self.assertNotIn("DESCR", consumidores.columns)
+        # A projeção não pode esconder coluna obrigatória que sumiu do arquivo.
+        with self.assertRaisesRegex(SnapshotImportError, "colunas obrigatórias"):
+            importer._validate_layer_schema(
+                "UCBT_tab",
+                consumidores.drop(columns=["CLAS_SUB"]),
+            )
 
 
 if __name__ == "__main__":

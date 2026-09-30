@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping
 
 import geopandas as gpd
 import pandas as pd
+import pyogrio
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
@@ -26,10 +27,20 @@ CAMADAS_ALVO: Mapping[str, str] = {
 }
 _IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Chave estável de cada camada; usada para bloquear duplicatas e chaves nulas.
+# Colunas que não podem vir nulas: nelas se apoiam junções e agregações.
 _KEY_COLUMNS: Mapping[str, tuple[str, ...]] = {
     "UNTRMT": ("COD_ID",),
     "UCBT_tab": ("UNI_TR_MT", "PN_CON"),
     "UGBT_tab": ("UNI_TR_MT", "PN_CON"),
+    "SUB": ("COD_ID",),
+    "SSDMT": ("COD_ID",),
+}
+# Unicidade só é exigida onde a entrega realmente garante. Contra o GDB real,
+# consumidores e geração repetem o mesmo transformador e o mesmo PN_CON de forma
+# legítima (1.066.358 linhas para 182.855 PN_CON distintos), então exigir chave
+# única rejeitaria a entrega sem evitar defeito algum.
+_UNIQUE_COLUMNS: Mapping[str, tuple[str, ...]] = {
+    "UNTRMT": ("COD_ID",),
     "SUB": ("COD_ID",),
     "SSDMT": ("COD_ID",),
 }
@@ -144,6 +155,7 @@ class SnapshotImporter:
                 layer=layer_name,
                 engine="pyogrio",
                 use_arrow=True,
+                columns=self._colunas_utiles(layer_name),
             )
         except Exception as pyogrio_error:
             logger.warning("Fallback de leitura para %s: %s", layer_name, pyogrio_error)
@@ -151,6 +163,32 @@ class SnapshotImporter:
                 return gpd.read_file(self._source_path, layer=layer_name)
             except Exception as exc:
                 raise SnapshotImportError(f"Falha ao ler camada {layer_name}: {exc}") from exc
+
+    def _colunas_utiles(self, layer_name: str) -> list[str] | None:
+        """Projeta a camada nas colunas que o resto do sistema efetivamente le.
+
+        A entrega traz dezenas de colunas que ninguém consome: em uma camada
+        de mais de um milhão de registros, ler tudo elevou o pico de memória
+        de 566 MB para 1731 MB sem nenhum ganho. Colunas ausentes ficam de
+        fora da projeção para que a validação de esquema continue reportando
+        o que falta, em vez de estourar no leitor.
+        """
+        desejadas = _REQUIRED_COLUMNS.get(layer_name, set()) | set(_KEY_COLUMNS.get(layer_name, ()))
+        if not desejadas:
+            return None
+        try:
+            info = pyogrio.read_info(self._source_path, layer=layer_name)
+        except Exception:
+            logger.warning("Sem metadados de %s; lendo todas as colunas", layer_name)
+            return None
+        # Só pede o que existe no arquivo: a validação de esquema precisa ver
+        # a camada inteira para apontar o que falta.
+        disponiveis = set(info["fields"])
+        colunas = sorted(desejadas & disponiveis)
+        # O pyogrio descreve a geometria fora de "fields".
+        if info.get("geometry_type") and "geometry" in desejadas:
+            colunas.append("geometry")
+        return colunas or None
 
     @staticmethod
     def _write_layer(
@@ -221,6 +259,11 @@ class SnapshotImporter:
                     f"Camada {layer_name} com identificador nulo em {column}: "
                     f"{int(keys.isna().sum())} registro(s)"
                 )
+
+        for column in _UNIQUE_COLUMNS.get(layer_name, ()):
+            if column not in dataframe.columns:
+                continue
+            keys = dataframe[column]
             duplicated = keys.duplicated()
             if bool(duplicated.any()):
                 exemplos = sorted({str(valor) for valor in keys[duplicated][:5]})
@@ -254,7 +297,7 @@ class SnapshotImporter:
 
                 exemplos = sorted(set(orphans[:5]))
                 raise SnapshotImportError(
-                    f"{len(set(orphans))} registro(s) de {table_name} referenciam "
+                    f"{len(orphans)} registro(s) de {table_name} referenciam "
                     f"{column} inexistente em {target_table}: {', '.join(exemplos)}"
                 )
 
