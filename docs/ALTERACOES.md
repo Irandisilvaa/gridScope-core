@@ -958,9 +958,36 @@ existente.
 
 ### Pendências
 
-- Executar o pipeline completo com os jobs reais de Voronoi e mercado usando o
-  GDB representativo; o importador e o corte já foram executados isoladamente
-  em PostgreSQL/PostGIS, com derivados mínimos no banco scratch.
+- Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
+  publicam derivados diretamente.
+
+## 2026-09-30 — validação do pipeline derivado real
+
+### Alterações
+
+- A primeira execução completa do GDB real encontrou uma divergência: GeoPandas
+  salvava Voronoi/cache usando o `search_path`, mas a leitura final do corte
+  procurava as tabelas explicitamente no schema temporário.
+- `src/database.py` passou a informar `schema=DATABASE_SCHEMA` ao salvar
+  Voronoi e a qualificar todas as operações de cache e leitura derivada.
+- Adicionado teste de segurança para garantir que jobs derivados respeitem o
+  schema configurado.
+
+### Validação
+
+- O pipeline completo foi executado em `gridscope_e2e` com o GDB real, incluindo
+  download do limite de Aracaju, Voronoi e análise de mercado.
+- O corte publicou atomicamente 55.728 transformadores, 1.066.331
+  consumidores, 15.413 registros de GD, 44 subestações, 310.744 trechos de
+  rede, 12 territórios Voronoi e 12 registros de cache.
+- O registro `grid_scope_publication` aponta para `gdb-real-derived` e mantém o
+  `quality_report` dos descartes.
+- Suíte Python no container: 90 testes executados, 87 aprovados e 3 testes
+  PostGIS ignorados sem `TEST_DATABASE_URL`.
+- Teste PostGIS explícito do corte: 3 aprovados.
+
+### Pendências
+
 - Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
   publicam derivados diretamente.
 
