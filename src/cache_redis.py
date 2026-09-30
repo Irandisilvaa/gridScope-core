@@ -17,6 +17,7 @@ except ImportError:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+PUBLICATION_VERSION_KEY = "grid_scope:publication_version"
 
 try:
     redis_client = redis.Redis(
@@ -30,11 +31,70 @@ except Exception as e:
     logger.warning(f"⚠️ Redis não configurado corretamente: {e}")
     redis_client = None
 
+_VERSAO_RECUPERADA: Optional[str] = None
+
+
 def is_redis_available():
     if not redis_client: return False
     try:
         return redis_client.ping()
-    except redis.ConnectionError:
+    except redis.RedisError:
+        return False
+
+def _recuperar_versao_publicada() -> str:
+    """Usa o registro transacional do banco quando o Redis perde a chave de versão."""
+
+    global _VERSAO_RECUPERADA
+    if _VERSAO_RECUPERADA:
+        return _VERSAO_RECUPERADA
+
+    try:
+        from database import carregar_publication_metadata
+
+        metadata = carregar_publication_metadata()
+    except Exception as error:
+        logger.warning(f"Falha ao recuperar a versão publicada no banco: {error}")
+        return "unpublished"
+
+    if not isinstance(metadata, dict):
+        return "unpublished"
+
+    versao = str(metadata.get("delivery_id") or metadata.get("published_at") or "unpublished")
+    definir_versao_publicacao(versao)
+    _VERSAO_RECUPERADA = versao
+    return versao
+
+
+def _publication_version() -> str:
+    """Retorna a versão publicada para impedir cache de snapshots antigos."""
+
+    if not is_redis_available():
+        return "unpublished"
+
+    try:
+        redis_version = redis_client.get(PUBLICATION_VERSION_KEY)
+    except redis.RedisError as error:
+        logger.warning(f"Falha ao ler a versão publicada no Redis: {error}")
+        return "unpublished"
+    if redis_version:
+        return str(redis_version)
+
+    return _recuperar_versao_publicada()
+
+
+def definir_versao_publicacao(delivery_id: str) -> bool:
+    """Registra no Redis a entrega que pode ser usada como namespace de cache."""
+
+    global _VERSAO_RECUPERADA
+
+    if not is_redis_available():
+        return False
+    try:
+        redis_client.set(PUBLICATION_VERSION_KEY, str(delivery_id))
+        _VERSAO_RECUPERADA = None
+        return True
+    except Exception:
+        logger.exception("Falha ao registrar versão publicada no Redis")
         return False
 
 def cache_json(ttl_seconds: int = 300, key_prefix: str = "api_cache"):
@@ -48,7 +108,7 @@ def cache_json(ttl_seconds: int = 300, key_prefix: str = "api_cache"):
             if not is_redis_available():
                 return func(*args, **kwargs)
 
-            key_parts = [key_prefix, func.__name__]
+            key_parts = [key_prefix, f"publication={_publication_version()}", func.__name__]
             if args: key_parts.extend([str(a) for a in args])
             if kwargs: key_parts.extend([f"{k}={v}" for k, v in kwargs.items()])
             

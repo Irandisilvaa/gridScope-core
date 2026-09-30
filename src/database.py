@@ -5,6 +5,7 @@ Centraliza todas as operações com o banco de dados PostgreSQL/PostGIS
 import os
 import sys
 import logging
+import json
 import geopandas as gpd
 import pandas as pd
 from sqlalchemy import create_engine, text
@@ -64,6 +65,49 @@ def get_engine():
     except Exception as e:
         logger.error(f"❌ Erro ao conectar no banco de dados: {e}")
         raise
+
+
+def carregar_publication_metadata() -> Optional[dict]:
+    """Carrega a identificação da última publicação confirmada no banco."""
+
+    engine = None
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT delivery_id, source, reference_period, published_at, row_counts
+                    FROM public.grid_scope_publication
+                    WHERE publication_key = 1
+                    """
+                )
+            ).mappings().first()
+            if row is None:
+                return None
+
+            row_counts = row["row_counts"]
+            if isinstance(row_counts, str):
+                row_counts = json.loads(row_counts)
+            published_at = row["published_at"]
+            return {
+                "status": "published",
+                "source": row["source"],
+                "delivery_id": row["delivery_id"],
+                "reference_period": row["reference_period"],
+                "published_at": published_at.isoformat() if hasattr(published_at, "isoformat") else published_at,
+                "row_counts": row_counts if isinstance(row_counts, dict) else {},
+            }
+    except Exception as error:
+        # Banco publicado antes do registro transacional ainda não tem a tabela.
+        if getattr(getattr(error, "orig", None), "pgcode", None) == "42P01":
+            logger.info("Banco ainda sem registro de publicação (grid_scope_publication)")
+            return None
+        logger.warning("Não foi possível ler metadados da publicação: %s", error)
+        return None
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 def carregar_subestacoes(colunas: Optional[List[str]] = None) -> gpd.GeoDataFrame:
@@ -242,6 +286,25 @@ def carregar_voronoi() -> gpd.GeoDataFrame:
         engine.dispose()
 
 
+def _avisar_publicacao_direta() -> None:
+    """Avisa quando um job derivado publica no schema operacional fora do pipeline.
+
+    Não bloqueia: execuções manuais e o dashboard continuam funcionando como
+    antes. O corte atômico continua sendo o caminho recomendado e o único que
+    atualiza ``grid_scope_publication`` e a versão de cache.
+    """
+
+    if os.getenv("GRIDSCOPE_DERIVED_STAGING") == "1" or DATABASE_SCHEMA != "public":
+        return
+    if os.getenv("GRIDSCOPE_ALLOW_DIRECT_PUBLICATION") == "1":
+        return
+    logger.warning(
+        "Publicação direta de derivados detected fora do corte atômico; "
+        "grid_scope_publication e o cache Redis não serão atualizados. "
+        "Use `python -m src.etl.pipeline` para uma publicação consistente."
+    )
+
+
 def salvar_voronoi(gdf: gpd.GeoDataFrame) -> None:
     """
     Salva territórios Voronoi no banco de dados
@@ -249,6 +312,7 @@ def salvar_voronoi(gdf: gpd.GeoDataFrame) -> None:
     Args:
         gdf: GeoDataFrame com territórios de Voronoi
     """
+    _avisar_publicacao_direta()
     engine = get_engine()
     
     try:
@@ -302,7 +366,8 @@ def salvar_cache_mercado(dados_mercado: list) -> None:
         dados_mercado: Lista de dicts com dados agregados por subestação
     """
     import json
-    
+
+    _avisar_publicacao_direta()
     engine = get_engine()
     
     try:
