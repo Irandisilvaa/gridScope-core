@@ -727,6 +727,23 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Testes Python no container: 44 aprovados.
 - Compilação Python no container: aprovada.
 
+## 2026-09-30 — simulação sem fallback geográfico silencioso
+
+### Alterações
+
+- `src/api.py` passou a extrair coordenadas de geometria Point/Polygon/
+  MultiPolygon e validar latitude/longitude antes de consultar clima.
+- Simulações com geometria ausente, inválida ou fora dos limites retornam
+  indisponibilidade explícita, em vez de usar Brasília/Aracaju como alvo
+  substituto.
+- Adicionado teste de contrato para impedir consulta climática quando a
+  localização da subestação não está disponível.
+
+### Validação
+
+- Testes Python no container: 45 aprovados.
+- Compilação Python no container: aprovada.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

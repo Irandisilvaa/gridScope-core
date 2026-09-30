@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
+from shapely.geometry import Point
 
 import src.api as api_module
 from src.cache_redis import limpar_cache
@@ -34,7 +35,7 @@ class ApiContractTests(unittest.TestCase):
                 },
                 "perfil_consumo": {},
                 "evolucao_temporal": [],
-                "geometry": None,
+                "geometry": Point(-37.0731, -10.9472),
             }
         ]
 
@@ -166,6 +167,17 @@ class ApiContractTests(unittest.TestCase):
             ambiguous = self.client.get("/simulacao/id/A")
 
         self.assertEqual(ambiguous.status_code, 409)
+
+    def test_simulacao_rejeita_localizacao_ausente(self) -> None:
+        sem_geometria = dict(self.snapshot[0], geometry=None)
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=[sem_geometria]
+        ), patch.object(api_module, "obter_clima_avancado") as clima:
+            response = self.client.get("/simulacao/id/A")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("Brasília", response.text)
+        clima.assert_not_called()
 
     def test_simulacao_por_nome_nao_escolhe_primeiro_resultado_ambiguo(self) -> None:
         duplicate_names = [

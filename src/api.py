@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import logging
+import math
 import os
 import sys
 import requests
@@ -232,18 +233,48 @@ def _carregar_alvo_simulacao(
     raise HTTPException(status_code=404, detail=f"Subestacao '{nome_buscado}' nao encontrada")
 
 
+def _extrair_coordenadas_simulacao(alvo: Dict[str, Any]) -> tuple[float, float]:
+    geom = alvo.get("geometry")
+    if not isinstance(geom, dict):
+        geom = getattr(geom, "__geo_interface__", None)
+    coordenadas = geom.get("coordinates") if isinstance(geom, dict) else None
+
+    def primeiro_par(valor: Any) -> tuple[float, float] | None:
+        if isinstance(valor, (list, tuple)):
+            if (
+                len(valor) == 2
+                and all(isinstance(parte, (int, float)) and not isinstance(parte, bool) for parte in valor)
+            ):
+                return float(valor[0]), float(valor[1])
+            for item in valor:
+                par = primeiro_par(item)
+                if par is not None:
+                    return par
+        return None
+
+    par = primeiro_par(coordenadas)
+    if par is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Localização da subestação indisponível para simulação",
+        )
+
+    lon, lat = par
+    if not (
+        math.isfinite(lat)
+        and math.isfinite(lon)
+        and -90 <= lat <= 90
+        and -180 <= lon <= 180
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail="Localização da subestação inválida para simulação",
+        )
+    return lat, lon
+
+
 def _gerar_simulacao(alvo: Dict[str, Any], data_obj: date) -> Dict[str, Any]:
-    lat, lon = -10.9472, -37.0731
-    try:
-        geom = alvo.get("geometry")
-        if isinstance(geom, dict) and "coordinates" in geom:
-            coords = geom["coordinates"]
-            if isinstance(coords[0], float):
-                lon, lat = coords[0], coords[1]
-            else:
-                lon, lat = coords[0][0][0], coords[0][0][1]
-    except (IndexError, KeyError, TypeError):
-        pass
+    lat, lon = _extrair_coordenadas_simulacao(alvo)
 
     irradiacao, temp_max, desc_tempo, fonte = obter_clima_avancado(lat, lon, data_obj)
 
