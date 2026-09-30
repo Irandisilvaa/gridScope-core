@@ -44,6 +44,16 @@ class ChatLimitsTests(unittest.TestCase):
         feedback.assert_called_once_with()
         historico.assert_called_once_with()
 
+    def test_health_informa_modelo_configurado(self) -> None:
+        self.assertEqual(chat_service.health_check()["model"], chat_service.CHAT_MODEL)
+
+    def test_ready_rejeita_armazenamento_indisponivel(self) -> None:
+        with patch.object(chat_service, "chat_storage_ready", False):
+            with self.assertRaises(HTTPException) as raised:
+                chat_service.ready_check()
+
+        self.assertEqual(raised.exception.status_code, 503)
+
 
 if __name__ == "__main__":
     unittest.main()

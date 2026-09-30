@@ -9,10 +9,10 @@ OUT_DIR = os.path.join(BASE_DIR, "validacao")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 try:
-    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN, model_is_compatible
     from .train_model import gerar_dados_treino_inteligente
 except ImportError:
-    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN, model_is_compatible
     from train_model import gerar_dados_treino_inteligente
 
 def validar_modelo(model_path):
@@ -20,10 +20,12 @@ def validar_modelo(model_path):
     print(f"\n📊 Validando: {nome}")
 
     modelo = joblib.load(model_path)
+    if not model_is_compatible(modelo):
+        raise ValueError("Artefato incompatível com o contrato atual de features")
 
     df = gerar_dados_treino_inteligente(seed=123)
     df["data"] = pd.date_range("2023-01-01", periods=len(df), freq="h")
-    feature_columns = tuple(getattr(modelo, "feature_names_in_", FEATURE_COLUMNS))
+    feature_columns = FEATURE_COLUMNS
     missing = set(feature_columns) - set(df.columns)
     if missing:
         raise ValueError(f"Features ausentes no dataset de validação: {sorted(missing)}")

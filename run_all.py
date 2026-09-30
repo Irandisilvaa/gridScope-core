@@ -3,6 +3,8 @@ import sys
 import time
 import os
 import logging
+import urllib.error
+import urllib.request
 from datetime import datetime
 
 DIR_RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -33,6 +35,17 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("GridScope")
+
+
+def modelo_artefato_compativel() -> bool:
+    try:
+        import joblib
+        from src.ai.model_contract import model_is_compatible
+
+        return model_is_compatible(joblib.load(CAMINHO_MODELO_PKL))
+    except Exception as error:
+        logger.warning("⚠️ Artefato ML indisponível ou incompatível: %s", error)
+        return False
 
 
 def get_env_with_src():
@@ -117,31 +130,62 @@ def _stop_api_processes(processes):
             process.wait(timeout=5)
 
 
+def aguardar_servicos(processes, endpoints, timeout_seconds=60, interval_seconds=1):
+    """Aguarda healthchecks HTTP em vez de usar um atraso fixo no startup."""
+
+    deadline = time.monotonic() + timeout_seconds
+    pendentes = dict(endpoints)
+    while pendentes and time.monotonic() < deadline:
+        for description, process in processes:
+            if process.poll() is not None:
+                raise RuntimeError(f"{description} encerrou durante o startup")
+
+        for description, url in tuple(pendentes.items()):
+            try:
+                with urllib.request.urlopen(url, timeout=2) as response:
+                    if response.status == 200:
+                        logger.info("✅ Healthcheck aprovado: %s", description)
+                        del pendentes[description]
+            except urllib.error.URLError:
+                continue
+
+        if pendentes:
+            time.sleep(interval_seconds)
+
+    if pendentes:
+        raise RuntimeError(f"Serviços não ficaram prontos: {', '.join(pendentes)}")
+
+
 def verificar_banco_populado():
     from sqlalchemy import create_engine, text
     from src.config import DATABASE_URL
-    
+
+    engine = None
     try:
         engine = create_engine(DATABASE_URL)
-        
+
         with engine.connect() as conn:
             tabelas = ['subestacoes', 'consumidores', 'cache_mercado']
-            
+
             for tabela in tabelas:
                 try:
                     result = conn.execute(text(f'SELECT COUNT(*) FROM "{tabela}"'))
                     count = result.scalar()
-                    
+
                     if count == 0:
-                        return False  
-                except:
-                    return False  
-            
-            return True  
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Erro ao verificar banco: {e}")
+                        return False
+                except Exception as error:
+                    logger.warning("Falha ao verificar tabela %s: %s", tabela, error)
+                    return False
+
+            return True
+
+    except Exception as error:
+        logger.warning("⚠️ Erro ao verificar banco: %s", error)
         return False
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 def run_pipeline():
@@ -158,7 +202,7 @@ def run_pipeline():
     else:
         logger.info("✅ Banco de dados já populado. Pulando ingestão no boot.")
 
-    if TRAIN_MODEL_ON_STARTUP or not os.path.exists(CAMINHO_MODELO_PKL):
+    if TRAIN_MODEL_ON_STARTUP or not modelo_artefato_compativel():
         logger.info("🧠 Treinando IA (Duck Curve)... Isso pode levar alguns segundos.")
         if not run_script(os.path.join(DIR_SRC, "ai", "train_model.py"), "Treinamento Modelo Random Forest"):
             sys.exit(1)
@@ -184,8 +228,14 @@ if __name__ == "__main__":
             ("API Chat IA (Gemini)", start_api_process("src.ai.chat_service:app", 8002, "api_chat.log", "API Chat IA (Gemini)"))
         )
 
-        logger.info("⏳ Aguardando 12 segundos para carga completa dos modelos de IA...")
-        time.sleep(12)
+        aguardar_servicos(
+            api_processes,
+            {
+                "API Principal": "http://127.0.0.1:8000/health",
+                "API Inteligência Artificial": "http://127.0.0.1:8001/health",
+                "API Chat IA": "http://127.0.0.1:8002/ready",
+            },
+        )
 
         logger.info("\n✅ APIs ONLINE — frontend Vite/PWA deve ser servido separadamente")
         logger.info("📝 Logs detalhados disponíveis na pasta /logs")

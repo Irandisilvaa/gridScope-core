@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import joblib
 import uvicorn
-import traceback
+import logging
 import os
 import requests
 import holidays
@@ -15,10 +15,12 @@ from datetime import datetime
 from shapely.geometry import Point
 from scipy.ndimage import gaussian_filter1d
 
+logger = logging.getLogger(__name__)
+
 try:
-    from src.ai.model_contract import FEATURE_COLUMNS
+    from src.ai.model_contract import FEATURE_COLUMNS, model_is_compatible
 except ImportError:
-    from model_contract import FEATURE_COLUMNS
+    from model_contract import FEATURE_COLUMNS, model_is_compatible
 
 app = FastAPI(title="GridScope AI", version="1.0")
 
@@ -29,8 +31,12 @@ MODEL_PATH = os.path.join(DIR_ATUAL, "modelo_consumo.pkl")
 model_rf = None
 if os.path.exists(MODEL_PATH):
     try: 
-        model_rf = joblib.load(MODEL_PATH)
-        print("✅ Modelo de Consumo ML carregado.")
+        model_candidate = joblib.load(MODEL_PATH)
+        if model_is_compatible(model_candidate):
+            model_rf = model_candidate
+            print("✅ Modelo de Consumo ML carregado.")
+        else:
+            print("⚠️ Artefato de modelo incompatível; usando fallback até novo treino.")
     except Exception as e: 
         print(f"⚠️ Erro ao carregar modelo ML: {e}")
 
@@ -62,6 +68,16 @@ class DuckCurveRequest(BaseModel):
     lat: float = Field(..., ge=-90, le=90)
     lon: float = Field(..., ge=-180, le=180)
     dna_perfil: dict | None = None 
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "service": "gridscope-ai",
+        "version": app.version,
+        "model_loaded": model_rf is not None,
+    }
 
 def normalizar_id(valor):
     if pd.isna(valor): return ""
@@ -342,9 +358,9 @@ def calcular_curva_inteligente(payload: DuckCurveRequest):
             "analise": f"Carga Média: {media_diaria_kwh/24:.0f} kW | GD: {pot_gd_final_kw:.0f} kWp"
         }
 
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+    except Exception as error:
+        logger.exception("Falha ao calcular curva inteligente")
+        raise HTTPException(status_code=500, detail="Erro interno ao calcular a curva") from error
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

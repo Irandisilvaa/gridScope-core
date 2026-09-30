@@ -76,6 +76,13 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
+        self.assertTrue(response.headers["X-Request-ID"])
+
+    def test_request_id_fornecido_e_devolvido(self) -> None:
+        response = self.client.get("/health", headers={"X-Request-ID": "teste-123"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["X-Request-ID"], "teste-123")
 
     def test_readiness_retorna_indisponivel_quando_redis_falha(self) -> None:
         with patch.object(api_module, "get_engine", return_value=MagicMock()), patch.object(

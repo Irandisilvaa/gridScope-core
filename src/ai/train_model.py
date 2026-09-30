@@ -6,9 +6,9 @@ from sklearn.ensemble import RandomForestRegressor
 import holidays
 
 try:
-    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN, annotate_model
 except ImportError:
-    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN, annotate_model
 
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -140,6 +140,7 @@ def treinar_modelo_universal():
     )
     
     model.fit(X, y)
+    annotate_model(model)
     
     print(f"💾 Salvando modelo em: {MODEL_PATH}")
     joblib.dump(model, MODEL_PATH)

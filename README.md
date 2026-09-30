@@ -72,8 +72,11 @@ interna do Compose.
 
 O projeto inclui scripts utilitários para gerenciamento do banco de dados:
 
-- `python backup_db.py`: Gera backup completo do banco PostgreSQL (salva em `backups/`).
-- `python criar_indices.py`: Recria índices de performance nas tabelas do banco.
+- `python scripts/backup_db.py`: Gera backup completo do banco PostgreSQL
+  (salva em `backups/`).
+- `python scripts/criar_indices.py`: Recria índices de performance nas tabelas
+  do banco.
+- `python -m unittest discover -s tests -v`: Executa a suíte de regressão.
 
 ---
 

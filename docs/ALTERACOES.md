@@ -758,6 +758,34 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Testes Python no container: 47 aprovados.
 - Compilação Python no container: aprovada.
 
+## 2026-09-30 — ciclo de vida da IA e startup observável
+
+### Alterações
+
+- O artefato ML passou a carregar a versão e a lista de features do contrato;
+  artefatos antigos ou incompatíveis são rejeitados e provocam novo treino
+  controlado quando o startup exigir o modelo.
+- `validate_model.py` agora recusa artefatos incompatíveis antes da inferência;
+  o modelo regenerado foi validado com R² 0,9989 e MAE 0,25.
+- `run_all.py` substituiu a espera fixa de 12 segundos por healthchecks HTTP
+  dos serviços; o chat possui readiness separado para o armazenamento.
+- A API principal adiciona `X-Request-ID` às respostas e aos logs; a API de IA
+  não devolve detalhes de exceções internas.
+- O modelo configurado em `CHAT_MODEL` passou a ser usado pelo chat, inclusive
+  no healthcheck.
+- A análise de mercado agora rejeita vínculos espaciais ambíguos em vez de
+  escolher silenciosamente o primeiro território.
+- README corrigido para os caminhos atuais dos scripts de manutenção e para o
+  comando da suíte de regressão.
+
+### Validação
+
+- Testes Python no container: 57 aprovados.
+- Compilação Python no container: aprovada.
+- Compose recriado com sucesso; startup aprovou os healthchecks da API
+  principal, IA e chat.
+- `/health` e `/ready` da API principal responderam com banco e Redis OK.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

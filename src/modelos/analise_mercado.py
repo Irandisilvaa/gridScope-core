@@ -82,8 +82,7 @@ def analisar_mercado():
         gdf_voronoi = gdf_voronoi.to_crs(epsg=31984) 
 
         if 'COD_ID' not in gdf_voronoi.columns:
-            print("ERRO CRÍTICO: Voronoi sem coluna COD_ID.")
-            return
+            raise RuntimeError("Voronoi sem coluna COD_ID")
 
         if 'NOM' not in gdf_voronoi.columns and 'NOME' in gdf_voronoi.columns:
             gdf_voronoi = gdf_voronoi.rename(columns={'NOME': 'NOM'})
@@ -95,7 +94,7 @@ def analisar_mercado():
         print(f"   -> {len(gdf_voronoi)} territórios válidos carregados.")
     except Exception as e:
         print(f"Erro Voronoi: {e}")
-        return
+        raise RuntimeError("Falha ao carregar territórios Voronoi") from e
     print("2. Mapeando Transformadores (Spatial Join)...")
     try:
         gdf_trafos = carregar_transformadores().to_crs(epsg=31984)
@@ -118,13 +117,16 @@ def analisar_mercado():
         ref_trafos = pd.DataFrame()
         ref_trafos['ID_TRAFO'] = trafos_join[col_id_trafo].apply(limpar_id)
         ref_trafos['ID_SUBESTACAO'] = trafos_join[col_id_sub].apply(limpar_id) 
-        
-        ref_trafos = ref_trafos.drop_duplicates(subset=['ID_TRAFO'])
-        
+
+        ref_trafos = ref_trafos.dropna(subset=['ID_TRAFO', 'ID_SUBESTACAO'])
+        ambiguos = ref_trafos[ref_trafos['ID_TRAFO'].duplicated(keep=False)]
+        if not ambiguos.empty:
+            raise RuntimeError("Transformador vinculado a mais de um território")
+
         print(f"   -> {len(ref_trafos)} transformadores vinculados a subestações.")
     except Exception as e:
         print(f"Erro Crítico em Transformadores: {e}")
-        return
+        raise RuntimeError("Falha ao vincular transformadores aos territórios") from e
     print("3. Processando Consumidores (Vínculo Rigoroso)...")
     df_cons_final = pd.DataFrame()
     mapa_pn_classe = pd.Series(dtype='object')

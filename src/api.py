@@ -7,9 +7,11 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import requests
 import urllib.parse 
+import uuid
 from datetime import datetime, date
 from typing import Dict, Optional, List, Any
 from shapely.geometry import mapping
@@ -53,6 +55,22 @@ CSV_COLUNAS_RANKING = (
     "potencia_total_kw_gd",
 )
 logger = logging.getLogger(__name__)
+
+
+@app.middleware("http")
+async def request_id_middleware(request, call_next):
+    requested_id = request.headers.get("X-Request-ID", "")
+    request_id = requested_id if re.fullmatch(r"[A-Za-z0-9._-]{1,64}", requested_id) else uuid.uuid4().hex
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    logger.info(
+        "request_id=%s method=%s path=%s status=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+    )
+    return response
 
 
 def proteger_celula_csv(valor: object) -> object:

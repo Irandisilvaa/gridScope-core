@@ -25,14 +25,18 @@ from database import (criar_tabela_feedback, salvar_feedback_chat,
 logger = logging.getLogger(__name__)
 
 client = genai.Client(api_key=CHAT_API_KEY)
+chat_storage_ready = False
 
 
 @asynccontextmanager
 async def lifespan(_app):
+    global chat_storage_ready
     try:
         criar_tabela_feedback()
         criar_tabelas_historico()
+        chat_storage_ready = True
     except Exception:
+        chat_storage_ready = False
         logger.exception("Falha ao inicializar tabelas do chat")
     yield
 
@@ -343,7 +347,7 @@ def enviar_mensagem(request: ChatRequest):
         try:
             response = call_gemini_with_retry(
                 client,
-                'gemini-3-flash-preview',
+                CHAT_MODEL,
                 contents,
                 types.GenerateContentConfig(
                     tools=tools,
@@ -435,7 +439,7 @@ def enviar_mensagem(request: ChatRequest):
             try:
                 response = call_gemini_with_retry(
                     client,
-                    'gemini-3-flash-preview',
+                    CHAT_MODEL,
                     contents,
                     types.GenerateContentConfig(
                         tools=tools,
@@ -584,13 +588,20 @@ def obter_conversa(conversa_id: int = Path(..., gt=0)):
 def health_check():
     return {
         "status": "ok",
-        "model": "gemini-3-flash-preview",
+        "model": CHAT_MODEL,
         "api_configured": CHAT_API_KEY is not None
     }
 
+
+@app.get("/ready")
+def ready_check():
+    if not chat_storage_ready:
+        raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
+    return {"status": "ready", "service": "gridscope-chat"}
+
 if __name__ == "__main__":
     print("\n🚀 Iniciando GridScope Chat IA Service...")
-    print(f"📡 Modelo: gemini-3-flash-preview (20 req/dia)")
+    print(f"📡 Modelo: {CHAT_MODEL}")
     print(f"🔑 API Key configurada: {'Sim' if CHAT_API_KEY else 'NÃO'}")
     print("\n💡 Acesse a documentação em: http://localhost:8002/docs\n")
     
