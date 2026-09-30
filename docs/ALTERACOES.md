@@ -634,6 +634,23 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Definir RPO/RTO, retenção e agendamento do backup para o ambiente de
   operação; o script local continua limitado à política dos cinco arquivos.
 
+## 2026-09-30 — inicialização lazy do armazenamento do chat
+
+### Alterações
+
+- `src/ai/chat_service.py` deixou de criar tabelas de feedback/histórico durante
+  a importação do módulo.
+- A preparação dessas tabelas passou para o `lifespan` do FastAPI, mantendo a
+  inicialização no startup real do serviço e permitindo importar o módulo sem
+  exigir banco disponível.
+- Adicionado teste para o ciclo de vida de inicialização do armazenamento.
+
+### Validação
+
+- Testes Python no container: 39 aprovados.
+- Compilação Python no container: aprovada.
+- `git diff --check`: aprovado.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

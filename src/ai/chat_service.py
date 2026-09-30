@@ -3,6 +3,7 @@ import sys
 import json
 import hashlib
 import logging
+from contextlib import asynccontextmanager
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from google import genai
@@ -21,15 +22,22 @@ from database import (criar_tabela_feedback, salvar_feedback_chat,
                     criar_tabelas_historico, criar_conversa, salvar_mensagem, 
                     carregar_conversas, carregar_mensagens)
 
-client = genai.Client(api_key=CHAT_API_KEY)
-try:
-    criar_tabela_feedback()
-    criar_tabelas_historico()
-except Exception as e:
-    print(f"⚠️ Erro ao inicializar: {e}")
-
-app = FastAPI(title="GridScope Chat IA", version="1.0")
 logger = logging.getLogger(__name__)
+
+client = genai.Client(api_key=CHAT_API_KEY)
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    try:
+        criar_tabela_feedback()
+        criar_tabelas_historico()
+    except Exception:
+        logger.exception("Falha ao inicializar tabelas do chat")
+    yield
+
+
+app = FastAPI(title="GridScope Chat IA", version="1.0", lifespan=lifespan)
 
 MAX_CHAT_MESSAGE_CHARS = 4_000
 MAX_HISTORY_MESSAGES = 20

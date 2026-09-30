@@ -1,7 +1,10 @@
+import asyncio
 import unittest
+from unittest.mock import patch
 
 from fastapi import HTTPException
 
+from src.ai import chat_service
 from src.ai.chat_service import ChatRequest, _validar_limites_chat
 
 
@@ -27,6 +30,19 @@ class ChatLimitsTests(unittest.TestCase):
             _validar_limites_chat(request)
 
         self.assertEqual(raised.exception.status_code, 422)
+
+    def test_tabelas_do_chat_sao_inicializadas_no_lifespan(self) -> None:
+        async def executar_lifespan() -> None:
+            async with chat_service.lifespan(None):
+                pass
+
+        with patch.object(chat_service, "criar_tabela_feedback") as feedback, patch.object(
+            chat_service, "criar_tabelas_historico"
+        ) as historico:
+            asyncio.run(executar_lifespan())
+
+        feedback.assert_called_once_with()
+        historico.assert_called_once_with()
 
 
 if __name__ == "__main__":
