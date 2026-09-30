@@ -1,7 +1,7 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { MetricCard } from "./MetricCard";
 import { StatusPill } from "./StatusPill";
-import type { Substation } from "../lib/api";
+import { api, type SolarSimulation, type Substation } from "../lib/api";
 
 type SubstationDetailProps = {
   row: Substation;
@@ -29,6 +29,29 @@ function barWidth(percentage: number) {
 export function SubstationDetail({ row, onClose }: SubstationDetailProps) {
   const classes = Object.entries(row.perfil_consumo);
   const generationClasses = Object.entries(row.geracao_distribuida.detalhe_por_classe);
+  const [simulationDate, setSimulationDate] = useState("");
+  const [simulation, setSimulation] = useState<SolarSimulation | null>(null);
+  const [simulationError, setSimulationError] = useState<string | null>(null);
+  const [isSimulating, setIsSimulating] = useState(false);
+
+  useEffect(() => {
+    setSimulationDate("");
+    setSimulation(null);
+    setSimulationError(null);
+  }, [row.id_tecnico]);
+
+  async function runSimulation() {
+    setIsSimulating(true);
+    setSimulationError(null);
+    try {
+      setSimulation(await api.getSolarSimulation(row.id_tecnico, simulationDate || undefined));
+    } catch {
+      setSimulationError("Não foi possível calcular a simulação para este ativo.");
+      setSimulation(null);
+    } finally {
+      setIsSimulating(false);
+    }
+  }
 
   return (
     <section className="grid gap-6 rounded-xl border border-[#6fe7d2]/25 bg-gradient-to-br from-[#6fe7d2]/[0.07] to-[#0d202c]/70 p-3 sm:p-6" aria-labelledby="substation-detail-title">
@@ -53,6 +76,33 @@ export function SubstationDetail({ row, onClose }: SubstationDetailProps) {
         <MetricCard label="Unidades GD" value={formatNumber(row.geracao_distribuida.total_unidades)} />
         <MetricCard label="Potência GD" value={`${formatNumber(row.geracao_distribuida.potencia_total_kw, 2)} kW`} />
       </div>
+
+      <DetailSection eyebrowText="Simulação solar" title="Projeção para este ativo">
+        <div className="grid gap-4 rounded-lg border border-[#ffc857]/20 bg-[#ffc857]/[0.05] p-4">
+          <p className="m-0 max-w-2xl text-sm leading-relaxed text-[#a8bcbd]">Estime a geração distribuída usando o ID técnico selecionado e a condição climática da data informada. A consulta climática é feita pelo backend.</p>
+          <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-end">
+            <label className="grid gap-1.5 text-xs font-semibold text-[#a8bcbd]" htmlFor="simulation-date">
+              Data de referência
+              <input className="rounded-md border border-white/10 bg-[#08141f] px-3 py-2 text-sm font-normal text-[#eef6f3] outline-none focus:border-[#6fe7d2]/60 focus:ring-2 focus:ring-[#6fe7d2]/20" id="simulation-date" onChange={(event) => setSimulationDate(event.target.value)} type="date" value={simulationDate} />
+            </label>
+            <button className="rounded-md border border-[#ffc857]/40 bg-[#ffc857]/10 px-3 py-2 text-xs font-bold text-[#ffc857] transition-colors hover:border-[#ffc857]/70 hover:bg-[#ffc857]/20 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ffc857]" disabled={isSimulating} onClick={runSimulation} type="button">
+              {isSimulating ? "Calculando…" : "Simular geração"}
+            </button>
+          </div>
+          {simulationError ? <p className="m-0 text-sm text-[#ff8379]" role="alert">{simulationError}</p> : null}
+          {simulation ? (
+            <div className="grid gap-3 border-t border-white/10 pt-4">
+              <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+                <MetricCard label="Geração estimada" value={`${formatNumber(simulation.geracao_estimada_mwh, 2)} MWh`} note={simulation.data_referencia} />
+                <MetricCard label="Irradiação" value={`${formatNumber(simulation.irradiacao_solar_kwh_m2, 2)} kWh/m²`} note={simulation.condicao_tempo} />
+                <MetricCard label="Temperatura máxima" value={`${formatNumber(simulation.temperatura_max_c, 1)} °C`} note={`Perda térmica ${formatNumber(simulation.fator_perda_termica, 2)}%`} />
+                <MetricCard label="Potência instalada" value={`${formatNumber(simulation.potencia_instalada_kw, 2)} kW`} note={simulation.fonte_dados} />
+              </div>
+              <p className="m-0 border-l-2 border-[#ffc857] pl-3 text-sm text-[#ffc857]">{simulation.impacto_na_rede}</p>
+            </div>
+          ) : null}
+        </div>
+      </DetailSection>
 
       <div className="grid gap-5 lg:grid-cols-2">
         <DetailSection eyebrowText="Perfil de consumo" title="Distribuição por classe">

@@ -336,3 +336,33 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - `python3 -m unittest tests.test_backup_db -v`: 2 testes aprovados.
 - `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q scripts/backup_db.py tests/test_backup_db.py`: aprovado.
 - `git diff --check`: aprovado.
+
+## 2026-09-29 — simulação solar por ID técnico
+
+### Alterações
+
+- Adicionado `GET /simulacao/id/{id_tecnico}` em `src/api.py`, com seleção
+  exata pelo identificador técnico e respostas `404` para ID ausente e `409`
+  para ID duplicado, sem escolher silenciosamente um registro.
+- Extraídas a validação da data, seleção do alvo e geração da simulação para
+  helpers compartilhados; a rota legada por nome permanece disponível para
+  compatibilidade, mas agora rejeita nomes ambíguos com `409`.
+- Adicionado `getSolarSimulation` e o tipo `SolarSimulation` ao cliente
+  TypeScript.
+- O detalhe da subestação agora permite escolher a data, executar a projeção
+  solar e visualizar geração, irradiação, temperatura, perda térmica, fonte e
+  impacto retornados pelo backend.
+- Adicionados testes de contrato para ID estável, ID inexistente e duplicidade.
+
+### Validação
+
+- Testes Python no container: 17 aprovados.
+- `npm run typecheck` e `npm run build`: aprovados.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
+- `git diff --check`: aprovado.
+
+### Pendências
+
+- A simulação ainda usa o fallback climático existente quando o provedor
+  externo não responde; o resultado deve continuar identificado como
+  estimativa na interface.

@@ -95,6 +95,48 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("'=SUM(1,1)", response.content.decode("utf-8-sig"))
         self.assertNotIn("geometry", response.content.decode("utf-8-sig"))
 
+    def test_simulacao_por_id_usa_identificador_estavel(self) -> None:
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=self.snapshot
+        ), patch.object(
+            api_module,
+            "obter_clima_avancado",
+            return_value=(5.0, 25.0, "Ceu Limpo", "Teste"),
+        ):
+            response = self.client.get("/simulacao/id/A?data=2026-09-29")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["subestacao"], "SE-A (ID: A)")
+        self.assertEqual(response.json()["data_referencia"], "29/09/2026")
+
+    def test_simulacao_por_id_rejeita_id_ausente_e_ambiguo(self) -> None:
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=self.snapshot
+        ):
+            missing = self.client.get("/simulacao/id/inexistente")
+
+        self.assertEqual(missing.status_code, 404)
+
+        duplicate = [self.snapshot[0], dict(self.snapshot[0], subestacao="SE-B (ID: A)")]
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=duplicate
+        ):
+            ambiguous = self.client.get("/simulacao/id/A")
+
+        self.assertEqual(ambiguous.status_code, 409)
+
+    def test_simulacao_por_nome_nao_escolhe_primeiro_resultado_ambiguo(self) -> None:
+        duplicate_names = [
+            dict(self.snapshot[0], subestacao="SE-A - Norte"),
+            dict(self.snapshot[0], id_tecnico="B", subestacao="SE-A - Sul"),
+        ]
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=duplicate_names
+        ):
+            response = self.client.get("/simulacao/SE-A")
+
+        self.assertEqual(response.status_code, 409)
+
 
 if __name__ == "__main__":
     unittest.main()

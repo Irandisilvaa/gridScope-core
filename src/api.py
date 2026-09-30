@@ -167,6 +167,113 @@ def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
         print(f"Erro Clima: {e}")
         return 5.0, 30.0, "Dados Offline", "Estimativa Padrao"
 
+
+def _parse_data_simulacao(data: Optional[str]) -> date:
+    if not data:
+        return date.today()
+
+    data_clean = data.replace("/", "-").replace(" ", "-")
+    for formato in ("%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            return datetime.strptime(data_clean, formato).date()
+        except ValueError:
+            continue
+    raise HTTPException(status_code=400, detail="Formato invalido. Use DD-MM-AAAA")
+
+
+def _carregar_alvo_simulacao(
+    *,
+    id_tecnico: Optional[str] = None,
+    nome_subestacao: Optional[str] = None,
+) -> Dict[str, Any]:
+    gdf, dados_mercado = carregar_dados_cache()
+    dados_fundidos = fundir_dados_geo_mercado(gdf, dados_mercado)
+
+    if id_tecnico is not None:
+        id_buscado = urllib.parse.unquote(id_tecnico).strip().upper()
+        matches = [
+            item
+            for item in dados_fundidos
+            if str(item.get("id_tecnico", "")).strip().upper() == id_buscado
+        ]
+        if not matches:
+            raise HTTPException(status_code=404, detail=f"ID técnico '{id_buscado}' não encontrado")
+        if len(matches) > 1:
+            raise HTTPException(status_code=409, detail=f"ID técnico '{id_buscado}' ambíguo")
+        return matches[0]
+
+    nome_buscado = urllib.parse.unquote(nome_subestacao or "").strip().upper()
+    exact_matches = [
+        item
+        for item in dados_fundidos
+        if str(item.get("subestacao", "")).strip().upper() == nome_buscado
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+    if len(exact_matches) > 1:
+        raise HTTPException(status_code=409, detail=f"Subestacao '{nome_buscado}' ambigua")
+
+    partial_matches = [
+        item
+        for item in dados_fundidos
+        if nome_buscado
+        and (
+            nome_buscado in str(item.get("subestacao", "")).strip().upper()
+            or str(item.get("subestacao", "")).strip().upper() in nome_buscado
+        )
+    ]
+    if len(partial_matches) == 1:
+        return partial_matches[0]
+    if len(partial_matches) > 1:
+        raise HTTPException(status_code=409, detail=f"Subestacao '{nome_buscado}' ambigua")
+
+    raise HTTPException(status_code=404, detail=f"Subestacao '{nome_buscado}' nao encontrada")
+
+
+def _gerar_simulacao(alvo: Dict[str, Any], data_obj: date) -> Dict[str, Any]:
+    lat, lon = -10.9472, -37.0731
+    try:
+        geom = alvo.get("geometry")
+        if isinstance(geom, dict) and "coordinates" in geom:
+            coords = geom["coordinates"]
+            if isinstance(coords[0], float):
+                lon, lat = coords[0], coords[1]
+            else:
+                lon, lat = coords[0][0][0], coords[0][0][1]
+    except (IndexError, KeyError, TypeError):
+        pass
+
+    irradiacao, temp_max, desc_tempo, fonte = obter_clima_avancado(lat, lon, data_obj)
+
+    perda_termica = 0.0
+    if temp_max > 25:
+        perda_termica = (temp_max - 25) * 0.004
+
+    fator_performance_real = 0.75 * (1 - perda_termica)
+    potencia = limpar_float(alvo["geracao_distribuida"]["potencia_total_kw"])
+    geracao_mwh = potencia * irradiacao * fator_performance_real / 1000
+
+    impacto = "Normal"
+    if irradiacao > 5.5 and temp_max < 30:
+        impacto = "CRITICO: Sol forte e Temp amena. Pico de injecao!"
+    elif irradiacao > 5.0:
+        impacto = "ALTA INJECAO: Atencao ao fluxo reverso."
+    elif irradiacao < 2.0:
+        impacto = "BAIXA GERACAO: Rede suportara carga maxima."
+
+    return {
+        "subestacao": alvo["subestacao"],
+        "data_referencia": data_obj.strftime("%d/%m/%Y"),
+        "fonte_dados": fonte,
+        "condicao_tempo": desc_tempo,
+        "irradiacao_solar_kwh_m2": round(irradiacao, 2),
+        "temperatura_max_c": round(temp_max, 1),
+        "fator_perda_termica": round(perda_termica * 100, 2),
+        "potencia_instalada_kw": potencia,
+        "geracao_estimada_mwh": round(geracao_mwh, 2),
+        "impacto_na_rede": impacto,
+    }
+
 @app.get("/", tags=["Status"])
 def home():
     return {"status": "online", "system": "GridScope Core 4.7"}
@@ -295,97 +402,31 @@ def obter_apenas_geojson():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao carregar GeoJSON: {str(e)}")
 
+@app.get("/simulacao/id/{id_tecnico}", response_model=SimulacaoSolar, tags=["Simulacao"])
+def simular_geracao_por_id(
+    id_tecnico: str,
+    data: Optional[str] = Query(None, description="Data: AAAA-MM-DD ou DD/MM/AAAA"),
+):
+    data_obj = _parse_data_simulacao(data)
+    try:
+        alvo = _carregar_alvo_simulacao(id_tecnico=id_tecnico)
+        return _gerar_simulacao(alvo, data_obj)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Erro dados: {error}") from error
+
+
 @app.get("/simulacao/{nome_subestacao}", response_model=SimulacaoSolar, tags=["Simulacao"])
 def simular_geracao(
-    nome_subestacao: str, 
-    data: Optional[str] = Query(None, description="Data: DD-MM-AAAA ou DD/MM/AAAA")
+    nome_subestacao: str,
+    data: Optional[str] = Query(None, description="Data: DD-MM-AAAA ou DD/MM/AAAA"),
 ):
-    data_obj = date.today()
-    if data:
-        data_clean = data.replace("/", "-").replace(" ", "-")
-        formatos = ["%Y-%m-%d", "%d-%m-%Y"]
-        parsed = False
-        for fmt in formatos:
-            try:
-                data_obj = datetime.strptime(data_clean, fmt).date()
-                parsed = True
-                break
-            except ValueError:
-                continue
-        if not parsed:
-            raise HTTPException(status_code=400, detail="Formato invalido. Use DD-MM-AAAA")
-
+    data_obj = _parse_data_simulacao(data)
     try:
-        gdf, dados_mercado = carregar_dados_cache()
-        dados_fundidos = fundir_dados_geo_mercado(gdf, dados_mercado)
-    
-        nome_buscado = urllib.parse.unquote(nome_subestacao).strip().upper()
-        print(f"DEBUG: Buscando por '{nome_buscado}'...")
-
-        alvo = None
-        for x in dados_fundidos:
-            nome_banco = str(x['subestacao']).strip().upper()
-            
-            if nome_banco == nome_buscado:
-                alvo = x; break
-            if nome_buscado in nome_banco:
-                alvo = x; break
-            if nome_banco in nome_buscado:
-                alvo = x; break
-
-        if not alvo: 
-            print(f"ERRO: '{nome_buscado}' nao encontrado no cache.")
-            raise HTTPException(status_code=404, detail=f"Subestacao '{nome_buscado}' nao encontrada")
-
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro dados: {e}")
-
-    lat, lon = -10.9472, -37.0731
-    try:
-        geom = alvo.get('geometry')
-        if isinstance(geom, dict) and 'coordinates' in geom:
-            coords = geom['coordinates']
-            if isinstance(coords[0], float):
-                lon, lat = coords[0], coords[1]
-            else: 
-                lon, lat = coords[0][0][0], coords[0][0][1]
-    except Exception as e:
-        print(f"Aviso Geometria: {e}")
-
-    irradiacao, temp_max, desc_tempo, fonte = obter_clima_avancado(lat, lon, data_obj)
-    
-    perda_termica = 0.0
-    if temp_max > 25:
-        delta_t = temp_max - 25
-        perda_termica = delta_t * 0.004
-    
-    fator_performance_base = 0.75
-    fator_performance_real = fator_performance_base * (1 - perda_termica)
-    
-    potencia = limpar_float(alvo['geracao_distribuida']['potencia_total_kw'])
-    
-    geracao_kwh = potencia * irradiacao * fator_performance_real
-    geracao_mwh = geracao_kwh / 1000
-
-    impacto = "Normal"
-    if irradiacao > 5.5 and temp_max < 30:
-        impacto = "CRITICO: Sol forte e Temp amena. Pico de injecao!"
-    elif irradiacao > 5.0:
-        impacto = "ALTA INJECAO: Atencao ao fluxo reverso."
-    elif irradiacao < 2.0:
-        impacto = "BAIXA GERACAO: Rede suportara carga maxima."
-    
-    return {
-        "subestacao": alvo['subestacao'],
-        "data_referencia": data_obj.strftime("%d/%m/%Y"),
-        "fonte_dados": fonte,
-        "condicao_tempo": desc_tempo,
-        "irradiacao_solar_kwh_m2": round(irradiacao, 2),
-        "temperatura_max_c": round(temp_max, 1),
-        "fator_perda_termica": round(perda_termica * 100, 2),
-        "potencia_instalada_kw": potencia,
-        "geracao_estimada_mwh": round(geracao_mwh, 2),
-        "impacto_na_rede": impacto
-    }
+        alvo = _carregar_alvo_simulacao(nome_subestacao=nome_subestacao)
+        return _gerar_simulacao(alvo, data_obj)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=f"Erro dados: {error}") from error

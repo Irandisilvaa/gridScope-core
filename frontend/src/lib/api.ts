@@ -47,6 +47,19 @@ export type Territories = {
   features: Array<Record<string, unknown>>;
 };
 
+export type SolarSimulation = {
+  subestacao: string;
+  data_referencia: string;
+  fonte_dados: string;
+  condicao_tempo: string;
+  irradiacao_solar_kwh_m2: number;
+  temperatura_max_c: number;
+  fator_perda_termica: number;
+  potencia_instalada_kw: number;
+  geracao_estimada_mwh: number;
+  impacto_na_rede: string;
+};
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -78,6 +91,11 @@ export class GridScopeApi {
 
   getRankingCsvUrl() {
     return `${this.baseUrl}/mercado/ranking.csv`;
+  }
+
+  async getSolarSimulation(idTecnico: string, date?: string, signal?: AbortSignal): Promise<SolarSimulation> {
+    const query = date ? `?data=${encodeURIComponent(date)}` : "";
+    return this.get<SolarSimulation>(`/simulacao/id/${encodeURIComponent(idTecnico)}${query}`, signal);
   }
 
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
