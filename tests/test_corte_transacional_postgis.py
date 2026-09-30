@@ -40,13 +40,28 @@ def _geometria_valida() -> Polygon:
     return Polygon([(0, 0), (1, 0), (1, 1), (0, 1)])
 
 
-def _camadas(prefixo: str, *, orfao: bool = False, duplicado: bool = False) -> dict[str, object]:
+def _camadas(
+    prefixo: str,
+    *,
+    orfao: bool = False,
+    duplicado: bool = False,
+    sem_sub: bool = False,
+) -> dict[str, object]:
     """Entrega sintética com IDs exclusivos por prefixo."""
 
     cod_sub = f"SUB-{prefixo}-1"
     cod_sub_duplicado = cod_sub if duplicado else f"SUB-{prefixo}-2"
     cod_trafo = f"TRAFO-{prefixo}-1"
     consumidor_ref = f"TRAFO-ORFAO-{prefixo}" if orfao else cod_trafo
+    transformador_ids = [cod_trafo]
+    transformador_subestacoes = [cod_sub]
+    transformador_geometrias = [Point(0.5, 0.5)]
+    consumidor_referencias = [consumidor_ref]
+    if sem_sub:
+        transformador_ids.append(f"TRAFO-SEM-SUB-{prefixo}")
+        transformador_subestacoes.append(None)
+        transformador_geometrias.append(Point(0.6, 0.6))
+        consumidor_referencias.append(f"TRAFO-SEM-SUB-{prefixo}")
 
     return {
         "SUB": gpd.GeoDataFrame(
@@ -59,9 +74,9 @@ def _camadas(prefixo: str, *, orfao: bool = False, duplicado: bool = False) -> d
         ),
         "UNTRMT": gpd.GeoDataFrame(
             {
-                "COD_ID": [cod_trafo],
-                "SUB": [cod_sub],
-                "geometry": [Point(0.5, 0.5)],
+                "COD_ID": transformador_ids,
+                "SUB": transformador_subestacoes,
+                "geometry": transformador_geometrias,
             },
             crs="EPSG:4326",
         ),
@@ -75,11 +90,14 @@ def _camadas(prefixo: str, *, orfao: bool = False, duplicado: bool = False) -> d
         ),
         "UCBT_tab": pd.DataFrame(
             {
-                "UNI_TR_MT": [consumidor_ref],
-                "CLAS_SUB": ["B1"],
-                "PN_CON": [f"PN-{prefixo}-1"],
-                "DAT_CON": ["2025-01-15"],
-                **{f"ENE_{mes:02d}": [float(mes)] for mes in range(1, 13)},
+                "UNI_TR_MT": consumidor_referencias,
+                "CLAS_SUB": ["B1"] * len(consumidor_referencias),
+                "PN_CON": [f"PN-{prefixo}-{idx}" for idx in range(len(consumidor_referencias))],
+                "DAT_CON": ["2025-01-15"] * len(consumidor_referencias),
+                **{
+                    f"ENE_{mes:02d}": [float(mes)] * len(consumidor_referencias)
+                    for mes in range(1, 13)
+                },
             }
         ),
         "UGBT_tab": pd.DataFrame(
@@ -207,7 +225,7 @@ class CorteTransacionalPostgisTests(unittest.TestCase):
                 return {}
             linha = connection.execute(
                 text(
-                    "SELECT delivery_id, row_counts FROM public.grid_scope_publication "
+                    "SELECT delivery_id, row_counts, quality_report FROM public.grid_scope_publication "
                     "WHERE publication_key = 1"
                 )
             ).mappings().first()
@@ -231,6 +249,23 @@ class CorteTransacionalPostgisTests(unittest.TestCase):
 
         registro = self._publicacao_registrada()
         self.assertTrue(registro["delivery_id"].startswith("delivery-b-"))
+
+    def test_registra_descarte_de_registros_sem_subestacao(self) -> None:
+        contagens = self._publicar("sem-sub", sem_sub=True)
+
+        self.assertEqual(contagens["transformadores"], 1)
+        self.assertEqual(contagens["consumidores"], 1)
+        registro = self._publicacao_registrada()
+        descartes = registro["quality_report"]["discarded_records"]
+        descarte_transformador = next(item for item in descartes if item["table"] == "transformadores")
+        descarte_consumidor = next(item for item in descartes if item["table"] == "consumidores")
+        self.assertEqual(descarte_transformador["count"], 1)
+        self.assertEqual(descarte_transformador["ids"], ["TRAFO-SEM-SUB-sem-sub"])
+        self.assertEqual(descarte_consumidor["count"], 1)
+        self.assertEqual(
+            descarte_consumidor["transformer_ids"],
+            ["TRAFO-SEM-SUB-sem-sub"],
+        )
 
     def test_entrega_corrompida_nao_altera_nem_declara_sucesso(self) -> None:
         self._publicar("a")

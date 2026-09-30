@@ -92,6 +92,7 @@ class ApiContractTests(unittest.TestCase):
                         "source": "local_file",
                         "delivery_id": "delivery-a",
                         "row_counts": {"subestacoes": 1},
+                        "quality_report": {"discarded_records": []},
                     }
                 ),
                 encoding="utf-8",
@@ -104,6 +105,7 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-a")
         self.assertEqual(response.json()["row_counts"], {"subestacoes": 1})
+        self.assertEqual(response.json()["quality_report"], {"discarded_records": []})
 
     def test_status_prioriza_metadados_transacionais_do_banco(self) -> None:
         with patch.object(
@@ -116,12 +118,19 @@ class ApiContractTests(unittest.TestCase):
                 "reference_period": None,
                 "published_at": "2026-09-30T12:00:00+00:00",
                 "row_counts": {"subestacoes": 2},
+                "quality_report": {
+                    "discarded_records": [{"table": "transformadores", "count": 1}]
+                },
             },
         ):
             response = self.client.get("/data/status")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-db")
+        self.assertEqual(
+            response.json()["quality_report"]["discarded_records"][0]["count"],
+            1,
+        )
 
     def test_health_nao_depende_do_banco(self) -> None:
         response = self.client.get("/health")

@@ -36,6 +36,7 @@ def _write_metadata(delivery, result) -> None:
         "received_at": delivery.received_at.isoformat(),
         "published_at": datetime.now(timezone.utc).isoformat(),
         "row_counts": result.row_counts,
+        "quality_report": result.quality_report,
     }
     DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -133,7 +134,11 @@ def ingest_current_delivery() -> dict:
             )
         _invalidate_runtime_cache(delivery.delivery_id)
         logger.info("Entrega %s publicada: %s", delivery.delivery_id, result.row_counts)
-        return {"delivery_id": delivery.delivery_id, "row_counts": result.row_counts}
+        return {
+            "delivery_id": delivery.delivery_id,
+            "row_counts": result.row_counts,
+            "quality_report": result.quality_report,
+        }
     finally:
         delivery.cleanup()
 

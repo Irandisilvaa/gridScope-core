@@ -31,7 +31,7 @@ class SnapshotImporterTests(unittest.TestCase):
         with patch("src.etl.importador.create_engine", return_value=engine), patch.object(
             importer, "_validate_source"
         ), patch.object(importer, "_create_schema"), patch.object(
-            importer, "_load_layers", return_value={"subestacoes": 3}
+            importer, "_load_layers", return_value=({"subestacoes": 3}, {})
         ), patch.object(importer, "_publish", publish), patch.object(
             importer, "_drop_schema"
         ):
@@ -54,7 +54,7 @@ class SnapshotImporterTests(unittest.TestCase):
         with patch("src.etl.importador.create_engine", return_value=engine), patch.object(
             importer, "_validate_source"
         ), patch.object(importer, "_create_schema"), patch.object(
-            importer, "_load_layers", return_value={"subestacoes": 3}
+            importer, "_load_layers", return_value=({"subestacoes": 3}, {})
         ), patch.object(importer, "_publish", publish), patch.object(
             importer, "_drop_schema"
         ), self.assertRaises(SnapshotImportError):
@@ -72,7 +72,7 @@ class SnapshotImporterTests(unittest.TestCase):
         with patch("src.etl.importador.create_engine", return_value=engine), patch.object(
             importer, "_validate_source"
         ), patch.object(importer, "_create_schema"), patch.object(
-            importer, "_load_layers", return_value={"subestacoes": 0}
+            importer, "_load_layers", return_value=({"subestacoes": 0}, {})
         ), patch.object(importer, "_publish", publish), patch.object(
             importer, "_drop_schema"
         ), self.assertRaises(SnapshotImportError):
@@ -165,6 +165,37 @@ class SnapshotImporterTests(unittest.TestCase):
 
         with self.assertRaisesRegex(SnapshotImportError, "nulo"):
             importer._validate_layer_schema("UCBT_tab", sem_transformador)
+
+    def test_transformador_sem_sub_e_dependentes_sao_auditados(self) -> None:
+        importer = self._make_importer()
+        transformadores = pd.DataFrame(
+            {
+                "COD_ID": ["TRAFO-1", "TRAFO-2", "TRAFO-3"],
+                "SUB": ["SUB-1", None, "  "],
+            }
+        )
+        consumidores = pd.DataFrame(
+            {
+                "UNI_TR_MT": ["TRAFO-1", "TRAFO-2", "TRAFO-3", "TRAFO-1"],
+            }
+        )
+
+        restantes, descarte = importer._discard_transformers_without_substation(transformadores)
+        consumidores_restantes, descarte_dependentes = importer._discard_transformer_dependents(
+            consumidores,
+            set(descarte[0]["ids"]),
+            "consumidores",
+        )
+
+        self.assertEqual(restantes["COD_ID"].tolist(), ["TRAFO-1"])
+        self.assertEqual(descarte[0]["count"], 2)
+        self.assertEqual(descarte[0]["ids"], ["TRAFO-2", "TRAFO-3"])
+        self.assertEqual(consumidores_restantes["UNI_TR_MT"].tolist(), ["TRAFO-1", "TRAFO-1"])
+        self.assertEqual(descarte_dependentes[0]["count"], 2)
+        self.assertEqual(
+            descarte_dependentes[0]["transformer_ids"],
+            ["TRAFO-2", "TRAFO-3"],
+        )
 
     def test_geometria_invalida_bloqueia_o_corte(self) -> None:
         importer = self._make_importer()

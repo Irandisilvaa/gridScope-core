@@ -77,9 +77,18 @@ def carregar_publication_metadata() -> Optional[dict]:
             row = conn.execute(
                 text(
                     """
-                    SELECT delivery_id, source, reference_period, published_at, row_counts
-                    FROM public.grid_scope_publication
-                    WHERE publication_key = 1
+                    SELECT
+                        publication.delivery_id,
+                        publication.source,
+                        publication.reference_period,
+                        publication.published_at,
+                        publication.row_counts,
+                        COALESCE(
+                            to_jsonb(publication) -> 'quality_report',
+                            '{}'::jsonb
+                        ) AS quality_report
+                    FROM public.grid_scope_publication AS publication
+                    WHERE publication.publication_key = 1
                     """
                 )
             ).mappings().first()
@@ -89,6 +98,9 @@ def carregar_publication_metadata() -> Optional[dict]:
             row_counts = row["row_counts"]
             if isinstance(row_counts, str):
                 row_counts = json.loads(row_counts)
+            quality_report = row["quality_report"]
+            if isinstance(quality_report, str):
+                quality_report = json.loads(quality_report)
             published_at = row["published_at"]
             return {
                 "status": "published",
@@ -97,6 +109,7 @@ def carregar_publication_metadata() -> Optional[dict]:
                 "reference_period": row["reference_period"],
                 "published_at": published_at.isoformat() if hasattr(published_at, "isoformat") else published_at,
                 "row_counts": row_counts if isinstance(row_counts, dict) else {},
+                "quality_report": quality_report if isinstance(quality_report, dict) else {},
             }
     except Exception as error:
         # Banco publicado antes do registro transacional ainda não tem a tabela.

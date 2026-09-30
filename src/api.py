@@ -137,6 +137,7 @@ class DataStatus(BaseModel):
     reference_period: Optional[str] = None
     published_at: Optional[str] = None
     row_counts: Dict[str, int] = Field(default_factory=dict)
+    quality_report: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ReadinessResponse(BaseModel):
@@ -371,7 +372,12 @@ def data_status():
 
     metadata_path = os.path.join(DIR_DADOS, "metadata_carga_atual.json")
     if not os.path.exists(metadata_path):
-        return {"status": "unavailable", "source": DATA_SOURCE, "row_counts": {}}
+        return {
+            "status": "unavailable",
+            "source": DATA_SOURCE,
+            "row_counts": {},
+            "quality_report": {},
+        }
 
     try:
         with open(metadata_path, "r", encoding="utf-8") as metadata_file:
@@ -383,6 +389,7 @@ def data_status():
             "reference_period": metadata.get("reference_period"),
             "published_at": metadata.get("published_at"),
             "row_counts": metadata.get("row_counts", {}),
+            "quality_report": metadata.get("quality_report", {}),
         }
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=503, detail="Metadados da carga indisponíveis") from exc
