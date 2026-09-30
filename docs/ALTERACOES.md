@@ -667,6 +667,32 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Compilação Python no container: aprovada.
 - A suíte deixou de abrir conexão do banco somente para importar a API de IA.
 
+## 2026-09-30 — contenção do monitor ANEEL
+
+### Alterações
+
+- `src/etl/monitor_aneel.py` passou a consultar e selecionar uma referência no
+  ArcGIS Hub sem baixar ZIP/GDB, gravar `metadata_aneel.json` ou executar
+  migração, Voronoi e análise de mercado.
+- O workflow `.github/workflows/verificar_aneel.yml` foi renomeado para deixar
+  explícito que a consulta é somente referencial e passou a instalar
+  `python-dotenv` junto com `requests`.
+- Removido o caminho legado que publicava automaticamente dados ANEEL durante
+  a consulta.
+- Adicionados testes para garantir que a consulta não abre arquivos nem indica
+  publicação após erro remoto.
+
+### Validação
+
+- Testes Python no container: 42 aprovados.
+- Compilação Python no container: aprovada.
+- A consulta ANEEL foi validada sem alteração da base operacional.
+
+### Pendências
+
+- A ANEEL permanece somente como referência até existir contrato/autorização da
+  distribuidora; o conector de produção continua bloqueado por FONTE-01.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

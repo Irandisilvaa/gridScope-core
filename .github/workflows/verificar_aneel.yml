@@ -1,4 +1,4 @@
-name: Monitor ANEEL BDGD
+name: Consulta ANEEL (somente referência)
 
 on:
   schedule:
@@ -17,8 +17,8 @@ jobs:
         with:
           python-version: '3.11'
           
-      - name: Instalar Requests
-        run: pip install requests
+      - name: Instalar dependências da consulta
+        run: python -m pip install requests python-dotenv
         
-      - name: Rodar Verificador
+      - name: Consultar referência ANEEL sem publicar dados
         run: python src/etl/monitor_aneel.py
