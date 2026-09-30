@@ -7,20 +7,30 @@ import sys
 import io
 import base64
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List, Optional
 import pandas as pd
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from database import get_engine, carregar_cache_mercado, carregar_voronoi
 from jinja2 import Environment, FileSystemLoader
 
 import google.generativeai as genai
-from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO
+try:
+    from src.config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO
+    from src.database import carregar_cache_mercado, carregar_voronoi
+except ModuleNotFoundError as error:
+    if error.name != "src":
+        raise
+    from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO
+    from database import carregar_cache_mercado, carregar_voronoi
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("PDFReport")
+
+
+class ReportDataError(RuntimeError):
+    """Indica que não há dados válidos para gerar um relatório."""
 
 if CHAT_API_KEY:
     genai.configure(api_key=CHAT_API_KEY)
@@ -217,8 +227,7 @@ def get_bulk_data() -> pd.DataFrame:
         dados_cache = carregar_cache_mercado()
         
         if not dados_cache:
-            logger.warning("Cache vazio, retornando dados mock")
-            return _get_mock_data()
+            raise ReportDataError("Cache de mercado vazio; relatório não gerado")
         
         registros = []
         
@@ -301,48 +310,15 @@ def get_bulk_data() -> pd.DataFrame:
         
         df = pd.DataFrame(registros)
         logger.info(f"Carregados dados de {len(df)} subestações")
+        if df.empty:
+            raise ReportDataError("Nenhuma subestação disponível para o relatório")
         return df
-        
-    except Exception as e:
-        logger.error(f"Erro ao buscar dados bulk: {e}")
-        return _get_mock_data()
 
-
-def _get_mock_data() -> pd.DataFrame:
-    """
-    Retorna dados mock para desenvolvimento/testes.
-    """
-    import random
-    
-    subestacoes = [
-        ("SE Farolândia", "12345", "Centro"),
-        ("SE Siqueira Campos", "12346", "Centro"),
-        ("SE Atalaia", "12347", "Sul"),
-        ("SE Industrial", "12348", "Norte"),
-        ("SE Jabotiana", "12349", "Oeste"),
-    ]
-    
-    registros = []
-    for nome, id_sub, regiao in subestacoes:
-        registro = {
-            'subestacao': nome,
-            'id': id_sub,
-            'regiao': regiao,
-            'total_clientes': random.randint(1000, 10000),
-            'consumo_total_mwh': random.uniform(1000, 50000),
-            'potencia_total_gd_kw': random.uniform(100, 5000),
-            'qtd_total_gd': random.randint(50, 500),
-        }
-        
-        for classe in CLASSES_DISPONIVEIS:
-            registro[f'clientes_{classe}'] = random.randint(0, 2000)
-            registro[f'consumo_mwh_{classe}'] = random.uniform(0, 10000)
-            registro[f'potencia_gd_kw_{classe}'] = random.uniform(0, 1000)
-            registro[f'qtd_gd_{classe}'] = random.randint(0, 100)
-        
-        registros.append(registro)
-    
-    return pd.DataFrame(registros)
+    except ReportDataError:
+        raise
+    except Exception as error:
+        logger.error("Erro ao buscar dados bulk: %s", error)
+        raise ReportDataError("Não foi possível carregar os dados do relatório") from error
 
 
 def filter_dataframe(
@@ -449,7 +425,8 @@ def get_pdf_data(
     classes_selecionadas: List[str],
     metricas_selecionadas: List[str],
     tipo_valor: str = "absoluto",
-    substation_id: Optional[str] = None
+    substation_id: Optional[str] = None,
+    report_date: Optional[date] = None,
 ) -> Dict:
     """
     Prepara dados no formato esperado pelo template PDF.
@@ -462,10 +439,10 @@ def get_pdf_data(
     total_gd_cidade = int(df['qtd_total_gd'].sum())
     num_subestacoes = len(df)
     
-    if substation_id:
+    if substation_id is not None:
         df_sub = df[df['id'].astype(str) == str(substation_id)]
         if df_sub.empty:
-            df_sub = df.iloc[[0]]  
+            raise ReportDataError(f"Subestação '{substation_id}' não encontrada")
     else:
         df_sub = df.iloc[[0]]  
     
@@ -589,7 +566,7 @@ def get_pdf_data(
             'logo_b64': None,  
             'header': {
                 'report_number': datetime.now().strftime("%Y%m%d%H%M%S"),
-                'report_date': datetime.now().strftime("%d/%m/%Y"),
+                'report_date': (report_date or date.today()).strftime("%d/%m/%Y"),
                 'substation_name': row['subestacao'],
                 'feeder_id': str(row['id']),
                 'neighborhood': _get_neighborhood_from_coords(str(row['id'])),
@@ -615,7 +592,8 @@ def generate_pdf(
     metricas_selecionadas: List[str],
     tipo_valor: str = "absoluto",
     substation_id: Optional[str] = None,
-    secoes: Optional[List[str]] = None
+    secoes: Optional[List[str]] = None,
+    report_date: Optional[date] = None,
 ) -> bytes:
     """
     Gera PDF do relatório usando xhtml2pdf (100% Python, sem deps externas).
@@ -638,7 +616,13 @@ def generate_pdf(
     if secoes is None:
         secoes = ["consumo", "gd", "comparacao", "ranking"]
     
-    data_raw = get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
+    data_raw = get_pdf_data(
+        classes_selecionadas,
+        metricas_selecionadas,
+        tipo_valor,
+        substation_id,
+        report_date,
+    )
     
     if "diagnostico" in secoes:
         try:
@@ -712,15 +696,23 @@ def get_report_data(
     classes_selecionadas: List[str],
     metricas_selecionadas: List[str],
     tipo_valor: str = "absoluto",
-    substation_id: Optional[str] = None
+    substation_id: Optional[str] = None,
+    report_date: Optional[date] = None,
 ) -> Dict:
     """Alias para get_pdf_data para compatibilidade."""
-    return get_pdf_data(classes_selecionadas, metricas_selecionadas, tipo_valor, substation_id)
+    return get_pdf_data(
+        classes_selecionadas,
+        metricas_selecionadas,
+        tipo_valor,
+        substation_id,
+        report_date,
+    )
 
 
 __all__ = [
     'CLASSES_DISPONIVEIS',
     'METRICAS_DISPONIVEIS',
+    'ReportDataError',
     'get_bulk_data',
     'filter_dataframe',
     'generate_csv',

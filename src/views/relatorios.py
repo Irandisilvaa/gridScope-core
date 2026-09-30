@@ -257,7 +257,8 @@ def render_view():
                         metricas_selecionadas=["clientes", "consumo_mwh", "potencia_gd_kw", "qtd_gd"],
                         tipo_valor="absoluto",
                         substation_id=str(id_subestacao),
-                        secoes=secoes_pdf
+                        secoes=secoes_pdf,
+                        report_date=data_relatorio,
                     )
                 
                 data_formatada = data_relatorio.strftime("%Y%m%d")

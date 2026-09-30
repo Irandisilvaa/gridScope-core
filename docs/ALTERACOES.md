@@ -361,6 +361,28 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
 - `git diff --check`: aprovado.
 
+## 2026-09-29 — contenção de dados falsos no PDF legado
+
+### Alterações
+
+- `src/pdf_report.py` deixou de fabricar dados aleatórios quando o cache está
+  vazio ou indisponível; agora propaga `ReportDataError` e bloqueia a geração.
+- ID de subestação inexistente deixou de cair silenciosamente na primeira
+  linha do DataFrame.
+- A data escolhida em `src/views/relatorios.py` agora é repassada ao cabeçalho
+  do PDF, em vez de ser substituída pela data atual.
+- Corrigido o import do módulo de relatório para funcionar como `src.pdf_report`
+  nos testes e manter fallback compatível com o carregamento legado.
+- Adicionados testes para cache vazio, ID inválido e preservação da data.
+- Nenhuma rota PDF nova foi exposta: o contrato do relatório e a autenticação
+  da nova interface continuam pendentes.
+
+### Validação
+
+- Testes Python no container: 22 aprovados.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
+- `git diff --check`: aprovado.
+
 ### Pendências
 
 - A simulação ainda usa o fallback climático existente quando o provedor
