@@ -90,14 +90,31 @@ def start_api_process(module_name, port, log_filename, description):
     env_vars = get_env_with_src()
     env_vars["PYTHONIOENCODING"] = "utf-8"
 
-    processo = subprocess.Popen(
-        [PYTHON_EXEC, "-m", "uvicorn", module_name, "--host", "0.0.0.0", "--port", str(port), "--workers", workers],
-        cwd=DIR_RAIZ,
-        env=env_vars,
-        stdout=log_file,
-        stderr=log_file
-    )
-    return processo
+    try:
+        return subprocess.Popen(
+            [PYTHON_EXEC, "-m", "uvicorn", module_name, "--host", "0.0.0.0", "--port", str(port), "--workers", workers],
+            cwd=DIR_RAIZ,
+            env=env_vars,
+            stdout=log_file,
+            stderr=log_file
+        )
+    finally:
+        log_file.close()
+
+
+def _stop_api_processes(processes):
+    for description, process in processes:
+        if process.poll() is None:
+            logger.info("🛑 Encerrando %s...", description)
+            process.terminate()
+
+    for description, process in processes:
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("⚠️ %s não encerrou no prazo; forçando parada", description)
+            process.kill()
+            process.wait(timeout=5)
 
 
 def verificar_banco_populado():
@@ -150,17 +167,22 @@ def run_pipeline():
 
 if __name__ == "__main__":
     logger.info("--- ⚡ INICIANDO SISTEMA GRIDSCOPE (HACKATHON MODE) ⚡ ---")
+    api_processes = []
 
     try:
         run_pipeline()
 
         logger.info("--- INICIANDO SERVIDORES ---")
 
-        api_proc = start_api_process("src.api:app", 8000, "api_service.log", "API Principal")
-
-        api_ai_proc = start_api_process("src.ai.ai_service:app", 8001, "api_ai.log", "API Inteligência Artificial")
-
-        api_chat_proc = start_api_process("src.ai.chat_service:app", 8002, "api_chat.log", "API Chat IA (Gemini)")
+        api_processes.append(
+            ("API Principal", start_api_process("src.api:app", 8000, "api_service.log", "API Principal"))
+        )
+        api_processes.append(
+            ("API Inteligência Artificial", start_api_process("src.ai.ai_service:app", 8001, "api_ai.log", "API Inteligência Artificial"))
+        )
+        api_processes.append(
+            ("API Chat IA (Gemini)", start_api_process("src.ai.chat_service:app", 8002, "api_chat.log", "API Chat IA (Gemini)"))
+        )
 
         logger.info("⏳ Aguardando 12 segundos para carga completa dos modelos de IA...")
         time.sleep(12)
@@ -171,22 +193,15 @@ if __name__ == "__main__":
 
         while True:
             time.sleep(2)
-            if api_proc.poll() is not None:
-                logger.error("⚠️ CRITICAL: API Principal (8000) morreu! Verifique logs/api_service.log")
-                break
-            if api_ai_proc.poll() is not None:
-                logger.error(
-                    "⚠️ CRITICAL: API IA (8001) morreu! O Duck Curve não vai funcionar. Verifique logs/api_ai.log")
-                break
-            if api_chat_proc.poll() is not None:
-                logger.warning("⚠️ API Chat (8002) morreu! O Chat IA não vai funcionar. Verifique logs/api_chat.log")
+            encerrado = next(
+                ((description, process) for description, process in api_processes if process.poll() is not None),
+                None,
+            )
+            if encerrado:
+                logger.error("⚠️ %s encerrou inesperadamente; consulte o log do serviço", encerrado[0])
                 break
     except KeyboardInterrupt:
         logger.info("\n🛑 Encerrando serviços...")
-        try:
-            api_proc.terminate()
-            api_ai_proc.terminate()
-            api_chat_proc.terminate()
-        except:
-            pass
+    finally:
+        _stop_api_processes(api_processes)
         logger.info("GridScope encerrado com sucesso.")

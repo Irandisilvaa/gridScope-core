@@ -595,6 +595,29 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Autenticação/autorização e correlação de logs continuam pendentes conforme
   `SEC-01` e `OPS-05`.
 
+## 2026-09-30 — encerramento coordenado do supervisor
+
+### Alterações
+
+- `run_all.py` agora fecha os arquivos de log dos processos filhos no processo
+  pai, mantém uma lista dos serviços iniciados e encerra todos de forma
+  coordenada.
+- A parada usa `terminate`, aguarda até cinco segundos e aplica `kill` quando
+  um processo não encerra no prazo, inclusive quando outro serviço falha ou há
+  `KeyboardInterrupt`.
+- Adicionado `tests/test_startup.py` para cobrir encerramento normal e forçado.
+
+### Validação
+
+- Testes Python no container: 38 aprovados.
+- Compilação Python no container: aprovada.
+- `git diff --check`: aprovado.
+
+### Pendências
+
+- A política de quais APIs são obrigatórias/opcionais e o gerenciamento
+  independente dos jobs de ingestão/treino continuam pendentes em `OPS-02`.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações
