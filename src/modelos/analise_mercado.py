@@ -399,19 +399,22 @@ def analisar_mercado():
         relatorio.append(stats)
 
     print("6. Salvando resultados...")
-    try:
-        with open(path_saida, 'w', encoding='utf-8') as f:
-            json.dump(relatorio, f, indent=4, ensure_ascii=False)
-        print(f"✅ Arquivo JSON salvo em {path_saida}")
-        
-        from config import DIR_DADOS, get_city_slug, get_cidade_alvo
-        slug = get_city_slug(get_cidade_alvo())
-        path_cidade_json = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
-        with open(path_cidade_json, 'w', encoding='utf-8') as f:
-            json.dump(relatorio, f, indent=4, ensure_ascii=False)
-        print(f"✅ Cache de mercado salvo para a cidade: {path_cidade_json}")
-    except Exception as e:
-        print(f"Erro ao salvar JSON local: {e}")
+    if os.getenv("GRIDSCOPE_DERIVED_STAGING") == "1":
+        print("Staging ativo: arquivos derivados locais não serão publicados.")
+    else:
+        try:
+            with open(path_saida, 'w', encoding='utf-8') as f:
+                json.dump(relatorio, f, indent=4, ensure_ascii=False)
+            print(f"✅ Arquivo JSON salvo em {path_saida}")
+
+            from config import DIR_DADOS, get_city_slug, get_cidade_alvo
+            slug = get_city_slug(get_cidade_alvo())
+            path_cidade_json = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
+            with open(path_cidade_json, 'w', encoding='utf-8') as f:
+                json.dump(relatorio, f, indent=4, ensure_ascii=False)
+            print(f"✅ Cache de mercado salvo para a cidade: {path_cidade_json}")
+        except Exception as e:
+            print(f"Erro ao salvar JSON local: {e}")
 
     try:
         salvar_cache_mercado(relatorio)

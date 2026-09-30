@@ -12,6 +12,15 @@ class ReportsDataTests(unittest.TestCase):
             with self.assertRaises(report_data.ReportDataError):
                 report_data.get_report_data("A")
 
+    def test_falha_de_carga_bloqueia_relatorio(self) -> None:
+        with patch.object(
+            report_data,
+            "carregar_dados_cache",
+            side_effect=report_data.DataCacheError("banco indisponível"),
+        ):
+            with self.assertRaises(report_data.ReportDataError):
+                report_data.get_report_data("A")
+
     def test_id_inexistente_nao_escolhe_primeira_subestacao(self) -> None:
         with patch.object(
             report_data,

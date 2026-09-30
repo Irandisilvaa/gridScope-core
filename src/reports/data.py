@@ -8,11 +8,11 @@ from collections.abc import Mapping
 # Ensure src is in path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
-    from src.utils import carregar_dados_cache, limpar_float
+    from src.utils import DataCacheError, carregar_dados_cache, limpar_float
 except ModuleNotFoundError as error:
     if error.name != "src":
         raise
-    from utils import carregar_dados_cache, limpar_float
+    from utils import DataCacheError, carregar_dados_cache, limpar_float
 
 
 class ReportDataError(RuntimeError):
@@ -39,7 +39,10 @@ def get_report_data(substation_id: str):
     """
     
     # 1. Load Real Data
-    _, dados_lista = carregar_dados_cache()
+    try:
+        _, dados_lista = carregar_dados_cache()
+    except DataCacheError as error:
+        raise ReportDataError("Carga operacional indisponível; relatório não gerado") from error
     if not dados_lista:
         raise ReportDataError("Cache de mercado vazio; relatório não gerado")
         

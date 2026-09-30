@@ -117,7 +117,15 @@ def main(cidade_alvo=None):
             salvar_voronoi(territorios_wgs84)
             print("Sucesso: Dados persistidos.")
     except Exception as e:
+        if os.getenv("GRIDSCOPE_DERIVED_STAGING") == "1":
+            # Dentro do corte atômico, um Voronoi não persistido não pode virar
+            # entrega publicada com derivados vazios.
+            raise RuntimeError("Falha ao persistir territórios Voronoi") from e
         logger.warning(f"Banco inacessível: {e}")
+
+    if os.getenv("GRIDSCOPE_DERIVED_STAGING") == "1":
+        print("Staging ativo: arquivos derivados locais não serão publicados.")
+        return
 
     path_json = os.path.join(DIR_RAIZ, NOME_JSON_SAIDA)
     territorios_wgs84.to_file(path_json, driver="GeoJSON")

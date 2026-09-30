@@ -2,96 +2,81 @@
 Script para atualizar completamente o banco de dados
 Útil para executar manualmente ou em pipelines CI/CD
 """
-import os
+import argparse
+from pathlib import Path
 import sys
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(str(Path(__file__).resolve().parents[1]))
+sys.path.append(str(Path(__file__).resolve().parents[2]))
+
+from src.etl.pipeline import ingest_current_delivery
 
 def atualizar_banco_completo():
-    """
-    Executa todo o pipeline de atualização do banco de dados:
-    1. Migra dados do GDB para PostgreSQL (limpando dados antigos)
-    2. Processa territórios Voronoi
-    3. Gera análise de mercado e cache
-    """
+    """Executa o corte atômico do snapshot completo com seus derivados."""
+
     print("=" * 70)
     print("🔄 ATUALIZAÇÃO COMPLETA DO BANCO DE DADOS")
     print("=" * 70)
-    
+
+    resultado = ingest_current_delivery()
+    print("\n🎉 ATUALIZAÇÃO CONCLUÍDA COM SUCESSO!")
+    print(f"Entrega publicada: {resultado['delivery_id']}")
+    print(f"Contagens: {resultado['row_counts']}")
+    return resultado
+
+
+def regenerar_apenas_cache():
+    """Regera somente o cache de mercado a partir do banco já publicado."""
+
+    print("=" * 70)
+    print("📊 REGENERANDO APENAS O CACHE DE MERCADO")
+    print("=" * 70)
+    from src.modelos.analise_mercado import analisar_mercado
+
+    analisar_mercado()
+    return True
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Atualiza o banco de dados completo")
+    parser.add_argument(
+        "--skip-voronoi",
+        action="store_true",
+        help="mantido por compatibilidade; o corte atômico sempre calcula o Voronoi",
+    )
+    parser.add_argument(
+        "--only-cache",
+        action="store_true",
+        help="apenas regenera o cache (assume que os dados já estão no banco)",
+    )
+
+    args = parser.parse_args()
+
+    if args.only_cache:
+        print("📊 Regenerando apenas cache...")
+        try:
+            regenerar_apenas_cache()
+        except Exception as error:
+            print(f"❌ Cache não regenerado: {error}", file=sys.stderr)
+            return 1
+        return 0
+
+    if args.skip_voronoi:
+        print(
+            "ℹ️  --skip-voronoi não altera o corte: bruto, Voronoi, mercado e "
+            "metadados são publicados na mesma transação."
+        )
+
     try:
-        print("\n📥 ETAPA 1/3: Migrando dados do GDB para PostgreSQL...")
-        print("-" * 70)
-        from etl.migracao_db import migrar_gdb_para_sql
-        migrar_gdb_para_sql(limpar_antes=True)
-        print("✅ Migração concluída!")
-        
-        print("\n🗺️  ETAPA 2/3: Processando territórios Voronoi...")
-        print("-" * 70)
-        from modelos.processar_voronoi import main as processar_voronoi
-        processar_voronoi()
-        print("✅ Voronoi processado!")
-        
-        print("\n📊 ETAPA 3/3: Gerando análise de mercado e cache...")
-        print("-" * 70)
-        from modelos.analise_mercado import analisar_mercado
-        analisar_mercado()
-        print("✅ Cache gerado!")
-        
-        print("\n" + "=" * 70)
-        print("🎉 ATUALIZAÇÃO CONCLUÍDA COM SUCESSO!")
-        print("=" * 70)
-        print("\n📋 Resumo:")
-        print("  ✅ Dados brutos migrados para PostgreSQL")
-        print("  ✅ Territórios Voronoi calculados e salvos")
-        print("  ✅ Cache de mercado gerado em JSONB")
-        print("\n💡 Próximos passos:")
-        print("  - API: python src/api.py")
-        print("  - Dashboard: streamlit run src/dashboard.py")
-        print("=" * 70)
-        
-        return True
-        
-    except Exception as e:
+        atualizar_banco_completo()
+    except Exception as error:
         print("\n" + "=" * 70)
         print("❌ ERRO NA ATUALIZAÇÃO")
         print("=" * 70)
-        print(f"\n{type(e).__name__}: {e}")
-        print("\n🛠️  Para depurar:")
-        print("  1. Verifique se o banco PostgreSQL está rodando")
-        print("  2. Verifique a variável DATABASE_URL no .env")
-        print("  3. Execute cada etapa manualmente:")
-        print("     - python src/etl/migracao_db.py")
-        print("     - python src/modelos/processar_voronoi.py")
-        print("     - python src/modelos/analise_mercado.py")
-        print("=" * 70)
-        
-        import traceback
-        traceback.print_exc()
-        
-        return False
+        print(f"{type(error).__name__}: {error}", file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    import argparse
-    
-    parser = argparse.ArgumentParser(description='Atualiza banco de dados completo')
-    parser.add_argument(
-        '--skip-voronoi',
-        action='store_true',
-        help='Pula processamento de Voronoi (mais rápido)'
-    )
-    parser.add_argument(
-        '--only-cache',
-        action='store_true',
-        help='Apenas regenera o cache (assume que dados já estão no banco)'
-    )
-    
-    args = parser.parse_args()
-    
-    if args.only_cache:
-        print("📊 Regenerando apenas cache...")
-        from modelos.analise_mercado import analisar_mercado
-        analisar_mercado()
-    else:
-        sucesso = atualizar_banco_completo()
-        sys.exit(0 if sucesso else 1)
+    sys.exit(main())

@@ -53,12 +53,14 @@ def _write_metadata(delivery, result) -> None:
     temporary_path.replace(METADATA_PATH)
 
 
-def _invalidate_runtime_cache() -> int:
+def _invalidate_runtime_cache(delivery_id: str | None = None) -> int:
     """Remove respostas Redis que poderiam refletir a carga anterior."""
 
     try:
-        from src.cache_redis import limpar_cache
+        from src.cache_redis import definir_versao_publicacao, limpar_cache
 
+        if delivery_id:
+            definir_versao_publicacao(delivery_id)
         removidas = limpar_cache()
         logger.info("Cache Redis invalidado: %s chaves removidas", removidas)
         return int(removidas)
@@ -75,6 +77,7 @@ def _build_derived_tables(staging_schema: str) -> dict[str, int]:
 
     environment = os.environ.copy()
     environment["DATABASE_SCHEMA"] = staging_schema
+    environment["GRIDSCOPE_DERIVED_STAGING"] = "1"
     python_path = environment.get("PYTHONPATH", "")
     source_path = str(PROJECT_ROOT / "src")
     environment["PYTHONPATH"] = os.pathsep.join(
@@ -117,9 +120,18 @@ def ingest_current_delivery() -> dict:
             DATABASE_URL,
             delivery.local_path,
             delivery_id=delivery.delivery_id,
+            publication_metadata={
+                "source": delivery.source,
+                "reference_period": delivery.reference_period,
+            },
         ).run(prepare_publish=_build_derived_tables)
-        _write_metadata(delivery, result)
-        _invalidate_runtime_cache()
+        try:
+            _write_metadata(delivery, result)
+        except Exception:
+            logger.exception(
+                "Falha ao atualizar espelho de metadados; o registro transacional do banco permanece vigente"
+            )
+        _invalidate_runtime_cache(delivery.delivery_id)
         logger.info("Entrega %s publicada: %s", delivery.delivery_id, result.row_counts)
         return {"delivery_id": delivery.delivery_id, "row_counts": result.row_counts}
     finally:
