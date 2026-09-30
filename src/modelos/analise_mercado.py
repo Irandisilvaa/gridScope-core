@@ -136,7 +136,7 @@ def analisar_mercado():
         df_uc = carregar_consumidores(colunas=cols_leitura, ignore_geometry=True)
 
         if df_uc is None or df_uc.empty:
-            print("   ⚠️ Aviso: Tabela de consumidores vazia.")
+            raise RuntimeError("Tabela de consumidores vazia; análise não publicada")
         else:
             df_uc = calcular_consumo_real(df_uc)
             
@@ -174,6 +174,7 @@ def analisar_mercado():
 
     except Exception as e:
         print(f"Erro Consumidores: {e}")
+        raise RuntimeError("Falha ao processar consumidores; análise não publicada") from e
     print("4. Processando GD...")
     df_gd_final = pd.DataFrame()
     try:
@@ -205,6 +206,7 @@ def analisar_mercado():
             gc.collect()
     except Exception as e:
         print(f"Aviso GD: {e}")
+        raise RuntimeError("Falha ao processar geração distribuída; análise não publicada") from e
 
     print("5. Construindo JSON de saída...")
     relatorio = []
@@ -414,6 +416,7 @@ def analisar_mercado():
         print("✅ Cache salvo no banco de dados PostgreSQL")
     except Exception as e:
         print(f"⚠️ Aviso: Não foi possível salvar cache no banco: {e}")
+        raise RuntimeError("Falha ao persistir cache de mercado; análise não publicada") from e
 
 def garantir_mercado_atualizado():
     dir_script = os.path.dirname(os.path.abspath(__file__))

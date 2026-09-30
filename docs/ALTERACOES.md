@@ -710,6 +710,23 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Testes Python no container: 43 aprovados.
 - Compilação Python no container: aprovada.
 
+## 2026-09-30 — falhas de agregação deixam de publicar resultado parcial
+
+### Alterações
+
+- `src/modelos/analise_mercado.py` agora interrompe a análise quando a tabela de
+  consumidores está vazia ou quando falha o carregamento/processamento de
+  consumidores ou GD.
+- Falha ao persistir `cache_mercado` agora propaga erro para que o job derivado
+  e o corte do snapshot sejam considerados malsucedidos.
+- Adicionado teste de regressão para impedir publicação após falha de
+  consumidores.
+
+### Validação
+
+- Testes Python no container: 44 aprovados.
+- Compilação Python no container: aprovada.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações
