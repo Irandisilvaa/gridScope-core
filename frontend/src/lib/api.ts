@@ -60,6 +60,11 @@ export type SolarSimulation = {
   impacto_na_rede: string;
 };
 
+export type RankingCsvFilters = {
+  busca?: string;
+  situacao?: "all" | "normal" | "attention";
+};
+
 export class ApiError extends Error {
   readonly status: number;
 
@@ -89,8 +94,12 @@ export class GridScopeApi {
     return this.get<Territories>("/mercado/geojson", signal);
   }
 
-  getRankingCsvUrl() {
-    return `${this.baseUrl}/mercado/ranking.csv`;
+  getRankingCsvUrl(filters?: RankingCsvFilters) {
+    const params = new URLSearchParams();
+    if (filters?.busca?.trim()) params.set("busca", filters.busca.trim());
+    if (filters?.situacao && filters.situacao !== "all") params.set("situacao", filters.situacao);
+    const query = params.toString();
+    return `${this.baseUrl}/mercado/ranking.csv${query ? `?${query}` : ""}`;
   }
 
   async getSolarSimulation(idTecnico: string, date?: string, signal?: AbortSignal): Promise<SolarSimulation> {

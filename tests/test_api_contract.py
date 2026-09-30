@@ -95,6 +95,28 @@ class ApiContractTests(unittest.TestCase):
         self.assertIn("'=SUM(1,1)", response.content.decode("utf-8-sig"))
         self.assertNotIn("geometry", response.content.decode("utf-8-sig"))
 
+    def test_exportacao_csv_aplica_busca_e_situacao(self) -> None:
+        attention = dict(
+            self.snapshot[0],
+            id_tecnico="B",
+            subestacao="SE-B (ID: B)",
+            metricas_rede={**self.snapshot[0]["metricas_rede"], "nivel_criticidade_gd": "ALTA"},
+        )
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=[self.snapshot[0], attention]
+        ):
+            response = self.client.get("/mercado/ranking.csv?busca=SE-B&situacao=attention")
+
+        body = response.content.decode("utf-8-sig")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("SE-B", body)
+        self.assertNotIn("SE-A", body)
+
+    def test_exportacao_csv_rejeita_situacao_invalida(self) -> None:
+        response = self.client.get("/mercado/ranking.csv?situacao=unknown")
+
+        self.assertEqual(response.status_code, 400)
+
     def test_simulacao_por_id_usa_identificador_estavel(self) -> None:
         with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
             api_module, "fundir_dados_geo_mercado", return_value=self.snapshot

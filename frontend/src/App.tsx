@@ -300,6 +300,10 @@ function EmptyFeature({ title, text }: { title: string; text: string }) {
 }
 
 function Reports() {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<SubstationStatusFilter>("all");
+  const hasFilters = query.trim().length > 0 || statusFilter !== "all";
+
   return (
     <div className="grid gap-[22px] pt-7">
       <section className={`${panel} grid gap-5 p-5 sm:p-7`}>
@@ -308,24 +312,39 @@ function Reports() {
           <h2 className="mt-2 text-[clamp(1.5rem,3vw,2.4rem)] font-semibold tracking-[-0.05em]">Ranking da carga atual</h2>
           <p className="mt-3 max-w-[620px] text-sm leading-relaxed text-[#8ea4a7]">Baixe um CSV com indicadores agregados por subestação. O arquivo não inclui geometrias nem dados pessoais dos consumidores.</p>
         </div>
+        <div className="grid gap-3 border-y border-white/10 py-4 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end">
+          <label className="grid gap-1.5 text-xs font-semibold text-[#a8bcbd]" htmlFor="report-search">
+            Filtrar exportação
+            <input className="rounded-md border border-white/10 bg-[#08141f] px-3 py-2 text-sm font-normal text-[#eef6f3] outline-none placeholder:text-[#577277] focus:border-[#6fe7d2]/60 focus:ring-2 focus:ring-[#6fe7d2]/20" id="report-search" onChange={(event) => setQuery(event.target.value)} placeholder="Nome ou ID técnico" type="search" value={query} />
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-[#a8bcbd]" htmlFor="report-status">
+            Situação
+            <select className="rounded-md border border-white/10 bg-[#08141f] px-3 py-2 text-sm font-normal text-[#eef6f3] outline-none focus:border-[#6fe7d2]/60 focus:ring-2 focus:ring-[#6fe7d2]/20" id="report-status" onChange={(event) => setStatusFilter(event.target.value as SubstationStatusFilter)} value={statusFilter}>
+              <option value="all">Todas</option>
+              <option value="normal">Normal</option>
+              <option value="attention">Atenção</option>
+            </select>
+          </label>
+          {hasFilters ? <button className="h-fit rounded-md border border-white/10 px-3 py-2 text-xs font-bold text-[#8ea4a7] transition-colors hover:border-[#6fe7d2]/40 hover:text-[#6fe7d2] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]" onClick={() => { setQuery(""); setStatusFilter("all"); }} type="button">Limpar filtros</button> : <span className="pb-2 text-xs text-[#577277]" role="status">O arquivo seguirá o recorte selecionado.</span>}
+        </div>
         <div className="flex flex-col gap-4 border-t border-white/10 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <strong className="block text-sm text-[#eef6f3]">Formato CSV UTF-8</strong>
-            <span className="mt-1 block text-xs text-[#8ea4a7]">A exportação representa a última carga publicada.</span>
+            <span className="mt-1 block text-xs text-[#8ea4a7]">A exportação representa a última carga publicada e aplica os filtros no backend.</span>
           </div>
           <a
             className="inline-flex w-fit items-center justify-center rounded-lg border border-[#6fe7d2]/35 bg-[#6fe7d2]/10 px-4 py-3 text-sm font-bold text-[#6fe7d2] transition-colors hover:border-[#6fe7d2]/60 hover:bg-[#6fe7d2]/20 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]"
             download="gridscope-ranking.csv"
-            href={api.getRankingCsvUrl()}
+            href={api.getRankingCsvUrl({ busca: query, situacao: statusFilter })}
           >
             Baixar ranking CSV
           </a>
         </div>
       </section>
       <section className={`${panel} p-5 sm:p-7`}>
-        <span className={eyebrow}>Próximas exportações</span>
-        <h2 className="mt-2 text-lg font-semibold">PDF e filtros por ativo</h2>
-        <p className="mt-2 max-w-[620px] text-sm leading-relaxed text-[#8ea4a7]">Serão habilitados quando o contrato de relatórios e o serviço de geração estiverem definidos.</p>
+        <span className={eyebrow}>Próxima exportação</span>
+        <h2 className="mt-2 text-lg font-semibold">Relatório PDF técnico</h2>
+        <p className="mt-2 max-w-[620px] text-sm leading-relaxed text-[#8ea4a7]">Será habilitado quando o contrato de relatório e o serviço de geração estiverem definidos.</p>
       </section>
     </div>
   );

@@ -358,11 +358,32 @@ def obter_dados_completos():
 
 
 @app.get("/mercado/ranking.csv", tags=["Exportações"])
-def exportar_ranking_csv():
+def exportar_ranking_csv(
+    busca: Optional[str] = Query(None, description="Filtra por nome ou ID técnico"),
+    situacao: str = Query("all", description="all, normal ou attention"),
+):
     """Exporta o ranking atual sem incluir geometria ou dados pessoais."""
+
+    if situacao not in {"all", "normal", "attention"}:
+        raise HTTPException(status_code=400, detail="Situacao invalida. Use all, normal ou attention")
 
     try:
         rows = obter_dados_completos()
+        termo = (busca or "").strip().casefold()
+        if termo:
+            rows = [
+                row
+                for row in rows
+                if termo in f"{row.get('id_tecnico', '')} {row.get('subestacao', '')}".casefold()
+            ]
+        if situacao != "all":
+            rows = [
+                row
+                for row in rows
+                if (str(row.get("metricas_rede", {}).get("nivel_criticidade_gd", "")).upper() == "NORMAL")
+                == (situacao == "normal")
+            ]
+
         output = io.StringIO()
         writer = csv.DictWriter(output, fieldnames=CSV_COLUNAS_RANKING, extrasaction="ignore")
         writer.writeheader()

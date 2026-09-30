@@ -399,3 +399,25 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - `npm run typecheck` e `npm run build`: aprovados.
 - Detector Impeccable em `frontend/src/App.tsx`: nenhum achado.
 - `git diff --check`: aprovado.
+
+## 2026-09-29 — filtros na exportação CSV
+
+### Alterações
+
+- `GET /mercado/ranking.csv` agora aceita `busca` por nome/ID técnico e
+  `situacao` (`all`, `normal` ou `attention`) no backend.
+- Valores de situação inválidos retornam `400`; o arquivo continua sem
+  geometria e sem dados pessoais.
+- A tela Relatórios ganhou busca, filtro de situação, limpeza de filtros e
+  indicação de que o recorte é aplicado no backend.
+- A pendência de filtros por ativo foi removida da tela; PDF técnico continua
+  aguardando contrato e serviço de geração.
+- Adicionados testes de contrato para filtragem e validação do parâmetro.
+
+### Validação
+
+- Testes Python no container: 19 aprovados.
+- `npm run typecheck` e `npm run build`: aprovados.
+- Detector Impeccable em `frontend/src/App.tsx`: nenhum achado.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
+- `git diff --check`: aprovado.
