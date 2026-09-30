@@ -315,3 +315,24 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
   existente não é alterado por estar fora do controle de versão. Volumes
   PostgreSQL já inicializados com a senha anterior exigem migração explícita
   da senha ou recriação controlada do volume.
+
+## 2026-09-29 — correção do backup PostgreSQL
+
+### Alterações
+
+- Atualizado `scripts/backup_db.py` para executar `docker compose exec` no
+  serviço real `db`, usando `POSTGRES_USER`, `POSTGRES_DB` e
+  `POSTGRES_PASSWORD` já presentes no container.
+- Removido `shell=True` e o redirecionamento construído por string; o dump
+  agora é escrito em arquivo temporário de permissão restrita e movido
+  atomicamente após validar que não está vazio.
+- Falhas do `pg_dump` removem o temporário e fazem o script terminar com código
+  diferente de zero; continuam sendo mantidos no máximo cinco backups.
+- Adicionado `backups/` ao `.gitignore` para impedir que dumps sejam versionados.
+- Criados testes determinísticos para sucesso atômico e falha de execução.
+
+### Validação
+
+- `python3 -m unittest tests.test_backup_db -v`: 2 testes aprovados.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q scripts/backup_db.py tests/test_backup_db.py`: aprovado.
+- `git diff --check`: aprovado.

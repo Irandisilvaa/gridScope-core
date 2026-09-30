@@ -32,4 +32,5 @@ frontend/node_modules/
 logs/
 *.log
 cache/
+backups/
 /secrets
