@@ -361,38 +361,6 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
 - `git diff --check`: aprovado.
 
-## 2026-09-29 — parametrização de consultas e validação de identificadores
-
-### Alterações
-
-- Parametrizados os IDs usados nas consultas de consumo de
-  `src/ai/ai_service.py` e `src/etl/etl_ai_consumo.py`; o mês da simulação é
-  validado e as colunas mensais são selecionadas de uma lista fixa.
-- Desativada a interpretação de regex nos filtros de nome de subestação desses
-  módulos, mantendo a busca como texto literal.
-- Criado um allowlist de colunas em `src/database.py`; colunas desconhecidas ou
-  duplicadas agora são rejeitadas antes de formar o `SELECT`.
-- Validado o schema de staging antes de iniciar os jobs derivados em
-  `src/etl/pipeline.py` e mantida a citação dos identificadores dinâmicos.
-- Ajustados `.env.example` e o fallback de `src/config.py` para usar
-  `postgresql+psycopg2`, compatível com `psycopg2-binary` instalado no projeto.
-- Criado `tests/test_sql_safety.py` com cobertura para IDs maliciosos, mês fora
-  do intervalo e coluna não permitida.
-
-### Validação
-
-- Testes Python no container: 30 aprovados.
-- `python -m compileall -q src tests` no container: aprovado.
-- `git diff --check`: aprovado; permanecem apenas avisos de normalização CRLF.
-- Busca por `eval()` executável em arquivos Python: nenhum resultado.
-
-### Pendências
-
-- O teste unitário foi executado sem o serviço `db`; a conexão da carga global
-  da IA registra indisponibilidade esperada, sem reprovar os testes.
-- A validação integrada ainda depende de PostgreSQL/PostGIS funcional e GDB
-  real ou anonimizado.
-
 ## 2026-09-29 — contenção de dados falsos no PDF legado
 
 ### Alterações
@@ -495,3 +463,35 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Busca em `src/reports/*.py` e `tests/*.py`: nenhum `eval()` executável.
 - `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
 - `git diff --check`: aprovado.
+
+## 2026-09-29 — parametrização de consultas e validação de identificadores
+
+### Alterações
+
+- Parametrizados os IDs usados nas consultas de consumo de
+  `src/ai/ai_service.py` e `src/etl/etl_ai_consumo.py`; o mês da simulação é
+  validado e as colunas mensais são selecionadas de uma lista fixa.
+- Desativada a interpretação de regex nos filtros de nome de subestação desses
+  módulos, mantendo a busca como texto literal.
+- Criado um allowlist de colunas em `src/database.py`; colunas desconhecidas ou
+  duplicadas agora são rejeitadas antes de formar o `SELECT`.
+- Validado o schema de staging antes de iniciar os jobs derivados em
+  `src/etl/pipeline.py` e mantida a citação dos identificadores dinâmicos.
+- Ajustados `.env.example` e o fallback de `src/config.py` para usar
+  `postgresql+psycopg2`, compatível com `psycopg2-binary` instalado no projeto.
+- Criado `tests/test_sql_safety.py` com cobertura para IDs maliciosos, mês fora
+  do intervalo e coluna não permitida.
+
+### Validação
+
+- Testes Python no container: 30 aprovados.
+- `python -m compileall -q src tests` no container: aprovado.
+- `git diff --check`: aprovado; permanecem apenas avisos de normalização CRLF.
+- Busca por `eval()` executável em arquivos Python: nenhum resultado.
+
+### Pendências
+
+- O teste unitário foi executado sem o serviço `db`; a conexão da carga global
+  da IA registra indisponibilidade esperada, sem reprovar os testes.
+- A validação integrada ainda depende de PostgreSQL/PostGIS funcional e GDB
+  real ou anonimizado.
