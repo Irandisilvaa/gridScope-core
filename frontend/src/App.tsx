@@ -96,6 +96,18 @@ function App() {
     [rows, selectedSubstationId],
   );
 
+  const isPublished = dataStatus?.status === "published";
+  const publicationLabel = !dataStatus
+    ? "Consultando status"
+    : isPublished
+      ? "Carga publicada"
+      : "Metadados indisponíveis";
+  const publicationIndicator = !dataStatus
+    ? "bg-[#8ea4a7]"
+    : isPublished
+      ? "bg-[#6fe7d2] shadow-[0_0_0_5px_rgba(111,231,210,0.1)]"
+      : "bg-[#ffc857] shadow-[0_0_0_5px_rgba(255,200,87,0.12)]";
+
   const selectSubstation = (row: Substation) => {
     setSelectedSubstationId(row.id_tecnico);
     setView("substations");
@@ -146,15 +158,16 @@ function App() {
             <h1 className="mt-2 text-[clamp(1.8rem,3vw,2.7rem)] font-semibold leading-none tracking-[-0.055em]">{navItems.find((item) => item.id === view)?.label}</h1>
           </div>
           <div className="flex min-w-[190px] items-center gap-2.5 py-0 sm:py-2.5">
-            <span className="h-2 w-2 rounded-full bg-[#6fe7d2] shadow-[0_0_0_5px_rgba(111,231,210,0.1)]" aria-hidden="true" />
+            <span className={`h-2 w-2 rounded-full ${publicationIndicator}`} aria-hidden="true" />
             <div>
               <strong className="block text-xs">{sourceLabel(dataStatus?.source ?? "fonte não configurada")}</strong>
-              <small className="mt-0.5 block text-[0.7rem] text-[#8ea4a7]">Atualização: {formatDate(dataStatus?.published_at)}</small>
+              <small className="mt-0.5 block text-[0.7rem] text-[#8ea4a7]">{publicationLabel} · Atualização: {formatDate(dataStatus?.published_at)}</small>
             </div>
           </div>
         </header>
 
         {!isOnline ? <div className="mt-[18px] rounded-[9px] border border-[#ffc857]/30 bg-[#ffc857]/[0.08] px-3.5 py-3 text-xs text-[#ffc857]" role="status">Sem conexão. A interface continua aberta, mas os dados da rede precisam do backend.</div> : null}
+        {!isLoading && !error && !isPublished ? <div className="mt-[18px] rounded-[9px] border border-[#ffc857]/30 bg-[#ffc857]/[0.08] px-3.5 py-3 text-xs text-[#ffc857]" role="status">Os metadados da carga não estão publicados. Os indicadores exibidos não têm proveniência confirmada nesta sessão.</div> : null}
         {isLoading ? <LoadingState /> : null}
         {error && !isLoading ? <ErrorState message={error} /> : null}
 
@@ -176,9 +189,9 @@ function Overview({ rows, metrics, criticalRows, dataStatus, territories, onSele
     <div className="grid gap-[22px] pt-7">
       <section className={`${panel} flex flex-col justify-end gap-8 bg-gradient-to-br from-[#6fe7d2]/[0.09] via-[#0d202c]/80 to-[#ffc857]/[0.04] p-5 sm:flex-row sm:items-end sm:p-7`}>
         <div>
-          <span className={eyebrow}>Leitura da carga publicada</span>
+          <span className={eyebrow}>{dataStatus?.status === "published" ? "Leitura da carga publicada" : "Leitura operacional · proveniência pendente"}</span>
           <h2 className="mt-2.5 max-w-[470px] text-[clamp(1.6rem,3.7vw,3rem)] font-semibold leading-tight tracking-[-0.05em]">Uma visão operacional antes do detalhe.</h2>
-          <p className="mt-3.5 max-w-[550px] text-sm leading-relaxed text-[#8ea4a7]">Indicadores calculados exclusivamente a partir da carga vigente. Quando a origem direta estiver configurada, a proveniência aparecerá aqui.</p>
+          <p className="mt-3.5 max-w-[550px] text-sm leading-relaxed text-[#8ea4a7]">Indicadores calculados exclusivamente a partir da carga vigente. {dataStatus?.status === "published" ? "A proveniência desta carga está disponível no cabeçalho." : "A proveniência desta carga ainda não foi confirmada."}</p>
         </div>
         <div className="min-w-40 border-l border-[#6fe7d2]/25 p-3.5 sm:shrink-0">
           <span className="block text-xs text-[#8ea4a7]">carga atual</span>

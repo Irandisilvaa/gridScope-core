@@ -382,3 +382,20 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 
 - `npm run typecheck` e `npm run build`: aprovados.
 - `git diff --check`: aprovado.
+
+## 2026-09-29 — proveniência visível no estado da interface
+
+### Alterações
+
+- O cabeçalho passou a distinguir `Carga publicada`, `Metadados
+  indisponíveis` e consulta em andamento por cor, texto e data.
+- Adicionado aviso explícito quando a API responde sem metadados publicados,
+  sem esconder os indicadores que ainda puderem ser consultados.
+- O destaque do Panorama deixou de afirmar que a carga está publicada quando a
+  proveniência não foi confirmada.
+
+### Validação
+
+- `npm run typecheck` e `npm run build`: aprovados.
+- Detector Impeccable em `frontend/src/App.tsx`: nenhum achado.
+- `git diff --check`: aprovado.
