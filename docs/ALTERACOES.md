@@ -786,6 +786,29 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
   principal, IA e chat.
 - `/health` e `/ready` da API principal responderam com banco e Redis OK.
 
+## 2026-09-30 — Compose padrão sem segredos ou código montado
+
+### Alterações
+
+- `docker-compose.yml` deixou de montar o repositório inteiro e o arquivo
+  `.env` no contêiner padrão.
+- Configurações necessárias passaram a ser encaminhadas explicitamente por
+  variáveis de ambiente; dados e logs continuam em volumes dedicados.
+- `Dockerfile` cria e executa o serviço com usuário não-root (`uid/gid 1000`),
+  mantendo diretórios de dados e logs graváveis.
+- Criado `docker-compose.dev.yml` como override explícito para desenvolvimento
+  com código e `.env` montados.
+- Adicionado teste para impedir regressão dos mounts inseguros.
+
+### Validação
+
+- `docker compose config` do perfil padrão e do override de desenvolvimento:
+  aprovados.
+- Build da imagem backend: aprovado.
+- Suíte Python no container sem bind mount do código: 59 aprovados.
+- Smoke real com Compose: processo executando como UID 1000; `/app/.env` e
+  `/app/.git` ausentes; `/health` e `/ready` aprovados.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

@@ -2,6 +2,12 @@ FROM python:3.11
 
 WORKDIR /app
 
+ARG APP_UID=1000
+ARG APP_GID=1000
+
+RUN groupadd --gid ${APP_GID} gridscope \
+    && useradd --uid ${APP_UID} --gid ${APP_GID} --create-home gridscope
+
 COPY requirements.txt .
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -21,6 +27,11 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+RUN mkdir -p /app/dados /app/logs \
+    && chown -R gridscope:gridscope /app
+
+USER gridscope
 
 EXPOSE 8000
 

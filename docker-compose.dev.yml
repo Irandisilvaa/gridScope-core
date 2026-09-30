@@ -1,0 +1,6 @@
+services:
+  gridscope:
+    user: "0:0"
+    volumes:
+      - .:/app
+      - ./.env:/app/.env:ro

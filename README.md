@@ -56,6 +56,14 @@ cd gridScope-core
 docker compose up --build
 ```
 
+O Compose padrão não monta o repositório nem o `.env` dentro do contêiner e
+executa a API com usuário não-root. Para desenvolvimento com hot reload/código
+montado, use o override explícito:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
 ### 3. Acessos
 
 - **Frontend:** [http://localhost:3000](http://localhost:3000)
