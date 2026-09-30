@@ -572,6 +572,29 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
   regenerado com essa versão; ambientes que mantiverem artefatos antigos devem
   regenerá-los antes de produção.
 
+## 2026-09-30 — respostas genéricas de erro na API principal
+
+### Alterações
+
+- `src/api.py` passou a registrar falhas no servidor e retornar mensagens
+  genéricas para ranking, GeoJSON e simulações, sem expor exceções, SQL ou
+  detalhes de infraestrutura ao cliente.
+- Falhas de clima agora usam logging estruturado, mantendo o fallback
+  explicitamente identificado como estimativa.
+- Adicionados testes de contrato que verificam a ausência de detalhes internos
+  nas respostas HTTP.
+
+### Validação
+
+- Testes Python no container: 37 aprovados.
+- Compilação Python no container: aprovada.
+- `git diff --check`: aprovado.
+
+### Pendências
+
+- Autenticação/autorização e correlação de logs continuam pendentes conforme
+  `SEC-01` e `OPS-05`.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

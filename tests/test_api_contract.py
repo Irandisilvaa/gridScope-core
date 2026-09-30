@@ -119,6 +119,24 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_ranking_nao_expõe_detalhe_da_excecao(self) -> None:
+        with patch.object(api_module, "carregar_dados_cache", side_effect=RuntimeError("segredo interno")):
+            response = self.client.get("/mercado/ranking")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("segredo interno", response.text)
+
+    def test_simulacao_nao_expõe_detalhe_da_excecao(self) -> None:
+        with patch.object(
+            api_module,
+            "_carregar_alvo_simulacao",
+            side_effect=RuntimeError("consulta interna inválida"),
+        ):
+            response = self.client.get("/simulacao/id/A")
+
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn("consulta interna inválida", response.text)
+
     def test_simulacao_por_id_usa_identificador_estavel(self) -> None:
         with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
             api_module, "fundir_dados_geo_mercado", return_value=self.snapshot

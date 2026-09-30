@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 import csv
 import io
 import json
+import logging
 import os
 import sys
 import requests
@@ -50,6 +51,7 @@ CSV_COLUNAS_RANKING = (
     "total_unidades_gd",
     "potencia_total_kw_gd",
 )
+logger = logging.getLogger(__name__)
 
 
 def proteger_celula_csv(valor: object) -> object:
@@ -164,7 +166,7 @@ def obter_clima_avancado(lat: float, lon: float, data_alvo: date):
         return irradiacao_kwh, temp_max, tempo_desc, fonte
         
     except Exception as e:
-        print(f"Erro Clima: {e}")
+        logger.warning("Falha ao consultar clima: %s", e)
         return 5.0, 30.0, "Dados Offline", "Estimativa Padrao"
 
 
@@ -353,8 +355,8 @@ def obter_dados_completos():
 
         return dados_fundidos
     except Exception as e:
-        print(f"Erro detalhado API: {e}") 
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+        logger.exception("Falha ao carregar ranking")
+        raise HTTPException(status_code=500, detail="Erro interno ao carregar o ranking") from e
 
 
 @app.get("/mercado/ranking.csv", tags=["Exportações"])
@@ -421,7 +423,8 @@ def obter_apenas_geojson():
         gdf, _ = carregar_dados_cache()
         return json.loads(gdf.to_json())
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao carregar GeoJSON: {str(e)}")
+        logger.exception("Falha ao carregar GeoJSON")
+        raise HTTPException(status_code=503, detail="GeoJSON indisponível") from e
 
 @app.get("/simulacao/id/{id_tecnico}", response_model=SimulacaoSolar, tags=["Simulacao"])
 def simular_geracao_por_id(
@@ -435,7 +438,8 @@ def simular_geracao_por_id(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Erro dados: {error}") from error
+        logger.exception("Falha ao gerar simulação por ID")
+        raise HTTPException(status_code=500, detail="Erro interno ao gerar a simulação") from error
 
 
 @app.get("/simulacao/{nome_subestacao}", response_model=SimulacaoSolar, tags=["Simulacao"])
@@ -450,4 +454,5 @@ def simular_geracao(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Erro dados: {error}") from error
+        logger.exception("Falha ao gerar simulação por nome")
+        raise HTTPException(status_code=500, detail="Erro interno ao gerar a simulação") from error
