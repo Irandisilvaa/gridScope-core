@@ -102,10 +102,10 @@ def start_api_process(module_name, port, log_filename, description):
 
 def verificar_banco_populado():
     from sqlalchemy import create_engine, text
+    from src.config import DATABASE_URL
     
     try:
-        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5435/gridscope_local")
-        engine = create_engine(db_url)
+        engine = create_engine(DATABASE_URL)
         
         with engine.connect() as conn:
             tabelas = ['subestacoes', 'consumidores', 'cache_mercado']

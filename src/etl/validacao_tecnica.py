@@ -9,7 +9,7 @@ import logging
 
 # Configuração
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import CIDADE_ALVO, DIR_RAIZ
+from config import CIDADE_ALVO, DATABASE_URL, DIR_RAIZ
 
 # Arquivo gerado pelo script anterior
 ARQUIVO_GEOJSON = os.path.join(DIR_RAIZ, "subestacoes_logicas.geojson")
@@ -18,9 +18,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger("Auditoria")
 
 def get_database_engine():
-    # Ajuste a porta/senha se necessário
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
-    return create_engine(db_url)
+    return create_engine(DATABASE_URL)
 
 def calcular_validacao():
     print("--- INICIANDO PROTOCOLO DE PROVA TÉCNICA (V2) ---")

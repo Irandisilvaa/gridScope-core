@@ -282,3 +282,36 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - comportamento implementado;
 - comandos de validação e resultado;
 - pendências ou limitações introduzidas.
+
+## 2026-09-29 — endurecimento da configuração local
+
+### Alterações
+
+- Removida a senha fixa do PostgreSQL em `docker-compose.yml`, `run_all.py` e
+  scripts de auditoria; o Compose agora exige `POSTGRES_PASSWORD` e a URL
+  interna `DATABASE_URL_DOCKER` no `.env`.
+- Adicionadas variáveis explícitas para usuário, banco e portas locais em
+  `.env.example`, mantendo `DATABASE_URL` para execução fora do Compose.
+- As portas publicadas de PostgreSQL e Redis agora ficam limitadas a
+  `127.0.0.1`; a comunicação entre os serviços permanece na rede interna.
+- O healthcheck do PostgreSQL passou a usar as credenciais configuradas, e
+  `run_all.py` passou a reutilizar `src.config.DATABASE_URL`, carregando o
+  `.env` pelo mesmo caminho da aplicação.
+- Atualizado o README com a migração de credenciais e a diferença entre URL
+  local (`localhost`) e URL interna (`db`).
+
+### Validação
+
+- `docker compose config` com credenciais de teste: aprovado.
+- Testes Python no container: 12 aprovados.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py tests`: aprovado.
+- `npm run typecheck` e `npm run build`: aprovados.
+- `git diff --check`: sem erros de conteúdo.
+
+### Pendências
+
+- Cada ambiente deve preencher `POSTGRES_PASSWORD`, `DATABASE_URL` e
+  `DATABASE_URL_DOCKER` antes de executar o Compose; o arquivo `.env` local
+  existente não é alterado por estar fora do controle de versão. Volumes
+  PostgreSQL já inicializados com a senha anterior exigem migração explícita
+  da senha ou recriação controlada do volume.

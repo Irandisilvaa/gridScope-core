@@ -45,19 +45,26 @@ Clone o repositório e configure o `.env`:
 git clone <url-do-repositorio>
 cd gridScope-core
 # Crie o arquivo .env baseado no .env.example
-# Certifique-se de configurar DATABASE_URL e REDIS_HOST
+# Defina POSTGRES_PASSWORD e repita a mesma credencial nas URLs DATABASE_URL
+# e DATABASE_URL_DOCKER; faça percent-encoding dos caracteres reservados da URL.
+# DATABASE_URL usa localhost; DATABASE_URL_DOCKER usa o serviço interno "db".
 ```
 
 ### 2. Execução
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 ### 3. Acessos
 
 - **Frontend:** [http://localhost:3000](http://localhost:3000)
 - **API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+
+As portas do PostgreSQL e do Redis ficam vinculadas somente a `127.0.0.1`.
+Para alterar as portas locais, use `POSTGRES_HOST_PORT` e
+`REDIS_HOST_PORT` no `.env`; a comunicação entre os serviços usa a rede
+interna do Compose.
 
 ---
 

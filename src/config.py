@@ -23,7 +23,7 @@ if _https_proxy:
 os.environ["NO_PROXY"] = "localhost,127.0.0.1,::1"
 os.environ["no_proxy"] = "localhost,127.0.0.1,::1"
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:1234@localhost:5435/gridscope_local")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres@localhost:5435/gridscope_local")
 DATABASE_SCHEMA = os.getenv("DATABASE_SCHEMA", "public").strip()
 
 # Alimentação de dados. Em desenvolvimento, o adaptador local mantém a execução

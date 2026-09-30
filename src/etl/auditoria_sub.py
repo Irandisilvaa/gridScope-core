@@ -6,12 +6,10 @@ import sys
 
 # Setup de caminhos
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from config import CIDADE_ALVO
+from config import CIDADE_ALVO, DATABASE_URL
 
 def get_engine():
-    # Ajuste a senha/porta se necessário, conforme seu .env ou configuração local
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:1234@localhost:5435/gridscope_local")
-    return create_engine(db_url)
+    return create_engine(DATABASE_URL)
 
 def auditar_subestacoes():
     print(f"🕵️ INICIANDO AUDITORIA FORENSE DE SUBESTAÇÕES - {CIDADE_ALVO}")

@@ -26,18 +26,18 @@ services:
       retries: 12
       start_period: 20s
     environment:
-      - DATABASE_URL=postgresql://postgres:1234@db:5432/gridscope_local
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - DATA_SOURCE=${DATA_SOURCE:-local_file}
-      - FILE_GDB=${FILE_GDB:-Energisa_SE_6587_2024-12-31_V11_20250902-1412.gdb}
-      - DISTRIBUTOR_SOURCE_URL=${DISTRIBUTOR_SOURCE_URL:-}
-      - DISTRIBUTOR_API_TOKEN=${DISTRIBUTOR_API_TOKEN:-}
-      - DATA_SOURCE_TIMEOUT_SECONDS=${DATA_SOURCE_TIMEOUT_SECONDS:-120}
-      - DATA_MAX_DOWNLOAD_BYTES=${DATA_MAX_DOWNLOAD_BYTES:-2147483648}
-      - DATA_MAX_ARCHIVE_ENTRIES=${DATA_MAX_ARCHIVE_ENTRIES:-100000}
-      - DATA_INGEST_ON_STARTUP=${DATA_INGEST_ON_STARTUP:-false}
-      - TRAIN_MODEL_ON_STARTUP=${TRAIN_MODEL_ON_STARTUP:-false}
+      DATABASE_URL: "${DATABASE_URL_DOCKER:?Defina DATABASE_URL_DOCKER no arquivo .env}"
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DATA_SOURCE: "${DATA_SOURCE:-local_file}"
+      FILE_GDB: "${FILE_GDB:-Energisa_SE_6587_2024-12-31_V11_20250902-1412.gdb}"
+      DISTRIBUTOR_SOURCE_URL: "${DISTRIBUTOR_SOURCE_URL:-}"
+      DISTRIBUTOR_API_TOKEN: "${DISTRIBUTOR_API_TOKEN:-}"
+      DATA_SOURCE_TIMEOUT_SECONDS: "${DATA_SOURCE_TIMEOUT_SECONDS:-120}"
+      DATA_MAX_DOWNLOAD_BYTES: "${DATA_MAX_DOWNLOAD_BYTES:-2147483648}"
+      DATA_MAX_ARCHIVE_ENTRIES: "${DATA_MAX_ARCHIVE_ENTRIES:-100000}"
+      DATA_INGEST_ON_STARTUP: "${DATA_INGEST_ON_STARTUP:-false}"
+      TRAIN_MODEL_ON_STARTUP: "${TRAIN_MODEL_ON_STARTUP:-false}"
 
   frontend:
     build: ./frontend
@@ -54,15 +54,15 @@ services:
     container_name: gridscope_db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 1234
-      POSTGRES_DB: gridscope_local
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no arquivo .env}"
+      POSTGRES_DB: "${POSTGRES_DB:-gridscope_local}"
     ports:
-      - "5435:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5435}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d gridscope_local"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -73,7 +73,7 @@ services:
     container_name: gridscope_redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
