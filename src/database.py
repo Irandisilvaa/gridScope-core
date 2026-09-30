@@ -30,6 +30,14 @@ _COLUNAS_PERMITIDAS = {
 }
 
 
+def _qualified_table(table_name: str) -> str:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", DATABASE_SCHEMA):
+        raise ValueError(f"Schema de banco inválido: {DATABASE_SCHEMA}")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table_name):
+        raise ValueError(f"Tabela inválida: {table_name}")
+    return f'"{DATABASE_SCHEMA}"."{table_name}"'
+
+
 def _select_columns(table_name: str, columns: Optional[List[str]]) -> str:
     if not columns:
         return "*"
@@ -288,7 +296,7 @@ def carregar_voronoi() -> gpd.GeoDataFrame:
     engine = get_engine()
     
     try:
-        sql = "SELECT * FROM territorios_voronoi"
+        sql = f"SELECT * FROM {_qualified_table('territorios_voronoi')}"
         gdf = gpd.read_postgis(sql, engine, geom_col='geometry')
         logger.info(f"📥 Carregados {len(gdf)} territórios Voronoi do banco")
         return gdf
@@ -335,6 +343,7 @@ def salvar_voronoi(gdf: gpd.GeoDataFrame) -> None:
         gdf.to_postgis(
             'territorios_voronoi', 
             engine, 
+            schema=DATABASE_SCHEMA,
             if_exists='replace', 
             index=False
         )
@@ -355,8 +364,8 @@ def criar_tabela_cache():
     
     try:
         with engine.connect() as conn:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS cache_mercado (
+            conn.execute(text(f"""
+                CREATE TABLE IF NOT EXISTS {_qualified_table('cache_mercado')} (
                     id_subestacao VARCHAR PRIMARY KEY,
                     dados_json JSONB NOT NULL,
                     data_atualizacao TIMESTAMP DEFAULT NOW()
@@ -387,7 +396,8 @@ def salvar_cache_mercado(dados_mercado: list) -> None:
         criar_tabela_cache()
         
         with engine.connect() as conn:
-            conn.execute(text("DELETE FROM cache_mercado"))
+            cache_table = _qualified_table("cache_mercado")
+            conn.execute(text(f"DELETE FROM {cache_table}"))
             
             for item in dados_mercado:
                 id_sub = item.get('id_tecnico', str(item.get('subestacao', '')))
@@ -395,8 +405,8 @@ def salvar_cache_mercado(dados_mercado: list) -> None:
                 item_clean = {k: v for k, v in item.items() if k != 'geometry'}
                 
                 conn.execute(
-                    text("""
-                        INSERT INTO cache_mercado (id_subestacao, dados_json, data_atualizacao)
+                    text(f"""
+                        INSERT INTO {cache_table} (id_subestacao, dados_json, data_atualizacao)
                         VALUES (:id, CAST(:dados AS jsonb), NOW())
                         ON CONFLICT (id_subestacao) 
                         DO UPDATE SET dados_json = CAST(:dados AS jsonb), data_atualizacao = NOW()
@@ -427,9 +437,10 @@ def carregar_cache_mercado() -> list:
     
     try:
         with engine.connect() as conn:
-            result = conn.execute(text("""
+            cache_table = _qualified_table("cache_mercado")
+            result = conn.execute(text(f"""
                 SELECT dados_json 
-                FROM cache_mercado 
+                FROM {cache_table}
                 ORDER BY id_subestacao
             """))
             
