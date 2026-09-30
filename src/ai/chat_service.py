@@ -1,16 +1,16 @@
 import os
 import sys
 import json
-import traceback
 import hashlib
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
 from google import genai
 from google.genai import types
 from google.genai.errors import ServerError
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Path, Query
+from pydantic import BaseModel, Field
 import uvicorn
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
@@ -30,6 +30,15 @@ except Exception as e:
     print(f"⚠️ Erro ao inicializar: {e}")
 
 app = FastAPI(title="GridScope Chat IA", version="1.0")
+logger = logging.getLogger(__name__)
+
+MAX_CHAT_MESSAGE_CHARS = 4_000
+MAX_HISTORY_MESSAGES = 20
+MAX_HISTORY_CONTENT_CHARS = 4_000
+MAX_CHAT_TOTAL_CHARS = 20_000
+MAX_TOOL_ARGS_CHARS = 4_000
+MAX_TOOL_RESULT_CHARS = 12_000
+MAX_FUNCTION_ITERATIONS = 10
 
 CONTEXTO_SISTEMA = f"""
 Você é um assistente especializado em análise de redes elétricas de distribuição.
@@ -264,10 +273,10 @@ tools = [
 ]
 
 class ChatRequest(BaseModel):
-    mensagem: str
-    historico: List[Dict[str, str]] = []
-    conversa_id: Optional[int] = None
-    usuario_id: Optional[str] = None
+    mensagem: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
+    historico: List[Dict[str, str]] = Field(default_factory=list)
+    conversa_id: Optional[int] = Field(default=None, gt=0)
+    usuario_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
 
 class ChatResponse(BaseModel):
     resposta: str
@@ -276,14 +285,37 @@ class ChatResponse(BaseModel):
     graficos: Optional[List[Dict[str, Any]]] = None
 
 class FeedbackRequest(BaseModel):
-    pergunta: str
-    resposta: str
+    pergunta: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
+    resposta: str = Field(..., min_length=1, max_length=MAX_TOOL_RESULT_CHARS)
     feedback: bool
-    comentario: str = None
+    comentario: Optional[str] = Field(default=None, max_length=2_000)
+
+
+def _validar_limites_chat(request: ChatRequest) -> None:
+    if not request.mensagem.strip():
+        raise HTTPException(status_code=422, detail="A mensagem não pode ser vazia")
+    if len(request.historico) > MAX_HISTORY_MESSAGES:
+        raise HTTPException(status_code=422, detail="Histórico excede o limite permitido")
+
+    total_chars = len(request.mensagem)
+    for message in request.historico:
+        if set(message) != {"role", "content"}:
+            raise HTTPException(status_code=422, detail="Item de histórico inválido")
+        if message["role"] not in {"user", "model"}:
+            raise HTTPException(status_code=422, detail="Papel de mensagem inválido")
+        if not message["content"].strip():
+            raise HTTPException(status_code=422, detail="Conteúdo de histórico vazio")
+        if len(message["content"]) > MAX_HISTORY_CONTENT_CHARS:
+            raise HTTPException(status_code=422, detail="Mensagem do histórico excede o limite permitido")
+        total_chars += len(message["content"])
+
+    if total_chars > MAX_CHAT_TOTAL_CHARS:
+        raise HTTPException(status_code=422, detail="Conteúdo total do chat excede o limite permitido")
 
 @app.post("/chat/message", response_model=ChatResponse)
 def enviar_mensagem(request: ChatRequest):
     try:
+        _validar_limites_chat(request)
         conversa_id = request.conversa_id
         if not conversa_id and request.usuario_id:
             titulo = request.mensagem[:50] + "..." if len(request.mensagem) > 50 else request.mensagem
@@ -328,7 +360,7 @@ def enviar_mensagem(request: ChatRequest):
             temperature=0.68
         )
         
-        max_iterations = 10
+        max_iterations = MAX_FUNCTION_ITERATIONS
         iteration = 0
         graficos_gerados = []  # Lista para coletar gráficos
         
@@ -354,26 +386,32 @@ def enviar_mensagem(request: ChatRequest):
             function_call = response.candidates[0].content.parts[0].function_call
             function_name = function_call.name
             function_args = dict(function_call.args)
-            
-            print(f"🔧 Chamando função: {function_name} com args: {function_args}")
-            
-            if function_name in FUNCOES_DISPONIVEIS:
-                try:
-                    resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
-                    print(f"✅ Função {function_name} executada com sucesso")
-                except Exception as e:
-                    print(f"❌ Erro ao executar função {function_name}: {e}")
-                    resultado = {"erro": str(e)}
-                
-                if function_name.startswith("gerar_grafico_"):
-                    if isinstance(resultado, dict) and "spec" in resultado and "tipo" in resultado:
-                        graficos_gerados.append(resultado)
-                        print(f"📊 Gráfico capturado: {resultado.get('titulo', 'Sem título')}")
-                    else:
-                        print(f"⚠️ A função {function_name} não retornou um gráfico válido:Keys={resultado.keys() if isinstance(resultado, dict) else 'Not Dict'}")
 
+            if len(json.dumps(function_args, ensure_ascii=False, default=str)) > MAX_TOOL_ARGS_CHARS:
+                resultado = {"erro": "Argumentos da ferramenta excedem o limite permitido"}
             else:
-                resultado = {"erro": f"Função {function_name} não encontrada"}
+                logger.info("Chamando função do chat: %s", function_name)
+
+                if function_name in FUNCOES_DISPONIVEIS:
+                    try:
+                        resultado = FUNCOES_DISPONIVEIS[function_name](**function_args)
+                        logger.info("Função do chat executada: %s", function_name)
+                    except Exception:
+                        logger.exception("Falha ao executar função do chat: %s", function_name)
+                        resultado = {"erro": "Falha ao executar a ferramenta"}
+
+                    if len(json.dumps(resultado, ensure_ascii=False, default=str)) > MAX_TOOL_RESULT_CHARS:
+                        resultado = {"erro": "Resultado da ferramenta excede o limite permitido"}
+
+                    if function_name.startswith("gerar_grafico_"):
+                        if isinstance(resultado, dict) and "spec" in resultado and "tipo" in resultado:
+                            graficos_gerados.append(resultado)
+                            print(f"📊 Gráfico capturado: {resultado.get('titulo', 'Sem título')}")
+                        else:
+                            print(f"⚠️ A função {function_name} não retornou um gráfico válido:Keys={resultado.keys() if isinstance(resultado, dict) else 'Not Dict'}")
+
+                else:
+                    resultado = {"erro": f"Função {function_name} não encontrada"}
             
             contents.append(response.candidates[0].content)
             
@@ -417,14 +455,13 @@ def enviar_mensagem(request: ChatRequest):
         
         resposta_final = ""
         if hasattr(response, 'candidates') and response.candidates:
-            print(f"DEBUG: Candidates count: {len(response.candidates)}")
+            logger.debug("Resposta Gemini contém %s candidatos", len(response.candidates))
             if len(response.candidates) > 0:
                 first_candidate = response.candidates[0]
                 if hasattr(first_candidate, 'content') and first_candidate.content:
-                    print(f"DEBUG: Content parts count: {len(first_candidate.content.parts)}")
+                    logger.debug("Resposta Gemini contém %s partes", len(first_candidate.content.parts))
                     if hasattr(first_candidate.content, 'parts') and first_candidate.content.parts:
                         for part in first_candidate.content.parts:
-                            print(f"DEBUG: Part text: {getattr(part, 'text', 'N/A')}")
                             if hasattr(part, 'text') and part.text:
                                 resposta_final = part.text
                                 break
@@ -433,9 +470,9 @@ def enviar_mensagem(request: ChatRequest):
             try:
                 if hasattr(response, 'text') and response.text:
                     resposta_final = response.text
-                    print(f"✅ Extraído de response.text: '{resposta_final[:100]}'")
+                    logger.debug("Texto extraído de response.text")
             except Exception as ex:
-                print(f"⚠️ response.text não disponível: {ex}")
+                logger.debug("response.text não disponível: %s", ex)
         
         if not resposta_final or resposta_final.strip() == "":
             print("⚠️ Resposta vazia detectada. Forçando uma última chamada para gerar texto...")
@@ -459,9 +496,9 @@ def enviar_mensagem(request: ChatRequest):
                 
                 if hasattr(final_response, 'text') and final_response.text:
                     resposta_final = final_response.text
-                    print(f"✅ Texto recuperado com chamada extra: '{resposta_final[:100]}'")
-            except Exception as retry_ex:
-                print(f"❌ Falha no retry de resposta vazia: {retry_ex}")
+                    logger.debug("Texto recuperado com chamada extra")
+            except Exception:
+                logger.exception("Falha no retry de resposta vazia")
 
         if not resposta_final or resposta_final.strip() == "":
             resposta_final = "⚠️ O modelo processou a requisição mas não retornou texto. Os dados foram consultados com sucesso no banco."
@@ -486,8 +523,8 @@ def enviar_mensagem(request: ChatRequest):
         )
         
     except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Erro no chat: {str(e)}")
+        logger.exception("Falha ao processar mensagem do chat")
+        raise HTTPException(status_code=500, detail="Erro interno ao processar o chat") from e
 
 @app.post("/chat/feedback")
 def enviar_feedback(request: FeedbackRequest):
@@ -500,10 +537,14 @@ def enviar_feedback(request: FeedbackRequest):
         )
         return {"status": "ok", "mensagem": "Obrigado pelo feedback!"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao salvar feedback: {str(e)}")
+        logger.exception("Falha ao salvar feedback do chat")
+        raise HTTPException(status_code=500, detail="Erro interno ao salvar o feedback") from e
 
 @app.post("/chat/conversa/nova")
-def nova_conversa(usuario_id: str, titulo: str):
+def nova_conversa(
+    usuario_id: str = Query(..., min_length=1, max_length=128),
+    titulo: str = Query(..., min_length=1, max_length=200),
+):
     try:
         conversa_id = criar_conversa(usuario_id, titulo)
         if conversa_id:
@@ -511,23 +552,26 @@ def nova_conversa(usuario_id: str, titulo: str):
         else:
             raise HTTPException(status_code=500, detail="Erro ao criar conversa")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        logger.exception("Falha ao criar conversa")
+        raise HTTPException(status_code=500, detail="Erro interno ao criar a conversa") from e
 
 @app.get("/chat/conversas")
-def listar_conversas(usuario_id: str):
+def listar_conversas(usuario_id: str = Query(..., min_length=1, max_length=128)):
     try:
         conversas = carregar_conversas(usuario_id)
         return {"conversas": conversas}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        logger.exception("Falha ao listar conversas")
+        raise HTTPException(status_code=500, detail="Erro interno ao listar conversas") from e
 
 @app.get("/chat/conversa/{conversa_id}")
-def obter_conversa(conversa_id: int):
+def obter_conversa(conversa_id: int = Path(..., gt=0)):
     try:
         mensagens = carregar_mensagens(conversa_id)
         return {"mensagens": mensagens}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+        logger.exception("Falha ao carregar conversa")
+        raise HTTPException(status_code=500, detail="Erro interno ao carregar a conversa") from e
 
 @app.get("/health")
 def health_check():

@@ -570,3 +570,29 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - A validação registrou `InconsistentVersionWarning`: o artefato foi treinado
   com scikit-learn 1.5.2 e carregado com 1.9.1; é necessário alinhar versões e
   regenerar o artefato antes de produção.
+
+## 2026-09-30 — limites e tratamento seguro do chat IA
+
+### Alterações
+
+- `src/ai/chat_service.py` passou a limitar mensagem, histórico, conteúdo
+  total, argumentos e resultados de ferramentas, além de aceitar somente os
+  papéis `user` e `model` no histórico.
+- Corrigido o default mutável de `historico` e adicionadas restrições para
+  feedback, criação e consulta de conversas.
+- O loop de function calling mantém no máximo 10 iterações e substitui
+  argumentos/resultados excessivos por erro controlado.
+- Erros HTTP do chat deixaram de devolver detalhes internos; conteúdo de
+  respostas e argumentos não é mais gravado nos logs de debug.
+- Adicionado `tests/test_chat_limits.py`.
+
+### Validação
+
+- Testes Python no container: 35 aprovados.
+- Compilação Python no container: aprovada.
+
+### Pendências
+
+- Autenticação, titularidade de conversas, rate limit por identidade e política
+  de retenção continuam pendentes até a definição do ambiente-alvo e da sessão
+  verificável.
