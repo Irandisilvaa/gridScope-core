@@ -956,11 +956,6 @@ existente.
 - Verificado também que o teste falha contra a versão anterior do importador,
   confirmando que ele cobre o defeito e não apenas o código novo.
 
-### Pendências
-
-- Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
-  publicam derivados diretamente.
-
 ## 2026-09-30 — validação do pipeline derivado real
 
 ### Alterações
@@ -985,11 +980,6 @@ existente.
 - Suíte Python no container: 90 testes executados, 87 aprovados e 3 testes
   PostGIS ignorados sem `TEST_DATABASE_URL`.
 - Teste PostGIS explícito do corte: 3 aprovados.
-
-### Pendências
-
-- Migrar o dashboard para o pipeline canônico; hoje os botões de processamento
-  publicam derivados diretamente.
 
 ## 2026-09-30 — descarte auditável de registros incompletos
 
@@ -1032,3 +1022,28 @@ que apontem para uma camada inexistente.
   registros de GD sem transformador.
 - Leitura dos metadados transacionais confirmou a entrega, contagens e o
   relatório de qualidade; banco operacional não foi usado para a publicação.
+
+## 2026-09-30 — dashboard com publicação canônica por cidade
+
+### Alterações
+
+- O botão de processamento do dashboard deixou de chamar Voronoi e mercado
+  diretamente no schema público quando já existe uma publicação canônica.
+- A nova função `ingest_city` altera a cidade, executa o pipeline completo e
+  restaura a cidade anterior se a publicação falhar.
+- Caches de arquivo continuam funcionando para instalações legadas que ainda
+  não possuem `grid_scope_publication`; depois da primeira publicação, a cidade
+  selecionada substitui atomicamente o snapshot canônico.
+
+### Validação
+
+- `tests/test_pipeline.py` cobre publicação da cidade selecionada e restauração
+  da configuração após falha.
+- Suíte Python no container: 92 testes executados, 89 aprovados e 3 testes
+  PostGIS ignorados sem `TEST_DATABASE_URL`.
+
+### Política conhecida
+
+- O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
+  simultâneas exigirá particionar a publicação e a API, e não será simulado por
+  caches locais fora do corte transacional.
