@@ -12,7 +12,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from src.config import DATABASE_URL, DIR_DADOS
+from src.config import DATABASE_URL, DIR_DADOS, atualizar_cidade_alvo, get_cidade_alvo
 from src.etl.fontes import create_data_source
 from src.etl.importador import SnapshotImporter
 
@@ -141,6 +141,18 @@ def ingest_current_delivery() -> dict:
         }
     finally:
         delivery.cleanup()
+
+
+def ingest_city(cidade: str) -> dict:
+    """Publica a entrega atual para uma cidade e restaura a anterior em falha."""
+
+    cidade_anterior = get_cidade_alvo()
+    atualizar_cidade_alvo(cidade)
+    try:
+        return ingest_current_delivery()
+    except Exception:
+        atualizar_cidade_alvo(cidade_anterior)
+        raise
 
 
 if __name__ == "__main__":

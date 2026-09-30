@@ -196,8 +196,10 @@ CIDADES_SUGERIDAS = [
 
 try:
     from src.config import get_cidade_alvo, atualizar_cidade_alvo, get_city_slug, DIR_DADOS
+    from src.database import carregar_publication_metadata
 except ImportError:
     from config import get_cidade_alvo, atualizar_cidade_alvo, get_city_slug, DIR_DADOS
+    from database import carregar_publication_metadata
 
 cidade_atual_config = get_cidade_alvo()
 
@@ -226,26 +228,28 @@ if cidade_final and cidade_final != cidade_atual_config:
     path_mkt = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
     
     has_cache = os.path.exists(path_geo) and os.path.exists(path_mkt)
+    try:
+        has_canonical_publication = carregar_publication_metadata() is not None
+    except Exception:
+        has_canonical_publication = False
     
-    if has_cache:
+    if has_cache and not has_canonical_publication:
         atualizar_cidade_alvo(cidade_final)
         st.cache_data.clear()
         st.rerun()
     else:
-        st.sidebar.info(f"💡 {cidade_final.split(',')[0]} precisa ser processada 1ª vez.")
-        if st.sidebar.button("⚡ Processar Cidade", use_container_width=True):
+        st.sidebar.info(
+            f"💡 {cidade_final.split(',')[0]} será publicada como a cidade canônica."
+        )
+        if st.sidebar.button("⚡ Publicar Cidade", use_container_width=True):
             with st.spinner(f"Gerando dados para {cidade_final}..."):
-                atualizar_cidade_alvo(cidade_final)
                 try:
                     try:
-                        from src.modelos.processar_voronoi import main as processar_voronoi
-                        from src.modelos.analise_mercado import analisar_mercado
+                        from src.etl.pipeline import ingest_city
                     except ImportError:
-                        from modelos.processar_voronoi import main as processar_voronoi
-                        from modelos.analise_mercado import analisar_mercado
+                        from etl.pipeline import ingest_city
 
-                    processar_voronoi(cidade_final)
-                    analisar_mercado()
+                    ingest_city(cidade_final)
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as err:

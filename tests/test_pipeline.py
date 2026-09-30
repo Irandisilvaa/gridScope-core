@@ -1,11 +1,49 @@
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from src.etl import pipeline
 
 
 class PipelineTests(unittest.TestCase):
+    @patch("src.etl.pipeline.get_cidade_alvo", return_value="Aracaju, Sergipe, Brazil")
+    @patch("src.etl.pipeline.atualizar_cidade_alvo")
+    @patch("src.etl.pipeline.ingest_current_delivery")
+    def test_ingest_city_publica_a_cidade_selecionada(
+        self,
+        ingest_current_delivery,
+        atualizar_cidade_alvo,
+        get_cidade_alvo,
+    ):
+        ingest_current_delivery.return_value = {"delivery_id": "cidade-b"}
+
+        resultado = pipeline.ingest_city("Lagarto, Sergipe, Brazil")
+
+        self.assertEqual(resultado["delivery_id"], "cidade-b")
+        get_cidade_alvo.assert_called_once_with()
+        atualizar_cidade_alvo.assert_called_once_with("Lagarto, Sergipe, Brazil")
+        ingest_current_delivery.assert_called_once_with()
+
+    @patch("src.etl.pipeline.get_cidade_alvo", return_value="Aracaju, Sergipe, Brazil")
+    @patch("src.etl.pipeline.atualizar_cidade_alvo")
+    @patch(
+        "src.etl.pipeline.ingest_current_delivery",
+        side_effect=RuntimeError("falha na publicação"),
+    )
+    def test_ingest_city_restaura_cidade_anterior_se_falhar(
+        self,
+        ingest_current_delivery,
+        atualizar_cidade_alvo,
+        get_cidade_alvo,
+    ):
+        with self.assertRaisesRegex(RuntimeError, "falha na publicação"):
+            pipeline.ingest_city("Lagarto, Sergipe, Brazil")
+
+        self.assertEqual(
+            [call.args[0] for call in atualizar_cidade_alvo.call_args_list],
+            ["Lagarto, Sergipe, Brazil", "Aracaju, Sergipe, Brazil"],
+        )
+
     @patch("src.etl.pipeline.subprocess.run")
     @patch("sqlalchemy.create_engine")
     def test_jobs_derivados_recebem_modo_staging(self, create_engine, run_job):
