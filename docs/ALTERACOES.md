@@ -651,6 +651,22 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Compilação Python no container: aprovada.
 - `git diff --check`: aprovado.
 
+## 2026-09-30 — carregamento lazy da base da API de IA
+
+### Alterações
+
+- `src/ai/ai_service.py` deixou de carregar subestações e abrir conexão com o
+  banco durante a importação do módulo.
+- O GeoDataFrame agora é carregado sob demanda na primeira operação que exige
+  localização ou busca de consumo real.
+- Adicionado teste que protege a importação sem dependência de banco.
+
+### Validação
+
+- Testes Python no container: 40 aprovados.
+- Compilação Python no container: aprovada.
+- A suíte deixou de abrir conexão do banco somente para importar a API de IA.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

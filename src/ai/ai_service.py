@@ -3,7 +3,6 @@ import numpy as np
 import joblib
 import uvicorn
 import traceback
-import sys
 import os
 import requests
 import holidays
@@ -21,13 +20,6 @@ try:
 except ImportError:
     from model_contract import FEATURE_COLUMNS
 
-# Tentativa de importação do módulo de banco de dados
-try:
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-    from src.database import get_engine 
-except ImportError:
-    pass
-
 app = FastAPI(title="GridScope AI", version="1.0")
 
 DIR_ATUAL = os.path.dirname(os.path.abspath(__file__))
@@ -42,14 +34,26 @@ if os.path.exists(MODEL_PATH):
     except Exception as e: 
         print(f"⚠️ Erro ao carregar modelo ML: {e}")
 
-# Carregar GeoDataFrame de Subestações (Global)
+# Carregar GeoDataFrame de Subestações sob demanda, não durante a importação.
 gdf_subs = None
-try:
-    from database import carregar_subestacoes
-    # Carrega apenas o necessário para evitar peso na memória
-    gdf_subs = carregar_subestacoes(colunas=['COD_ID', 'NOME', 'geometry'])
-except Exception as e:
-    print(f"⚠️ Falha ao carregar subestações do banco: {e}")
+
+
+def _obter_subestacoes():
+    global gdf_subs
+    if gdf_subs is not None:
+        return gdf_subs
+
+    try:
+        from src.database import carregar_subestacoes
+    except ImportError:
+        from database import carregar_subestacoes
+
+    try:
+        gdf_subs = carregar_subestacoes(colunas=['COD_ID', 'NOME', 'geometry'])
+    except Exception as error:
+        print(f"⚠️ Falha ao carregar subestações do banco: {error}")
+        gdf_subs = gpd.GeoDataFrame()
+    return gdf_subs
 
 class DuckCurveRequest(BaseModel):
     data_alvo: str
@@ -88,10 +92,12 @@ def buscar_dados_reais_interno(nome_subestacao, mes_alvo):
         return None
         
     try:
-        from database import carregar_subestacoes, get_engine
+        try:
+            from src.database import get_engine
+        except ImportError:
+            from database import get_engine
         
-        # Se o gdf global não estiver carregado, tenta carregar local
-        local_gdf = gdf_subs if gdf_subs is not None else carregar_subestacoes()
+        local_gdf = _obter_subestacoes()
         if local_gdf is None or local_gdf.empty:
             return None
 
@@ -121,10 +127,11 @@ def buscar_dados_reais_interno(nome_subestacao, mes_alvo):
         return None
 
 def resolver_subestacao(lat, lon):
-    if gdf_subs is None or gdf_subs.empty: return "Desconhecida"
+    local_gdf = _obter_subestacoes()
+    if local_gdf is None or local_gdf.empty: return "Desconhecida"
     try:
         ponto = gpd.GeoDataFrame(geometry=[Point(lon, lat)], crs="EPSG:4326")
-        gdf_alvo = gdf_subs.to_crs("EPSG:4326")
+        gdf_alvo = local_gdf.to_crs("EPSG:4326")
         
         join = gpd.sjoin(ponto, gdf_alvo, how="left", predicate="within")
         if not join.empty:
