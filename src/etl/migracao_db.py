@@ -8,7 +8,7 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[2]))
 
-from src.config import DATABASE_URL, DIR_DADOS, FILE_GDB
+from src.config import DATABASE_URL, DIR_DADOS, FILE_GDB, get_cidade_alvo
 from src.etl.importador import CAMADAS_ALVO, SnapshotImportResult, SnapshotImporter
 from src.etl.pipeline import _build_derived_tables, _invalidate_runtime_cache
 
@@ -33,7 +33,10 @@ def migrar_gdb_para_sql(
         DATABASE_URL,
         source,
         delivery_id=resolved_delivery_id,
-        publication_metadata={"source": "local_file"},
+        publication_metadata={
+            "source": "local_file",
+            "city_target": get_cidade_alvo(),
+        },
     ).run(prepare_publish=_build_derived_tables)
     _invalidate_runtime_cache(result.delivery_id)
     return result

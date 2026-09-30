@@ -141,7 +141,11 @@ class CorteTransacionalPostgisTests(unittest.TestCase):
             TEST_DATABASE_URL,
             caminho,
             delivery_id=campos["delivery_id"],
-            publication_metadata={"source": "teste", "reference_period": "2025-01"},
+            publication_metadata={
+                "source": "teste",
+                "reference_period": "2025-01",
+                "city_target": "Aracaju, Sergipe, Brazil",
+            },
         )
 
         with patch.object(SnapshotImporter, "_read_layer", autospec=True) as ler:
@@ -225,7 +229,8 @@ class CorteTransacionalPostgisTests(unittest.TestCase):
                 return {}
             linha = connection.execute(
                 text(
-                    "SELECT delivery_id, row_counts, quality_report FROM public.grid_scope_publication "
+                    "SELECT delivery_id, city_target, row_counts, quality_report "
+                    "FROM public.grid_scope_publication "
                     "WHERE publication_key = 1"
                 )
             ).mappings().first()
@@ -249,6 +254,7 @@ class CorteTransacionalPostgisTests(unittest.TestCase):
 
         registro = self._publicacao_registrada()
         self.assertTrue(registro["delivery_id"].startswith("delivery-b-"))
+        self.assertEqual(registro["city_target"], "Aracaju, Sergipe, Brazil")
 
     def test_registra_descarte_de_registros_sem_subestacao(self) -> None:
         contagens = self._publicar("sem-sub", sem_sub=True)

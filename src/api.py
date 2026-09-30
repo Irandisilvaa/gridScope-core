@@ -135,6 +135,7 @@ class DataStatus(BaseModel):
     source: str
     delivery_id: Optional[str] = None
     reference_period: Optional[str] = None
+    city_target: Optional[str] = None
     published_at: Optional[str] = None
     row_counts: Dict[str, int] = Field(default_factory=dict)
     quality_report: Dict[str, Any] = Field(default_factory=dict)
@@ -387,6 +388,7 @@ def data_status():
             "source": metadata.get("source", DATA_SOURCE),
             "delivery_id": metadata.get("delivery_id"),
             "reference_period": metadata.get("reference_period"),
+            "city_target": metadata.get("city_target"),
             "published_at": metadata.get("published_at"),
             "row_counts": metadata.get("row_counts", {}),
             "quality_report": metadata.get("quality_report", {}),

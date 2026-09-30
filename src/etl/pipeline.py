@@ -33,6 +33,7 @@ def _write_metadata(delivery, result) -> None:
         "delivery_id": delivery.delivery_id,
         "format": delivery.format,
         "reference_period": delivery.reference_period,
+        "city_target": get_cidade_alvo(),
         "received_at": delivery.received_at.isoformat(),
         "published_at": datetime.now(timezone.utc).isoformat(),
         "row_counts": result.row_counts,
@@ -124,6 +125,7 @@ def ingest_current_delivery() -> dict:
             publication_metadata={
                 "source": delivery.source,
                 "reference_period": delivery.reference_period,
+                "city_target": get_cidade_alvo(),
             },
         ).run(prepare_publish=_build_derived_tables)
         try:
@@ -136,6 +138,7 @@ def ingest_current_delivery() -> dict:
         logger.info("Entrega %s publicada: %s", delivery.delivery_id, result.row_counts)
         return {
             "delivery_id": delivery.delivery_id,
+            "city_target": get_cidade_alvo(),
             "row_counts": result.row_counts,
             "quality_report": result.quality_report,
         }

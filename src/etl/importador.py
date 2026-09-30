@@ -431,6 +431,7 @@ class SnapshotImporter:
                         delivery_id TEXT NOT NULL,
                         source TEXT NOT NULL,
                         reference_period TEXT,
+                        city_target TEXT,
                         published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         row_counts JSONB NOT NULL,
                         quality_report JSONB NOT NULL DEFAULT '{}'::jsonb
@@ -449,12 +450,21 @@ class SnapshotImporter:
             connection.execute(
                 text(
                     """
+                    ALTER TABLE public.grid_scope_publication
+                    ADD COLUMN IF NOT EXISTS city_target TEXT
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
                     INSERT INTO public.grid_scope_publication
                         (
                             publication_key,
                             delivery_id,
                             source,
                             reference_period,
+                            city_target,
                             published_at,
                             row_counts,
                             quality_report
@@ -464,6 +474,7 @@ class SnapshotImporter:
                         :delivery_id,
                         :source,
                         :reference_period,
+                        :city_target,
                         NOW(),
                         CAST(:row_counts AS jsonb),
                         CAST(:quality_report AS jsonb)
@@ -472,6 +483,7 @@ class SnapshotImporter:
                         delivery_id = EXCLUDED.delivery_id,
                         source = EXCLUDED.source,
                         reference_period = EXCLUDED.reference_period,
+                        city_target = EXCLUDED.city_target,
                         published_at = EXCLUDED.published_at,
                         row_counts = EXCLUDED.row_counts,
                         quality_report = EXCLUDED.quality_report
@@ -481,6 +493,7 @@ class SnapshotImporter:
                     "delivery_id": self._delivery_id,
                     "source": str(self._publication_metadata.get("source", "unknown")),
                     "reference_period": self._publication_metadata.get("reference_period"),
+                    "city_target": self._publication_metadata.get("city_target"),
                     "row_counts": json.dumps(dict(row_counts), ensure_ascii=False),
                     "quality_report": json.dumps(dict(quality_report), ensure_ascii=False),
                 },

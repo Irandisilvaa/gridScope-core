@@ -17,7 +17,7 @@ class PublicationPathTests(unittest.TestCase):
         )
         self.assertEqual(
             importer_type.call_args.kwargs["publication_metadata"],
-            {"source": "local_file"},
+            {"source": "local_file", "city_target": migracao_db.get_cidade_alvo()},
         )
         invalidate_cache.assert_called_once_with("delivery-b")
 

@@ -89,6 +89,7 @@ def carregar_publication_metadata() -> Optional[dict]:
                         publication.delivery_id,
                         publication.source,
                         publication.reference_period,
+                        to_jsonb(publication) ->> 'city_target' AS city_target,
                         publication.published_at,
                         publication.row_counts,
                         COALESCE(
@@ -115,6 +116,7 @@ def carregar_publication_metadata() -> Optional[dict]:
                 "source": row["source"],
                 "delivery_id": row["delivery_id"],
                 "reference_period": row["reference_period"],
+                "city_target": row["city_target"],
                 "published_at": published_at.isoformat() if hasattr(published_at, "isoformat") else published_at,
                 "row_counts": row_counts if isinstance(row_counts, dict) else {},
                 "quality_report": quality_report if isinstance(quality_report, dict) else {},

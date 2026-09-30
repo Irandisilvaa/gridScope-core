@@ -91,6 +91,7 @@ class ApiContractTests(unittest.TestCase):
                         "status": "published",
                         "source": "local_file",
                         "delivery_id": "delivery-a",
+                        "city_target": "Aracaju, Sergipe, Brazil",
                         "row_counts": {"subestacoes": 1},
                         "quality_report": {"discarded_records": []},
                     }
@@ -104,6 +105,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-a")
+        self.assertEqual(response.json()["city_target"], "Aracaju, Sergipe, Brazil")
         self.assertEqual(response.json()["row_counts"], {"subestacoes": 1})
         self.assertEqual(response.json()["quality_report"], {"discarded_records": []})
 
@@ -116,6 +118,7 @@ class ApiContractTests(unittest.TestCase):
                 "source": "local_file",
                 "delivery_id": "delivery-db",
                 "reference_period": None,
+                "city_target": "Lagarto, Sergipe, Brazil",
                 "published_at": "2026-09-30T12:00:00+00:00",
                 "row_counts": {"subestacoes": 2},
                 "quality_report": {
@@ -127,6 +130,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-db")
+        self.assertEqual(response.json()["city_target"], "Lagarto, Sergipe, Brazil")
         self.assertEqual(
             response.json()["quality_report"]["discarded_records"][0]["count"],
             1,
