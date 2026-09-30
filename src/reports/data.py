@@ -1,16 +1,37 @@
+import ast
 import pandas as pd
 from datetime import datetime
 import sys
 import os
+from collections.abc import Mapping
 
 # Ensure src is in path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 try:
+    from src.utils import carregar_dados_cache, limpar_float
+except ModuleNotFoundError as error:
+    if error.name != "src":
+        raise
     from utils import carregar_dados_cache, limpar_float
-except ImportError:
-    # Use mocks if utils not found (e.g. testing)
-    carregar_dados_cache = lambda: (None, [])
-    limpar_float = lambda x: 0.0
+
+
+class ReportDataError(RuntimeError):
+    """Erro de dados que impede a geração de um relatório."""
+
+
+def _as_mapping(value: object, field_name: str) -> dict:
+    if value is None:
+        return {}
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str):
+        try:
+            parsed = ast.literal_eval(value)
+        except (SyntaxError, ValueError) as error:
+            raise ReportDataError(f"Campo {field_name} não contém um mapa válido") from error
+        if isinstance(parsed, Mapping):
+            return dict(parsed)
+    raise ReportDataError(f"Campo {field_name} não contém um mapa válido")
 
 def get_report_data(substation_id: str):
     """
@@ -20,29 +41,28 @@ def get_report_data(substation_id: str):
     # 1. Load Real Data
     _, dados_lista = carregar_dados_cache()
     if not dados_lista:
-        # Fallback if DB empty
-        return {} # Should handle error gracefully
+        raise ReportDataError("Cache de mercado vazio; relatório não gerado")
         
     df = pd.DataFrame(dados_lista)
+    if "id_tecnico" not in df.columns:
+        raise ReportDataError("Cache de mercado sem identificador técnico")
     
     # 2. Find Selected Substation Logic
     # Handle matching by ID or Name
     # 'id_tecnico' is often the key, or we matched by 'subestacao' label in UI
-    try:
-        current_sub = df[df['id_tecnico'].astype(str) == str(substation_id)].iloc[0]
-    except (IndexError, KeyError):
-        # Fallback: try finding by name if ID failed? 
-        # UI passed ID, assume it's valid. If not, pick first.
-        current_sub = df.iloc[0]
+    id_buscado = str(substation_id).strip()
+    matches = df[df['id_tecnico'].astype(str).str.strip() == id_buscado]
+    if matches.empty:
+        raise ReportDataError(f"Subestação '{id_buscado}' não encontrada")
+    if len(matches) > 1:
+        raise ReportDataError(f"Subestação '{id_buscado}' ambígua")
+    current_sub = matches.iloc[0]
         
-    metricas = current_sub.get('metricas_rede', {})
-    if isinstance(metricas, str): metricas = eval(metricas)
+    metricas = _as_mapping(current_sub.get('metricas_rede', {}), "metricas_rede")
     
-    dados_gd = current_sub.get('geracao_distribuida', {})
-    if isinstance(dados_gd, str): dados_gd = eval(dados_gd)
+    dados_gd = _as_mapping(current_sub.get('geracao_distribuida', {}), "geracao_distribuida")
     
-    perfil = current_sub.get('perfil_consumo', {})
-    if isinstance(perfil, str): perfil = eval(perfil)
+    perfil = _as_mapping(current_sub.get('perfil_consumo', {}), "perfil_consumo")
 
     # 3. Calculate City Totals (Sum of all substations)
     total_clients_city = 0
@@ -53,10 +73,8 @@ def get_report_data(substation_id: str):
     ranking_list = []
     
     for _, row in df.iterrows():
-        m = row.get('metricas_rede', {})
-        if isinstance(m, str): m = eval(m)
-        gd = row.get('geracao_distribuida', {})
-        if isinstance(gd, str): gd = eval(gd)
+        m = _as_mapping(row.get('metricas_rede', {}), "metricas_rede")
+        gd = _as_mapping(row.get('geracao_distribuida', {}), "geracao_distribuida")
         
         # Safe float conversion
         cons = limpar_float(m.get('consumo_anual_mwh', 0))
@@ -112,8 +130,7 @@ def get_report_data(substation_id: str):
     total_cons_sub = limpar_float(metricas.get('consumo_anual_mwh', 0))
     
     for cls in classes_interest:
-        data_cls = perfil.get(cls, {})
-        if isinstance(data_cls, str): data_cls = eval(data_cls)
+        data_cls = _as_mapping(perfil.get(cls, {}), f"perfil_consumo.{cls}")
         val = limpar_float(data_cls.get('consumo_anual_mwh', 0))
         pct = (val / total_cons_sub * 100) if total_cons_sub > 0 else 0
         
@@ -126,16 +143,19 @@ def get_report_data(substation_id: str):
 
     # C. GD Table
     # Extract from 'geracao_distribuida.detalhe_por_classe'
-    gd_detalhe = dados_gd.get('detalhe_por_classe', {})
-    if isinstance(gd_detalhe, str): gd_detalhe = eval(gd_detalhe)
+    gd_detalhe = _as_mapping(dados_gd.get('detalhe_por_classe', {}), "geracao_distribuida.detalhe_por_classe")
     gd_rows = []
     
     for cls in classes_interest:
-        pot_kw = limpar_float(gd_detalhe.get(cls, 0))
+        dados_gd_classe = gd_detalhe.get(cls, 0)
+        if isinstance(dados_gd_classe, Mapping) or isinstance(dados_gd_classe, str):
+            dados_gd_classe = _as_mapping(dados_gd_classe, f"detalhe_por_classe.{cls}")
+            pot_kw = limpar_float(dados_gd_classe.get('potencia_kw', 0))
+        else:
+            pot_kw = limpar_float(dados_gd_classe)
         # Note: 'count' per class might not be available in simple cache, using mock or total
         # We'll use total clients of that class if available, or just omit count logic
-        cls_data = perfil.get(cls, {})
-        if isinstance(cls_data, str): cls_data = eval(cls_data)
+        cls_data = _as_mapping(perfil.get(cls, {}), f"perfil_consumo.{cls}")
         count_cli = int(cls_data.get('qtd_clientes', 0))
         
         if pot_kw > 0:

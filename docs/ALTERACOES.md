@@ -443,3 +443,23 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Detector Impeccable em `frontend/src/App.tsx`: nenhum achado.
 - `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
 - `git diff --check`: aprovado.
+
+## 2026-09-29 — validação da camada legada de dados PDF
+
+### Alterações
+
+- Substituído `eval()` por `ast.literal_eval()` com validação de mapas em
+  `src/reports/data.py`.
+- Cache vazio, ID inexistente e ID duplicado agora interrompem o relatório com
+  `ReportDataError`, sem escolher um ativo substituto.
+- Corrigido o tratamento de potência por classe quando o cache usa mapa ou
+  valor numérico.
+- Adicionados testes contra conteúdo malicioso, cache vazio e seleção
+  ambígua.
+
+### Validação
+
+- Testes Python no container: 26 aprovados.
+- Busca em `src/reports/*.py` e `tests/*.py`: nenhum `eval()` executável.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py scripts tests`: aprovado.
+- `git diff --check`: aprovado.
