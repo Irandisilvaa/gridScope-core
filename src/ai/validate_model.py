@@ -1,53 +1,19 @@
 import os
 import joblib
 import pandas as pd
-import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score, mean_absolute_error
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(BASE_DIR, "modelos")
 OUT_DIR = os.path.join(BASE_DIR, "validacao")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 try:
-    from holidays.countries import Brazil
-    br_holidays = Brazil()
-except Exception:
-    br_holidays = set()
-
-def gerar_fator_subestacao(identificador: str) -> int:
-    return abs(hash(identificador)) % 10
-
-def subestacao_valida(nome):
-    nome = nome.upper()
-    return nome.startswith("SUBESTA") or nome == "SE_CONTORNO"
-
-def gerar_gabarito(nome, horas, eh_fds):
-    nome = nome.upper()
-
-    valores = []
-    for h, fds in zip(horas, eh_fds):
-
-        if "INDUSTRIAL" in nome:
-            val = 1.0 + np.random.normal(0, 0.05)
-
-        elif "CONTORNO" in nome or "SUBESTA6" in nome:
-            val = 1.8 + 0.9 * np.sin((h - 11) * np.pi / 10)
-
-        else:
-            val = 1.0
-            val += 0.7 * np.exp(-(h - 11) ** 2 / 12)
-            val += 0.9 * np.exp(-(h - 19) ** 2 / 5)
-            if h < 6:
-                val *= 0.6
-
-        if fds:
-            val *= 0.85
-
-        valores.append(max(0.1, val))
-
-    return np.array(valores)
+    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from .train_model import gerar_dados_treino_inteligente
+except ImportError:
+    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+    from train_model import gerar_dados_treino_inteligente
 
 def validar_modelo(model_path):
     nome = os.path.basename(model_path).replace("modelo_", "").replace(".pkl", "")
@@ -55,43 +21,19 @@ def validar_modelo(model_path):
 
     modelo = joblib.load(model_path)
 
-    datas = pd.date_range("2025-01-01", "2025-12-31 23:00", freq="h")
-    df = pd.DataFrame({"data": datas})
+    df = gerar_dados_treino_inteligente(seed=123)
+    df["data"] = pd.date_range("2023-01-01", periods=len(df), freq="h")
+    feature_columns = tuple(getattr(modelo, "feature_names_in_", FEATURE_COLUMNS))
+    missing = set(feature_columns) - set(df.columns)
+    if missing:
+        raise ValueError(f"Features ausentes no dataset de validação: {sorted(missing)}")
 
-    df["hora"] = df["data"].dt.hour
-    df["mes"] = df["data"].dt.month
-    df["dia_semana"] = df["data"].dt.dayofweek
-    df["dia_ano"] = df["data"].dt.dayofyear
-    df["ano"] = df["data"].dt.year
-    df["eh_fim_semana"] = (df["dia_semana"] >= 5).astype(int)
-    df["eh_feriado"] = df["data"].dt.date.isin(br_holidays).astype(int)
-
-    fator = gerar_fator_subestacao(nome)
-    df["fator_subestacao"] = fator
-
-    X = df[
-        [
-            "hora",
-            "mes",
-            "dia_semana",
-            "dia_ano",
-            "ano",
-            "eh_feriado",
-            "eh_fim_semana",
-            "fator_subestacao",
-        ]
-    ]
+    X = df.loc[:, list(feature_columns)]
 
     print("🤖 Rodando inferência...")
     y_pred = modelo.predict(X)
 
-    y_ref = gerar_gabarito(
-        nome,
-        df["hora"].values,
-        df["eh_fim_semana"].values
-    )
-
-    y_ref = y_ref / y_ref.mean() * y_pred.mean()
+    y_ref = df[TARGET_COLUMN].to_numpy()
 
     r2 = r2_score(y_ref, y_pred)
     mae = mean_absolute_error(y_ref, y_pred)
@@ -122,17 +64,13 @@ if __name__ == "__main__":
 
     resultados = []
 
-    for arq in os.listdir(MODELS_DIR):
-        if not arq.endswith(".pkl"):
+    for arq in sorted(os.listdir(BASE_DIR)):
+        if not arq.startswith("modelo_") or not arq.endswith(".pkl"):
             continue
 
         nome = arq.replace("modelo_", "").replace(".pkl", "")
 
-        if not subestacao_valida(nome):
-            print(f"⏭️ Ignorado (fora do escopo): {nome}")
-            continue
-
-        res = validar_modelo(os.path.join(MODELS_DIR, arq))
+        res = validar_modelo(os.path.join(BASE_DIR, arq))
         resultados.append(res)
 
     df_res = pd.DataFrame(

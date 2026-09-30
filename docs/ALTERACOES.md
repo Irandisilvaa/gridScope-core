@@ -542,3 +542,31 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 
 - A validação com GDB real/anonimizado continua pendente; o smoke test usa uma
   tabela temporária para não substituir dados locais existentes.
+
+## 2026-09-30 — contrato reprodutível do modelo de consumo
+
+### Alterações
+
+- Criado `src/ai/model_contract.py` com a lista única de features e o nome do
+  alvo compartilhados por treino e validação.
+- `src/ai/train_model.py` passou a usar `numpy.random.Generator` com seed
+  explícita e a selecionar as features pela ordem do contrato.
+- `src/ai/ai_service.py` passou a construir a entrada da inferência com o
+  mesmo contrato de colunas.
+- `src/ai/validate_model.py` deixou de procurar uma pasta de modelos
+  inexistente e valida `src/ai/modelo_*.pkl` usando o mesmo dataset/feature
+  schema do treino.
+- Adicionado `tests/test_model_contract.py` para garantir reprodutibilidade e
+  ordem das features.
+
+### Validação
+
+- Testes Python no container: 33 aprovados.
+- Validação do modelo `modelo_consumo.pkl`: R² 0,9989 e MAE 0,22.
+- Compilação Python no container: aprovada.
+
+### Pendências
+
+- A validação registrou `InconsistentVersionWarning`: o artefato foi treinado
+  com scikit-learn 1.5.2 e carregado com 1.9.1; é necessário alinhar versões e
+  regenerar o artefato antes de produção.

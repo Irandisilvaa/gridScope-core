@@ -16,6 +16,11 @@ from datetime import datetime
 from shapely.geometry import Point
 from scipy.ndimage import gaussian_filter1d
 
+try:
+    from src.ai.model_contract import FEATURE_COLUMNS
+except ImportError:
+    from model_contract import FEATURE_COLUMNS
+
 # Tentativa de importação do módulo de banco de dados
 try:
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -180,7 +185,7 @@ def prever_curva_ml(data_alvo, dna):
                     "pct_rural": float(dna.get('rural',0))
                 })
             
-            predicao = model_rf.predict(pd.DataFrame(features))
+            predicao = model_rf.predict(pd.DataFrame(features, columns=FEATURE_COLUMNS))
             return np.array(predicao, dtype=float)
         except: 
             pass

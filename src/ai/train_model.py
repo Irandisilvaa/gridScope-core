@@ -5,6 +5,11 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 import holidays
 
+try:
+    from .model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+except ImportError:
+    from model_contract import FEATURE_COLUMNS, TARGET_COLUMN
+
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -35,13 +40,14 @@ CURVA_RUR = np.array([
     0.5, 0.4, 0.3, 0.3
 ])
 
-def gerar_dados_treino_inteligente():
+def gerar_dados_treino_inteligente(seed: int = 42, quantidade_perfis: int = 50):
     """
     Gera um dataset massivo misturando aleatoriamente os perfis (DNA)
     para ensinar o modelo a reagir a qualquer tipo de subestação.
     """
     print("🔄 Gerando dataset de treinamento sintético inteligente...")
     
+    rng = np.random.default_rng(seed)
     br_holidays = holidays.Brazil()
     datas = pd.date_range(start="2023-01-01", end="2023-12-31", freq="h")
     
@@ -51,8 +57,8 @@ def gerar_dados_treino_inteligente():
         "SUB_RESIDENCIAL", "SUB_INDUSTRIAL", "SUB_COMERCIAL", "SUB_MISTA", "SUB_RURAL"
     ]
 
-    for i in range(50):
-        tipo_sub = np.random.choice(perfis_mock)
+    for i in range(quantidade_perfis):
+        tipo_sub = rng.choice(perfis_mock)
         identificador_str = f"{tipo_sub}_{i}"    
         nome_upper = identificador_str.upper()
 
@@ -90,7 +96,7 @@ def gerar_dados_treino_inteligente():
                 fator_sazonal = 0.9
                 
             # Ruído aleatório (realidade)
-            ruido = np.random.normal(0, 0.05)
+            ruido = rng.normal(0, 0.05)
             
             # Cálculo final do target
             consumo_final = consumo_base * fator_fds * fator_sazonal + ruido
@@ -123,8 +129,8 @@ def treinar_modelo_universal():
     print(f"📊 Dataset gerado com {len(df)} amostras.")
     print("🚀 Iniciando treinamento do Modelo Universal...")
     
-    X = df.drop(columns=["fator_consumo"])
-    y = df["fator_consumo"]
+    X = df.loc[:, list(FEATURE_COLUMNS)]
+    y = df[TARGET_COLUMN]
     
     model = RandomForestRegressor(
         n_estimators=100,
