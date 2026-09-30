@@ -3,8 +3,27 @@ import os
 import sys
 import pandas as pd
 from typing import Dict, Any
+from sqlalchemy import text as sql_text
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _buscar_consumo_por_classe(engine, id_sub: str) -> pd.DataFrame:
+    query = sql_text(
+        """
+            SELECT
+                c."CLAS_SUB",
+                SUM(c."ENE_01") as "ENE_01", SUM(c."ENE_02") as "ENE_02", SUM(c."ENE_03") as "ENE_03",
+                SUM(c."ENE_04") as "ENE_04", SUM(c."ENE_05") as "ENE_05", SUM(c."ENE_06") as "ENE_06",
+                SUM(c."ENE_07") as "ENE_07", SUM(c."ENE_08") as "ENE_08", SUM(c."ENE_09") as "ENE_09",
+                SUM(c."ENE_10") as "ENE_10", SUM(c."ENE_11") as "ENE_11", SUM(c."ENE_12") as "ENE_12"
+            FROM consumidores c
+            JOIN transformadores t ON c."UNI_TR_MT" = t."COD_ID"
+            WHERE t."SUB" = :id_sub
+            GROUP BY c."CLAS_SUB"
+        """
+    )
+    return pd.read_sql(query, engine, params={"id_sub": str(id_sub)})
 
 def buscar_dados_reais_para_ia(nome_subestacao: str) -> Dict[str, Any]:
 
@@ -15,7 +34,9 @@ def buscar_dados_reais_para_ia(nome_subestacao: str) -> Dict[str, Any]:
         
         gdf_subs = carregar_subestacoes()
         
-        filtro = gdf_subs['NOME'].str.upper().str.contains(nome_subestacao.strip().upper(), na=False)
+        filtro = gdf_subs['NOME'].str.upper().str.contains(
+            nome_subestacao.strip().upper(), na=False, regex=False
+        )
         
         if filtro.sum() == 0:
             print(f"❌ Subestação '{nome_subestacao}' não encontrada na tabela 'subestacoes'.")
@@ -31,21 +52,7 @@ def buscar_dados_reais_para_ia(nome_subestacao: str) -> Dict[str, Any]:
         
         engine = get_engine()
         
-        # Query otimizada: Soma energias agrupadas por classe
-        sql = f"""
-            SELECT 
-                c."CLAS_SUB",
-                SUM(c."ENE_01") as "ENE_01", SUM(c."ENE_02") as "ENE_02", SUM(c."ENE_03") as "ENE_03",
-                SUM(c."ENE_04") as "ENE_04", SUM(c."ENE_05") as "ENE_05", SUM(c."ENE_06") as "ENE_06",
-                SUM(c."ENE_07") as "ENE_07", SUM(c."ENE_08") as "ENE_08", SUM(c."ENE_09") as "ENE_09",
-                SUM(c."ENE_10") as "ENE_10", SUM(c."ENE_11") as "ENE_11", SUM(c."ENE_12") as "ENE_12"
-            FROM consumidores c
-            JOIN transformadores t ON c."UNI_TR_MT" = t."COD_ID"
-            WHERE t."SUB" = '{id_sub}'
-            GROUP BY c."CLAS_SUB"
-        """
-        
-        df_agregado = pd.read_sql(sql, engine)
+        df_agregado = _buscar_consumo_por_classe(engine, id_sub)
         engine.dispose()
         
         if df_agregado.empty:

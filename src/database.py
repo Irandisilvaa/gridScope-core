@@ -17,6 +17,30 @@ from config import DATABASE_SCHEMA, DATABASE_URL
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Database")
 
+_COLUNAS_PERMITIDAS = {
+    "subestacoes": {"COD_ID", "NOME", "geometry"},
+    "transformadores": {"COD_ID", "SUB", "geometry"},
+    "consumidores": {
+        "UNI_TR_MT", "CLAS_SUB", "PN_CON", "DAT_CON",
+        *(f"ENE_{mes:02d}" for mes in range(1, 13)),
+    },
+    "geracao_gd": {"UNI_TR_MT", "POT_INST", "PN_CON", "DAT_CON"},
+    "rede_mt": {"COD_ID", "SUB", "geometry"},
+}
+
+
+def _select_columns(table_name: str, columns: Optional[List[str]]) -> str:
+    if not columns:
+        return "*"
+
+    allowed = _COLUNAS_PERMITIDAS.get(table_name, set())
+    invalid = [column for column in columns if column not in allowed]
+    if invalid:
+        raise ValueError(f"Colunas não permitidas para {table_name}: {', '.join(invalid)}")
+    if len(set(columns)) != len(columns):
+        raise ValueError(f"Colunas duplicadas para {table_name}")
+    return ", ".join(f'"{column}"' for column in columns)
+
 
 def get_engine():
     """
@@ -56,9 +80,9 @@ def carregar_subestacoes(colunas: Optional[List[str]] = None) -> gpd.GeoDataFram
     
     try:
         if colunas:
-            cols_sql = ", ".join([f'"{c}"' if c != 'geometry' else c for c in colunas])
+            cols_sql = _select_columns("subestacoes", colunas)
             if "geometry" not in colunas:
-                cols_sql += ", geometry"
+                cols_sql += ', "geometry"'
             sql = f'SELECT {cols_sql} FROM subestacoes'
         else:
             sql = "SELECT * FROM subestacoes"
@@ -87,9 +111,9 @@ def carregar_transformadores(colunas: Optional[List[str]] = None) -> gpd.GeoData
     
     try:
         if colunas:
-            cols_sql = ", ".join([f'"{col}"' for col in colunas])
+            cols_sql = _select_columns("transformadores", colunas)
             if 'geometry' not in colunas:
-                sql = f"SELECT {cols_sql}, geometry FROM transformadores"
+                sql = f'SELECT {cols_sql}, "geometry" FROM transformadores'
             else:
                 sql = f"SELECT {cols_sql} FROM transformadores"
         else:
@@ -121,10 +145,7 @@ def carregar_consumidores(colunas: Optional[List[str]] = None, ignore_geometry: 
     engine = get_engine()
     
     try:
-        if colunas:
-            cols_sql = ", ".join([f'"{col}"' for col in colunas])
-        else:
-            cols_sql = "*"
+        cols_sql = _select_columns("consumidores", colunas)
         
         sql = f"SELECT {cols_sql} FROM consumidores"
         
@@ -154,10 +175,7 @@ def carregar_geracao_gd(colunas: Optional[List[str]] = None, ignore_geometry: bo
     engine = get_engine()
     
     try:
-        if colunas:
-            cols_sql = ", ".join([f'"{col}"' for col in colunas])
-        else:
-            cols_sql = "*"
+        cols_sql = _select_columns("geracao_gd", colunas)
         
         sql = f"SELECT {cols_sql} FROM geracao_gd"
         
@@ -186,7 +204,9 @@ def carregar_rede_mt(colunas: Optional[List[str]] = None) -> gpd.GeoDataFrame:
     
     try:
         if colunas:
-            cols_sql = ", ".join(colunas + ["geometry"]) if "geometry" not in colunas else ", ".join(colunas)
+            cols_sql = _select_columns("rede_mt", colunas)
+            if "geometry" not in colunas:
+                cols_sql += ', "geometry"'
             sql = f"SELECT {cols_sql} FROM rede_mt"
         else:
             sql = "SELECT * FROM rede_mt"
@@ -426,7 +446,7 @@ def verificar_tabelas() -> dict:
         with engine.connect() as conn:
             for tabela in tabelas:
                 try:
-                    result = conn.execute(text(f"SELECT COUNT(*) FROM {tabela}"))
+                    result = conn.execute(text(f'SELECT COUNT(*) FROM "{tabela}"'))
                     count = result.scalar()
                     resultado[tabela] = count
                     logger.info(f"✅ {tabela}: {count} registros")

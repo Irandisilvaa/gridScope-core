@@ -9,6 +9,7 @@ import requests
 import holidays
 import calendar   
 import geopandas as gpd
+from sqlalchemy import text as sql_text
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from datetime import datetime
@@ -58,6 +59,24 @@ def normalizar_id(valor):
     s = str(valor).strip().replace('.0', '')
     return s
 
+
+def _buscar_consumo_mensal(engine, id_alvo: str, mes_alvo: int):
+    mes = int(mes_alvo)
+    if mes < 1 or mes > 12:
+        raise ValueError("Mês de consumo deve estar entre 1 e 12")
+
+    colunas_mes = tuple(f"ENE_{numero:02d}" for numero in range(1, 13))
+    coluna_mes = colunas_mes[mes - 1]
+    query = sql_text(
+        f"""
+            SELECT SUM(c."{coluna_mes}") as total_kwh
+            FROM consumidores c
+            JOIN transformadores t ON c."UNI_TR_MT" = t."COD_ID"
+            WHERE t."SUB" = :id_alvo
+        """
+    )
+    return pd.read_sql(query, engine, params={"id_alvo": str(id_alvo)})
+
 def buscar_dados_reais_interno(nome_subestacao, mes_alvo):
     """Busca o consumo real no banco de dados para calibrar a simulação."""
     if not nome_subestacao or nome_subestacao == "Desconhecida":
@@ -71,7 +90,9 @@ def buscar_dados_reais_interno(nome_subestacao, mes_alvo):
         if local_gdf is None or local_gdf.empty:
             return None
 
-        filtro = local_gdf['NOME'].astype(str).str.upper().str.contains(str(nome_subestacao).strip().upper(), na=False)
+        filtro = local_gdf['NOME'].astype(str).str.upper().str.contains(
+            str(nome_subestacao).strip().upper(), na=False, regex=False
+        )
         
         if filtro.sum() == 0: 
             return None
@@ -79,17 +100,8 @@ def buscar_dados_reais_interno(nome_subestacao, mes_alvo):
         id_alvo = normalizar_id(local_gdf[filtro].iloc[0]['COD_ID'])
         
         engine = get_engine()
-        col_mes = f"ENE_{int(mes_alvo):02d}"
         
-        # Query segura
-        sql = f"""
-            SELECT SUM(c."{col_mes}") as total_kwh
-            FROM consumidores c
-            JOIN transformadores t ON c."UNI_TR_MT" = t."COD_ID"
-            WHERE t."SUB" = '{id_alvo}'
-        """
-        
-        result = pd.read_sql(sql, engine)
+        result = _buscar_consumo_mensal(engine, id_alvo, mes_alvo)
         engine.dispose()
         
         if not result.empty and pd.notna(result['total_kwh'].iloc[0]):

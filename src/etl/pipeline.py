@@ -56,6 +56,9 @@ def _write_metadata(delivery, result) -> None:
 def _build_derived_tables(staging_schema: str) -> dict[str, int]:
     """Gera os derivados usando o mesmo schema temporário do snapshot."""
 
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", staging_schema):
+        raise RuntimeError(f"Schema de staging inválido: {staging_schema}")
+
     environment = os.environ.copy()
     environment["DATABASE_SCHEMA"] = staging_schema
     python_path = environment.get("PYTHONPATH", "")
@@ -73,9 +76,6 @@ def _build_derived_tables(staging_schema: str) -> dict[str, int]:
         )
         if completed.returncode != 0:
             raise RuntimeError(f"Job derivado falhou: {job.name}")
-
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", staging_schema):
-        raise RuntimeError(f"Schema de staging inválido: {staging_schema}")
 
     from sqlalchemy import create_engine, text
 
