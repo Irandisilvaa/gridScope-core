@@ -744,6 +744,20 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - Testes Python no container: 45 aprovados.
 - Compilação Python no container: aprovada.
 
+## 2026-09-30 — validação geográfica na API de IA
+
+### Alterações
+
+- `src/ai/ai_service.py` passou a rejeitar latitude e longitude fora dos
+  intervalos geográficos válidos no contrato `DuckCurveRequest`.
+- Adicionados testes de contrato para coordenadas inválidas, evitando que a
+  requisição chegue ao cálculo ou ao provedor climático.
+
+### Validação
+
+- Testes Python no container: 47 aprovados.
+- Compilação Python no container: aprovada.
+
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
 ### Alterações

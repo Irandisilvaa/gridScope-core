@@ -10,7 +10,7 @@ import calendar
 import geopandas as gpd
 from sqlalchemy import text as sql_text
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from shapely.geometry import Point
 from scipy.ndimage import gaussian_filter1d
@@ -59,8 +59,8 @@ class DuckCurveRequest(BaseModel):
     data_alvo: str
     potencia_gd_kw: float
     consumo_mes_alvo_mwh: float 
-    lat: float
-    lon: float
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
     dna_perfil: dict | None = None 
 
 def normalizar_id(valor):
