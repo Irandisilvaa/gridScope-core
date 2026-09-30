@@ -83,7 +83,7 @@ def cache_json(ttl_seconds: int = 300, key_prefix: str = "api_cache"):
 
 def limpar_cache(padrao: str = "api_cache:*"):
     if not is_redis_available(): return 0
-    keys = redis_client.keys(padrao)
+    keys = list(redis_client.scan_iter(match=padrao))
     if keys:
         return redis_client.delete(*keys)
     return 0

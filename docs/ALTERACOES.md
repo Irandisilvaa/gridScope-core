@@ -518,3 +518,27 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 
 - O teste unitário e a suíte completa aguardam o daemon Docker; o host não
   possui `pandas`/as dependências da aplicação.
+
+## 2026-09-30 — isolamento de testes e invalidação segura do cache Redis
+
+### Alterações
+
+- `src/cache_redis.py` passou a usar `SCAN` em `limpar_cache`, evitando a
+  operação bloqueante `KEYS` em Redis com muitas chaves.
+- `tests/test_api_contract.py` limpa o namespace de cache antes de cada caso,
+  impedindo que respostas persistidas contaminem testes de contrato.
+- Adicionado `tests/test_cache_redis.py` para garantir a varredura e remoção
+  das chaves encontradas.
+
+### Validação
+
+- Testes Python no container: 32 aprovados.
+- Teste integrado com PostgreSQL/PostGIS: importação temporária, publicação e
+  leitura de uma tabela de staging aprovadas; a tabela de smoke test foi
+  removida ao final.
+- `git diff --check`: aprovado.
+
+### Pendências
+
+- A validação com GDB real/anonimizado continua pendente; o smoke test usa uma
+  tabela temporária para não substituir dados locais existentes.

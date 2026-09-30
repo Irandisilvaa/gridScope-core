@@ -9,10 +9,12 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 import src.api as api_module
+from src.cache_redis import limpar_cache
 
 
 class ApiContractTests(unittest.TestCase):
     def setUp(self) -> None:
+        limpar_cache()
         self.client = TestClient(api_module.app)
         self.snapshot = [
             {
