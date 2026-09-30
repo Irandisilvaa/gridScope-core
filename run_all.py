@@ -112,7 +112,7 @@ def verificar_banco_populado():
             
             for tabela in tabelas:
                 try:
-                    result = conn.execute(text(f"SELECT COUNT(*) FROM {tabela}"))
+                    result = conn.execute(text(f'SELECT COUNT(*) FROM "{tabela}"'))
                     count = result.scalar()
                     
                     if count == 0:

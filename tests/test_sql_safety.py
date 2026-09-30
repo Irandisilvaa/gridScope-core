@@ -37,6 +37,5 @@ class SqlSafetyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             database._select_columns("consumidores", ["PN_CON; DROP TABLE consumidores"])
 
-
 if __name__ == "__main__":
     unittest.main()

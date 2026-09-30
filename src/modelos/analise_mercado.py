@@ -59,6 +59,16 @@ def calcular_consumo_real(df):
     df['CONSUMO_ANUAL'] = df[cols_existentes].sum(axis=1)
     return df
 
+
+def _classificar_geracao_por_classe(
+    df_geracao: pd.DataFrame, mapa_pn_classe: pd.Series
+) -> pd.DataFrame:
+    if mapa_pn_classe.empty:
+        df_geracao['TIPO'] = 'Outros'
+    else:
+        df_geracao['TIPO'] = df_geracao['PN_CON'].map(mapa_pn_classe).fillna('Outros')
+    return df_geracao
+
 def analisar_mercado():
     print("INICIANDO ANALISE DETALHADA E LIMPEZA DE DADOS...")
     
@@ -117,7 +127,7 @@ def analisar_mercado():
         return
     print("3. Processando Consumidores (Vínculo Rigoroso)...")
     df_cons_final = pd.DataFrame()
-    mapa_pn_classe = {}
+    mapa_pn_classe = pd.Series(dtype='object')
     
     try:
         cols_ene = [f'ENE_{i:02d}' for i in range(1, 13)]
@@ -182,10 +192,7 @@ def analisar_mercado():
                 how='inner'
             )
             
-            if not mapa_pn_classe.empty:
-                df_gd_final['TIPO'] = df_gd_final['PN_CON'].map(mapa_pn_classe).fillna('Outros')
-            else:
-                df_gd_final['TIPO'] = 'Outros'
+            df_gd_final = _classificar_geracao_por_classe(df_gd_final, mapa_pn_classe)
 
             # Tratamento de Data para Série Temporal
             if 'DAT_CON' in df_gd_final.columns:

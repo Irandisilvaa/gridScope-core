@@ -495,3 +495,26 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
   da IA registra indisponibilidade esperada, sem reprovar os testes.
 - A validação integrada ainda depende de PostgreSQL/PostGIS funcional e GDB
   real ou anonimizado.
+
+## 2026-09-29 — estabilidade da agregação de mercado no startup
+
+### Alterações
+
+- `src/modelos/analise_mercado.py` agora representa o mapa de classes de
+  consumidores como `Series` desde o início, evitando `AttributeError` quando
+  há GD sem consumidores vinculados.
+- Extraída a classificação de GD para `_classificar_geracao_por_classe`, com
+  fallback explícito para `Outros`.
+- `run_all.py` passou a citar os nomes fixos das tabelas na verificação de
+  população do banco.
+- Adicionado teste regressivo em `tests/test_analise_mercado.py`.
+
+### Validação
+
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/gridscope-pycache python3 -m compileall -q src run_all.py tests`: aprovado.
+- `git diff --check`: aprovado.
+
+### Pendências
+
+- O teste unitário e a suíte completa aguardam o daemon Docker; o host não
+  possui `pandas`/as dependências da aplicação.
