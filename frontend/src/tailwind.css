@@ -1,1 +1,77 @@
 @import "tailwindcss";
+
+@theme {
+  --font-display: "Sora", sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  --color-grid-yellow: #FFD400;
+  --color-grid-yellow-hover: #FFE033;
+  --color-grid-yellow-muted: rgba(255, 212, 0, 0.12);
+  --color-grid-black: #050505;
+  --color-grid-graphite: #181818;
+  --color-grid-graphite-light: #222222;
+  --color-grid-surface: #0b0b0b;
+  --color-grid-surface-raised: #121212;
+  --color-grid-surface-border: #242424;
+  --color-grid-gray: #8a8a8a;
+  --color-grid-gray-dark: #4a4a4a;
+  --color-grid-white: #ffffff;
+
+  --color-status-success: #22c55e;
+  --color-status-danger: #ef4444;
+  --color-status-info: #3b82f6;
+  --color-status-warning: #f59e0b;
+  --color-status-purple: #8b5cf6;
+}
+
+@layer base {
+  body {
+    background-color: #050505;
+    color: #ffffff;
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+  }
+
+  code, kbd, samp, pre, .font-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Technical Telemetry Grid Background & Glow Utilities */
+.grid-bg-dots {
+  background-image: radial-gradient(rgba(255, 212, 0, 0.08) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.grid-bg-cross {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.energy-glow {
+  box-shadow: 0 0 25px -5px rgba(255, 212, 0, 0.25);
+}
+
+.yellow-border-glow {
+  box-shadow: 0 0 0 1px rgba(255, 212, 0, 0.3), 0 0 20px -3px rgba(255, 212, 0, 0.15);
+}
+
+/* Double-bezel hardware styling (Doppelrand architecture) */
+.double-bezel {
+  border: 1px solid #222222;
+  background-color: #0d0d0d;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+}
+
+.double-bezel-inner {
+  border: 1px solid #1a1a1a;
+  background-color: #121212;
+}

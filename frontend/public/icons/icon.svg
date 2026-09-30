@@ -1,6 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#08141f"/>
-  <path d="M112 320h288M144 256h224M176 192h160" stroke="#6fe7d2" stroke-width="24" stroke-linecap="round"/>
-  <path d="M256 96v320M96 256h320" stroke="#ffc857" stroke-width="14" stroke-linecap="round" opacity=".9"/>
-  <circle cx="256" cy="256" r="38" fill="#08141f" stroke="#f3f7f5" stroke-width="16"/>
+  <rect width="512" height="512" rx="112" fill="#050505"/>
+  <circle cx="256" cy="256" r="248" fill="none" stroke="#181818" stroke-width="4"/>
+  <g transform="translate(256, 256)">
+    <!-- Top-Right Cycle Arc with Arrowhead -->
+    <path d="M -140,-50 A 155 155 0 0 1 140,-50" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" opacity="0.95"/>
+    <path d="M 120,-85 L 155,-50 L 115,-20" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Bottom-Left Cycle Arc with Arrowhead -->
+    <path d="M 140,50 A 155 155 0 0 1 -140,50" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" opacity="0.95"/>
+    <path d="M -120,85 L -155,50 L -115,20" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Institutional GridScope Lightning Bolt in Amarelo GridScope #FFD400 -->
+    <path d="M 22,-145 L -72,12 L 8,12 L -22,145 L 72,-12 L -8,-12 Z" fill="#FFD400" filter="drop-shadow(0 0 14px rgba(255, 212, 0, 0.45))"/>
+  </g>
 </svg>

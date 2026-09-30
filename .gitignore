@@ -22,6 +22,7 @@ subestacoes_logicas_aracaju.geojson
 perfil_mercado_aracaju.json
 territorios_voronoi.png
 perfil_mercado.json
+!frontend/public/data/**
 # Imagens geradas pela validação da IA
 src/ai/validacao/
 
@@ -34,3 +35,4 @@ logs/
 cache/
 backups/
 /secrets
+/.agents

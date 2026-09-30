@@ -1,60 +1,216 @@
+import React, { useState, useMemo, useEffect } from "react";
 import type { Substation } from "../lib/api";
 import { StatusPill } from "./StatusPill";
+import { Pagination } from "./Pagination";
+import { ArrowUp, ArrowDown, CaretRight } from "@phosphor-icons/react";
 
 type SubstationTableProps = {
   rows: Substation[];
   onSelect?: (row: Substation) => void;
   selectedId?: string;
+  pageSize?: number;
+  enablePagination?: boolean;
 };
 
 function formatNumber(value: number, maximumFractionDigits = 0) {
   return new Intl.NumberFormat("pt-BR", { maximumFractionDigits }).format(value);
 }
 
-function toneFor(criticality: string): "good" | "warn" | "muted" {
-  if (criticality.toUpperCase().includes("CRÍT")) return "warn";
-  if (criticality.toUpperCase().includes("MÉD")) return "warn";
-  return "good";
-}
+export const SubstationTable: React.FC<SubstationTableProps> = ({
+  rows,
+  onSelect,
+  selectedId,
+  pageSize = 7,
+  enablePagination = true,
+}) => {
+  const [sortField, setSortField] = useState<SortField>("gdPower");
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
-export function SubstationTable({ rows, onSelect, selectedId }: SubstationTableProps) {
+  // Reset page when rows array changes or filters update
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [rows.length]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(false); // default desc for telemetry metrics
+    }
+    setCurrentPage(1);
+  };
+
+  type SortField = "name" | "clients" | "consumption" | "gdPower" | "criticality";
+
+  const sortedRows = useMemo(() => {
+    const copy = [...rows];
+    return copy.sort((a, b) => {
+      let valA: string | number = 0;
+      let valB: string | number = 0;
+
+      switch (sortField) {
+        case "name":
+          valA = a.subestacao.toLowerCase();
+          valB = b.subestacao.toLowerCase();
+          break;
+        case "clients":
+          valA = a.metricas_rede.total_clientes;
+          valB = b.metricas_rede.total_clientes;
+          break;
+        case "consumption":
+          valA = a.metricas_rede.consumo_anual_mwh;
+          valB = b.metricas_rede.consumo_anual_mwh;
+          break;
+        case "gdPower":
+          valA = a.geracao_distribuida.potencia_total_kw;
+          valB = b.geracao_distribuida.potencia_total_kw;
+          break;
+        case "criticality":
+          valA = a.metricas_rede.nivel_criticidade_gd;
+          valB = b.metricas_rede.nivel_criticidade_gd;
+          break;
+      }
+
+      if (valA < valB) return sortAsc ? -1 : 1;
+      if (valA > valB) return sortAsc ? 1 : -1;
+      return 0;
+    });
+  }, [rows, sortField, sortAsc]);
+
+  const displayedRows = useMemo(() => {
+    if (!enablePagination) return sortedRows;
+    const start = (currentPage - 1) * pageSize;
+    return sortedRows.slice(start, start + pageSize);
+  }, [sortedRows, currentPage, pageSize, enablePagination]);
+
+  const renderSortIcon = (field: SortField) => {
+    if (sortField !== field) return null;
+    return sortAsc ? (
+      <ArrowUp size={12} className="inline ml-1 text-[#FFD400]" />
+    ) : (
+      <ArrowDown size={12} className="inline ml-1 text-[#FFD400]" />
+    );
+  };
+
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-[680px] w-full border-collapse">
-        <thead>
-          <tr>
-            <th className="border-t-0 px-3 py-[13px] text-left text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#688287]" scope="col">Subestação</th>
-            <th className="border-t-0 px-3 py-[13px] text-left text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#688287]" scope="col">Clientes</th>
-            <th className="border-t-0 px-3 py-[13px] text-left text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#688287]" scope="col">Consumo anual</th>
-            <th className="border-t-0 px-3 py-[13px] text-left text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#688287]" scope="col">Potência GD</th>
-            <th className="border-t-0 px-3 py-[13px] text-left text-[0.65rem] font-bold uppercase tracking-[0.1em] text-[#688287]" scope="col">Situação</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr className={selectedId === row.id_tecnico ? "bg-[#6fe7d2]/[0.07]" : ""} key={row.id_tecnico}>
-              <th className="border-t border-white/10 px-3 py-[13px] text-left text-xs font-semibold text-[#eef6f3]" scope="row">
-                {onSelect ? (
-                  <button className="rounded-sm p-0 text-left font-bold text-[#6fe7d2] underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]" onClick={() => onSelect(row)} type="button">
-                    {row.subestacao.split(" (ID:")[0]}
-                  </button>
-                ) : (
-                  row.subestacao.split(" (ID:")[0]
-                )}
+    <div className="overflow-hidden rounded-xl border border-[#222222] bg-[#0c0c0c] shadow-md">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[700px] border-collapse text-left">
+          <thead>
+            <tr className="border-b border-[#242424] bg-[#121212] text-[0.68rem] font-mono font-semibold uppercase tracking-[0.1em] text-[#8A8A8A]">
+              <th
+                className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
+                onClick={() => handleSort("name")}
+                scope="col"
+              >
+                Subestação {renderSortIcon("name")}
               </th>
-              <td className="border-t border-white/10 px-3 py-[13px] text-xs text-[#a8bcbd]">{formatNumber(row.metricas_rede.total_clientes)}</td>
-              <td className="border-t border-white/10 px-3 py-[13px] text-xs text-[#a8bcbd]">{formatNumber(row.metricas_rede.consumo_anual_mwh, 2)} MWh</td>
-              <td className="border-t border-white/10 px-3 py-[13px] text-xs text-[#a8bcbd]">{formatNumber(row.geracao_distribuida.potencia_total_kw, 2)} kW</td>
-              <td className="border-t border-white/10 px-3 py-[13px] text-xs text-[#a8bcbd]">
-                <StatusPill
-                  label={row.metricas_rede.nivel_criticidade_gd}
-                  tone={toneFor(row.metricas_rede.nivel_criticidade_gd)}
-                />
-              </td>
+              <th
+                className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
+                onClick={() => handleSort("clients")}
+                scope="col"
+              >
+                Clientes {renderSortIcon("clients")}
+              </th>
+              <th
+                className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
+                onClick={() => handleSort("consumption")}
+                scope="col"
+              >
+                Consumo Anual {renderSortIcon("consumption")}
+              </th>
+              <th
+                className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
+                onClick={() => handleSort("gdPower")}
+                scope="col"
+              >
+                Potência GD {renderSortIcon("gdPower")}
+              </th>
+              <th
+                className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
+                onClick={() => handleSort("criticality")}
+                scope="col"
+              >
+                Criticidade GD {renderSortIcon("criticality")}
+              </th>
+              <th className="px-4 py-3.5 text-right" scope="col">
+                Ação
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-[#1A1A1A]">
+            {displayedRows.map((row) => {
+              const isSelected = selectedId === row.id_tecnico;
+              const cleanName = row.subestacao.split(" (ID:")[0];
+
+              return (
+                <tr
+                  key={row.id_tecnico}
+                  onClick={() => onSelect && onSelect(row)}
+                  className={`group cursor-pointer transition-colors ${
+                    isSelected
+                      ? "bg-[#FFD400]/[0.08] border-l-2 border-l-[#FFD400]"
+                      : "hover:bg-[#151515]"
+                  }`}
+                >
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col">
+                      <strong className={`font-display text-xs ${isSelected ? "text-[#FFD400]" : "text-white group-hover:text-[#FFD400]"}`}>
+                        {cleanName}
+                      </strong>
+                      <span className="font-mono text-[0.66rem] text-[#8A8A8A]">
+                        ID: {row.id_tecnico}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-[#E0E0E0]">
+                    {formatNumber(row.metricas_rede.total_clientes)}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-[#E0E0E0]">
+                    {formatNumber(row.metricas_rede.consumo_anual_mwh, 2)}{" "}
+                    <span className="text-[0.68rem] text-[#8A8A8A]">MWh</span>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs font-semibold text-[#FFD400]">
+                    {formatNumber(row.geracao_distribuida.potencia_total_kw, 2)}{" "}
+                    <span className="text-[0.68rem] text-[#8A8A8A]">kW</span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusPill
+                      label={row.metricas_rede.nivel_criticidade_gd}
+                      size="sm"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect && onSelect(row);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-lg border border-[#2E2E2E] bg-[#141414] px-2.5 py-1 text-[0.7rem] font-medium text-[#8A8A8A] transition-all hover:border-[#FFD400] hover:text-[#FFD400] group-hover:border-[#FFD400]/50"
+                    >
+                      <span>Inspecionar</span>
+                      <CaretRight size={12} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Built-in Pagination Bar if > 7 items */}
+      {enablePagination && (
+        <Pagination
+          currentPage={currentPage}
+          totalItems={sortedRows.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+        />
+      )}
     </div>
   );
-}
+};
