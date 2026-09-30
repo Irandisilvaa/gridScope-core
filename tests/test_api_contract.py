@@ -9,6 +9,8 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 from shapely.geometry import Point
 
+import geopandas as gpd
+
 import src.api as api_module
 from src.cache_redis import limpar_cache
 
@@ -39,6 +41,27 @@ class ApiContractTests(unittest.TestCase):
             }
         ]
 
+    def test_ranking_com_fusao_real_nao_quebra_a_geometria(self) -> None:
+        """Cobre a fusão de verdade: o banco entrega lista de dicts sem geometria."""
+
+        mercado = [
+            {chave: valor for chave, valor in item.items() if chave != "geometry"}
+            for item in self.snapshot
+        ]
+        territories = gpd.GeoDataFrame(
+            {"COD_ID": ["A"], "NOME": ["SE-A"]},
+            geometry=[Point(-37.0731, -10.9472)],
+            crs="EPSG:4326",
+        )
+
+        with patch.object(api_module, "carregar_dados_cache", return_value=(territories, mercado)):
+            response = self.client.get("/mercado/ranking")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload), 1)
+        self.assertIsNotNone(payload[0]["geometry"])
+
     def test_ranking_aceita_o_schema_aninhado_do_etl(self) -> None:
         with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
             api_module, "fundir_dados_geo_mercado", return_value=self.snapshot
@@ -49,6 +72,15 @@ class ApiContractTests(unittest.TestCase):
         body = response.json()
         self.assertEqual(body[0]["id_tecnico"], "A")
         self.assertEqual(body[0]["geracao_distribuida"]["detalhe_por_classe"]["Residencial"]["qtd"], 2)
+
+    def test_ranking_vazio_retorna_indisponibilidade(self) -> None:
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=[]
+        ):
+            response = self.client.get("/mercado/ranking")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn("[]", response.text)
 
     def test_status_lê_somente_metadados_da_carga(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -64,12 +96,32 @@ class ApiContractTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            with patch.object(api_module, "DIR_DADOS", temporary):
+            with patch.object(api_module, "carregar_publication_metadata", return_value=None), patch.object(
+                api_module, "DIR_DADOS", temporary
+            ):
                 response = self.client.get("/data/status")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-a")
         self.assertEqual(response.json()["row_counts"], {"subestacoes": 1})
+
+    def test_status_prioriza_metadados_transacionais_do_banco(self) -> None:
+        with patch.object(
+            api_module,
+            "carregar_publication_metadata",
+            return_value={
+                "status": "published",
+                "source": "local_file",
+                "delivery_id": "delivery-db",
+                "reference_period": None,
+                "published_at": "2026-09-30T12:00:00+00:00",
+                "row_counts": {"subestacoes": 2},
+            },
+        ):
+            response = self.client.get("/data/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["delivery_id"], "delivery-db")
 
     def test_health_nao_depende_do_banco(self) -> None:
         response = self.client.get("/health")

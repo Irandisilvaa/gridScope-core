@@ -15,6 +15,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Utils")
 
 
+class DataCacheError(RuntimeError):
+    """Falha ao obter a carga operacional vigente."""
+
+
 def _force_scalar(val):
     if val is None:
         return None
@@ -39,9 +43,25 @@ def _force_scalar(val):
         return val
 
 
+_NAO_ESCALARES = (list, tuple, dict, set, pd.Series, pd.Index, np.ndarray)
+
+
+def _eh_nulo(dado) -> bool:
+    """pd.isna só é seguro em escalares; em listas devolve array e quebra o `if`."""
+
+    if dado is None:
+        return True
+    if isinstance(dado, _NAO_ESCALARES):
+        return False
+    try:
+        return bool(pd.isna(dado))
+    except (TypeError, ValueError):
+        return False
+
+
 def sanitizar_dados(dado):
     try:
-        if pd.isna(dado):
+        if _eh_nulo(dado):
             return None
 
         if isinstance(dado, (pd.Series, pd.Index, np.ndarray, list)):
@@ -93,14 +113,25 @@ def limpar_float(val):
 
 def carregar_dados_cache(cidade_alvo=None):
     try:
-        from config import get_cidade_alvo, get_city_slug, DIR_DADOS
+        from config import ALLOW_FILE_CACHE, get_cidade_alvo, get_city_slug, DIR_DADOS
         cidade = cidade_alvo or get_cidade_alvo()
         slug = get_city_slug(cidade)
         
         path_geojson = os.path.join(DIR_DADOS, f"voronoi_{slug}.geojson")
         path_json = os.path.join(DIR_DADOS, f"cache_mercado_{slug}.json")
-        
-        if os.path.exists(path_geojson) and os.path.exists(path_json):
+
+        # O corte canônico não reescreve esses arquivos; se uma entrega já foi
+        # publicada, eles ficariam obsoletos e o banco deve ser a única fonte.
+        sem_publicacao_canonica = not os.path.exists(
+            os.path.join(DIR_DADOS, "metadata_carga_atual.json")
+        )
+
+        if (
+            ALLOW_FILE_CACHE
+            and sem_publicacao_canonica
+            and os.path.exists(path_geojson)
+            and os.path.exists(path_json)
+        ):
             try:
                 gdf = gpd.read_file(path_geojson)
                 with open(path_json, 'r', encoding='utf-8') as f:
@@ -135,10 +166,10 @@ def carregar_dados_cache(cidade_alvo=None):
 
     except ImportError as ie:
         logger.error(f"Módulo database não encontrado: {ie}")
-        return gpd.GeoDataFrame(), []
+        raise DataCacheError("Camada de dados indisponível") from ie
     except Exception as e:
         logger.error(f"Erro crítico ao carregar dados: {e}")
-        return gpd.GeoDataFrame(), []
+        raise DataCacheError("Carga operacional indisponível") from e
 
 
 def fundir_dados_geo_mercado(gdf, dados_mercado):

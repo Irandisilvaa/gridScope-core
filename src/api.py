@@ -18,10 +18,10 @@ from shapely.geometry import mapping
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 try:
-    from utils import carregar_dados_cache, fundir_dados_geo_mercado
+    from utils import DataCacheError, carregar_dados_cache, fundir_dados_geo_mercado
     from cache_redis import cache_json, is_redis_available
     from config import DATA_SOURCE, DIR_DADOS
-    from database import get_engine
+    from database import carregar_publication_metadata, get_engine
 except ImportError as e:
     print(f"CRITICAL API ERROR: {e}")
     sys.exit(1)
@@ -209,6 +209,8 @@ def _carregar_alvo_simulacao(
 ) -> Dict[str, Any]:
     gdf, dados_mercado = carregar_dados_cache()
     dados_fundidos = fundir_dados_geo_mercado(gdf, dados_mercado)
+    if not dados_fundidos:
+        raise HTTPException(status_code=503, detail="Dados de mercado indisponíveis")
 
     if id_tecnico is not None:
         id_buscado = urllib.parse.unquote(id_tecnico).strip().upper()
@@ -363,6 +365,10 @@ def readiness():
 def data_status():
     """Expõe a proveniência da carga publicada sem devolver dados do arquivo."""
 
+    database_metadata = carregar_publication_metadata()
+    if database_metadata is not None:
+        return database_metadata
+
     metadata_path = os.path.join(DIR_DADOS, "metadata_carga_atual.json")
     if not os.path.exists(metadata_path):
         return {"status": "unavailable", "source": DATA_SOURCE, "row_counts": {}}
@@ -387,10 +393,14 @@ def obter_dados_completos():
     try:
         gdf, dados_mercado = carregar_dados_cache()
         dados_fundidos = fundir_dados_geo_mercado(gdf, dados_mercado)
+        if not dados_fundidos:
+            raise HTTPException(status_code=503, detail="Dados de mercado indisponíveis")
         
         for item in dados_fundidos:
-            if item.get('geometry'):
-                item['geometry'] = mapping(item['geometry'])
+            # sanitizar_dados já converte a geometria; mapping() não é idempotente.
+            geometria = item.get('geometry')
+            if geometria is not None and hasattr(geometria, 'geom_type'):
+                item['geometry'] = mapping(geometria)
             
             if 'metricas_rede' in item:
                 m = item['metricas_rede']
@@ -403,6 +413,10 @@ def obter_dados_completos():
                     valores['consumo_anual_mwh'] = limpar_float(raw_consumo)
 
         return dados_fundidos
+    except HTTPException:
+        raise
+    except DataCacheError as error:
+        raise HTTPException(status_code=503, detail="Dados de mercado indisponíveis") from error
     except Exception as e:
         logger.exception("Falha ao carregar ranking")
         raise HTTPException(status_code=500, detail="Erro interno ao carregar o ranking") from e
@@ -470,7 +484,13 @@ def obter_apenas_geojson():
     """Retorna apenas o GeoJSON dos territórios Voronoi do banco PostgreSQL"""
     try:
         gdf, _ = carregar_dados_cache()
+        if gdf is None or gdf.empty:
+            raise HTTPException(status_code=503, detail="GeoJSON indisponível")
         return json.loads(gdf.to_json())
+    except HTTPException:
+        raise
+    except DataCacheError as error:
+        raise HTTPException(status_code=503, detail="GeoJSON indisponível") from error
     except Exception as e:
         logger.exception("Falha ao carregar GeoJSON")
         raise HTTPException(status_code=503, detail="GeoJSON indisponível") from e
@@ -486,6 +506,8 @@ def simular_geracao_por_id(
         return _gerar_simulacao(alvo, data_obj)
     except HTTPException:
         raise
+    except DataCacheError as error:
+        raise HTTPException(status_code=503, detail="Dados de mercado indisponíveis") from error
     except Exception as error:
         logger.exception("Falha ao gerar simulação por ID")
         raise HTTPException(status_code=500, detail="Erro interno ao gerar a simulação") from error
@@ -502,6 +524,8 @@ def simular_geracao(
         return _gerar_simulacao(alvo, data_obj)
     except HTTPException:
         raise
+    except DataCacheError as error:
+        raise HTTPException(status_code=503, detail="Dados de mercado indisponíveis") from error
     except Exception as error:
         logger.exception("Falha ao gerar simulação por nome")
         raise HTTPException(status_code=500, detail="Erro interno ao gerar a simulação") from error
