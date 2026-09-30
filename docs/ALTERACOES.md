@@ -366,3 +366,19 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 - A simulação ainda usa o fallback climático existente quando o provedor
   externo não responde; o resultado deve continuar identificado como
   estimativa na interface.
+
+## 2026-09-29 — filtros locais de subestações
+
+### Alterações
+
+- Adicionada busca local por nome ou ID técnico na visão de Subestações.
+- Adicionado filtro por situação `Todas`, `Normal` ou `Atenção`, sem alterar a
+  carga recebida nem duplicar cálculos do backend.
+- Adicionado contador de resultados, ação para limpar filtros e estado vazio
+  acessível quando nenhum ativo corresponde à combinação selecionada.
+- Mantida a seleção por `id_tecnico` e o detalhe operacional existente.
+
+### Validação
+
+- `npm run typecheck` e `npm run build`: aprovados.
+- `git diff --check`: aprovado.

@@ -7,6 +7,7 @@ import { TerritoryMap } from "./components/TerritoryMap";
 import { api, type DataStatus, type Substation, type Territories } from "./lib/api";
 
 type View = "overview" | "substations" | "reports" | "assistant";
+type SubstationStatusFilter = "all" | "normal" | "attention";
 
 const navItems: Array<{ id: View; label: string; hint: string }> = [
   { id: "overview", label: "Panorama", hint: "Visão do sistema" },
@@ -218,13 +219,43 @@ function Overview({ rows, metrics, criticalRows, dataStatus, territories, onSele
 }
 
 function Substations({ rows, selected, selectedId, onSelect, onClose }: { rows: Substation[]; selected: Substation | null; selectedId: string | null; onSelect: (id: string) => void; onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<SubstationStatusFilter>("all");
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return rows.filter((row) => {
+      const searchableText = `${row.id_tecnico} ${row.subestacao}`.toLowerCase();
+      const matchesQuery = !normalizedQuery || searchableText.includes(normalizedQuery);
+      const isNormal = row.metricas_rede.nivel_criticidade_gd.toUpperCase() === "NORMAL";
+      const matchesStatus = statusFilter === "all" || (statusFilter === "normal" ? isNormal : !isNormal);
+      return matchesQuery && matchesStatus;
+    });
+  }, [query, rows, statusFilter]);
+
+  const hasFilters = query.trim().length > 0 || statusFilter !== "all";
+
   return (
     <div className="grid gap-[22px] pt-7">
       <section className={`${panel} min-h-[460px] p-3 sm:p-6`}>
         <SectionHeading eyebrowText="Exploração" title="Todos os ativos publicados">
-          <span className="text-xs text-[#8ea4a7]">{rows.length} registros</span>
+          <span className="text-xs text-[#8ea4a7]">{filteredRows.length === rows.length ? `${rows.length} registros` : `${filteredRows.length} de ${rows.length}`}</span>
         </SectionHeading>
-        <SubstationTable rows={rows} selectedId={selectedId ?? undefined} onSelect={(row) => onSelect(row.id_tecnico)} />
+        <div className="mb-5 grid gap-3 border-y border-white/10 py-3 sm:grid-cols-[minmax(0,1fr)_180px_auto] sm:items-end">
+          <label className="grid gap-1.5 text-xs font-semibold text-[#a8bcbd]" htmlFor="substation-search">
+            Buscar ativo
+            <input className="rounded-md border border-white/10 bg-[#08141f] px-3 py-2 text-sm font-normal text-[#eef6f3] outline-none placeholder:text-[#577277] focus:border-[#6fe7d2]/60 focus:ring-2 focus:ring-[#6fe7d2]/20" id="substation-search" onChange={(event) => setQuery(event.target.value)} placeholder="Nome ou ID técnico" type="search" value={query} />
+          </label>
+          <label className="grid gap-1.5 text-xs font-semibold text-[#a8bcbd]" htmlFor="substation-status">
+            Situação
+            <select className="rounded-md border border-white/10 bg-[#08141f] px-3 py-2 text-sm font-normal text-[#eef6f3] outline-none focus:border-[#6fe7d2]/60 focus:ring-2 focus:ring-[#6fe7d2]/20" id="substation-status" onChange={(event) => setStatusFilter(event.target.value as SubstationStatusFilter)} value={statusFilter}>
+              <option value="all">Todas</option>
+              <option value="normal">Normal</option>
+              <option value="attention">Atenção</option>
+            </select>
+          </label>
+          {hasFilters ? <button className="h-fit rounded-md border border-white/10 px-3 py-2 text-xs font-bold text-[#8ea4a7] transition-colors hover:border-[#6fe7d2]/40 hover:text-[#6fe7d2] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#6fe7d2]" onClick={() => { setQuery(""); setStatusFilter("all"); }} type="button">Limpar filtros</button> : <span className="pb-2 text-xs text-[#577277]" role="status">Filtre sem sair desta carga.</span>}
+        </div>
+        {filteredRows.length ? <SubstationTable rows={filteredRows} selectedId={selectedId ?? undefined} onSelect={(row) => onSelect(row.id_tecnico)} /> : <div className="border border-dashed border-white/10 p-6 text-center text-sm text-[#8ea4a7]" role="status">Nenhuma subestação corresponde aos filtros atuais.</div>}
       </section>
       {selected ? <SubstationDetail row={selected} onClose={onClose} /> : <p className="m-0 border border-dashed border-white/10 p-[18px] text-center text-sm text-[#8ea4a7]">Selecione uma subestação para abrir o detalhe operacional.</p>}
     </div>
