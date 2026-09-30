@@ -64,9 +64,8 @@ urllib3==2.6.2
 uvicorn==0.40.0
 watchdog==6.0.0
 xyzservices==2025.11.0
-scikit-learn>=1.5.0
+scikit-learn==1.9.1
 joblib==1.4.2
-pandas==2.3.3
 holidays>=0.28
 redis==5.0.1
 SQLAlchemy>=2.0

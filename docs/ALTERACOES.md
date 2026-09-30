@@ -562,14 +562,15 @@ Antes de finalizar qualquer alteração, atualizar este arquivo com:
 ### Validação
 
 - Testes Python no container: 33 aprovados.
-- Validação do modelo `modelo_consumo.pkl`: R² 0,9989 e MAE 0,22.
+- Validação do modelo `modelo_consumo.pkl`: R² 0,9989 e MAE 0,25.
 - Compilação Python no container: aprovada.
+- `docker compose build gridscope`: aprovado após fixar a dependência.
 
 ### Pendências
 
-- A validação registrou `InconsistentVersionWarning`: o artefato foi treinado
-  com scikit-learn 1.5.2 e carregado com 1.9.1; é necessário alinhar versões e
-  regenerar o artefato antes de produção.
+- `scikit-learn` foi fixado em `1.9.1` e o artefato local ignorado pelo Git foi
+  regenerado com essa versão; ambientes que mantiverem artefatos antigos devem
+  regenerá-los antes de produção.
 
 ## 2026-09-30 — limites e tratamento seguro do chat IA
 
