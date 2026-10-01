@@ -1042,6 +1042,23 @@ que apontem para uma camada inexistente.
 - Suíte Python no container: 92 testes executados, 89 aprovados e 3 testes
   PostGIS ignorados sem `TEST_DATABASE_URL`.
 
+## 2026-09-30 — cidade canônica no frontend
+
+### Alterações
+
+- O tipo `DataStatus` do cliente passou a consumir `city_target`.
+- A cidade canônica agora aparece no bloco de conexão e no cabeçalho da carga
+  do Panorama, evitando que o usuário confunda uma publicação de outra cidade
+  com a carga atual.
+- Backend antigo ou cache local sem esse campo exibem `Não informada` sem
+  quebrar o carregamento.
+
+### Validação
+
+- `npm run typecheck`: aprovado.
+- `npm run build`: aprovado; bundle e service worker PWA gerados.
+- Detector visual Impeccable nos arquivos alterados: nenhum alerta.
+
 ### Política conhecida
 
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
