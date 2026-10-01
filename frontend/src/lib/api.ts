@@ -38,6 +38,7 @@ export type DataStatus = {
   source: string;
   delivery_id?: string | null;
   reference_period?: string | null;
+  city_target?: string | null;
   published_at?: string | null;
   row_counts: Record<string, number>;
   mode?: "live" | "fallback";
@@ -96,6 +97,7 @@ export class GridScopeApi {
         source: "Carga Estrutural (Local Cache)",
         delivery_id: "GS-PROD-2026",
         reference_period: "2025/2026",
+        city_target: null,
         published_at: new Date().toISOString(),
         row_counts: {
           subestacoes: 32,

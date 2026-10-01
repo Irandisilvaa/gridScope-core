@@ -329,6 +329,8 @@ export function App() {
                   />
                 </div>
                 <p className="mt-2 font-mono text-[0.68rem] leading-relaxed text-[#777777]">
+                  Cidade: {dataStatus?.city_target ?? "Não informada"}
+                  <br />
                   Carga: {dataStatus?.delivery_id ?? "GS-PROD"} · Ref: {dataStatus?.reference_period ?? "2025/2026"}
                 </p>
               </>
@@ -546,13 +548,13 @@ function OverviewView({
             </p>
           </div>
 
-          <div className="min-w-[200px] rounded-2xl border border-[#262626] bg-[#141414] p-4 font-mono text-xs shrink-0">
-            <span className="text-[0.66rem] uppercase text-[#8A8A8A] block">CARGA EM MONITORAMENTO</span>
-            <strong className="mt-1 block text-sm font-bold text-[#FFD400]">
-              {dataStatus?.delivery_id ?? "GS-PROD-2026"}
+          <div className="min-w-[220px] rounded-2xl border border-[#262626] bg-[#141414] p-4 font-mono text-xs shrink-0">
+            <span className="text-[0.66rem] uppercase text-[#8A8A8A] block">CIDADE CANÔNICA</span>
+            <strong className="mt-1 block break-words text-sm font-bold text-[#FFD400]">
+              {dataStatus?.city_target ?? "Não informada"}
             </strong>
             <span className="mt-1 text-[0.68rem] text-[#8A8A8A] block">
-              Atualização: {formatDate(dataStatus?.published_at)}
+              Carga {dataStatus?.delivery_id ?? "GS-PROD-2026"} · {formatDate(dataStatus?.published_at)}
             </span>
           </div>
         </div>
