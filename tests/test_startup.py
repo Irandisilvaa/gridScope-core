@@ -50,6 +50,28 @@ class StartupTests(unittest.TestCase):
                 interval_seconds=0,
             )
 
+    @patch("src.database.get_engine")
+    def test_verificacao_do_banco_reutiliza_engine_com_schema_configurado(self, get_engine):
+        engine = MagicMock()
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.return_value.scalar.return_value = 1
+        get_engine.return_value = engine
+
+        self.assertTrue(run_all.verificar_banco_populado())
+
+        get_engine.assert_called_once_with()
+        self.assertEqual(connection.execute.call_count, 3)
+        engine.dispose.assert_called_once_with()
+
+    @patch("src.database.get_engine")
+    def test_verificacao_do_banco_falha_se_tabela_esta_vazia(self, get_engine):
+        engine = MagicMock()
+        connection = engine.connect.return_value.__enter__.return_value
+        connection.execute.return_value.scalar.side_effect = [1, 0]
+        get_engine.return_value = engine
+
+        self.assertFalse(run_all.verificar_banco_populado())
+
     @patch("run_all.modelo_artefato_compativel", return_value=True)
     @patch("run_all.run_script")
     @patch("run_all.verificar_banco_populado", return_value=False)

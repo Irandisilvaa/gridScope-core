@@ -157,12 +157,14 @@ def aguardar_servicos(processes, endpoints, timeout_seconds=60, interval_seconds
 
 
 def verificar_banco_populado():
-    from sqlalchemy import create_engine, text
-    from src.config import DATABASE_URL
+    from sqlalchemy import text
+    from src.database import get_engine
 
     engine = None
     try:
-        engine = create_engine(DATABASE_URL)
+        # Reutiliza o search_path/schema validado pela DAL; a engine anterior
+        # sempre consultava public, mesmo quando DATABASE_SCHEMA era outro.
+        engine = get_engine()
 
         with engine.connect() as conn:
             tabelas = ['subestacoes', 'consumidores', 'cache_mercado']
