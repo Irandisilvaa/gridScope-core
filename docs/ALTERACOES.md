@@ -1092,6 +1092,23 @@ que apontem para uma camada inexistente.
 - `npm run build`: aprovado; PWA gerada.
 - Detector visual Impeccable nos três arquivos alterados: nenhum alerta.
 
+## 2026-09-30 — verificação de schema no boot
+
+### Alterações
+
+- `run_all.verificar_banco_populado()` passou a reutilizar
+  `src.database.get_engine()` em vez de criar uma conexão paralela.
+- A verificação agora respeita `DATABASE_SCHEMA` e o `search_path` configurado
+  pela camada de acesso a dados, evitando falso banco vazio quando a operação
+  usa schema diferente de `public`.
+- Adicionados testes para banco populado e para tabela vazia em
+  `tests/test_startup.py`.
+
+### Validação
+
+- Testes de startup no Docker: 7 aprovados.
+- Suíte unitária no Docker: 94 testes, 91 aprovados e 3 ignorados.
+
 ### Política conhecida
 
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
