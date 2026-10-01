@@ -82,9 +82,9 @@ O projeto inclui scripts utilitários para gerenciamento do banco de dados:
 
 - `python scripts/backup_db.py`: Gera backup completo do banco PostgreSQL
   (salva em `backups/`).
-- `python scripts/restore_db.py backups/arquivo.sql --confirm`: Restaura um
-  dump no banco configurado pelo Compose; use somente em banco descartável ou
-  de homologação e confirme explicitamente a sobrescrita.
+- `python scripts/restore_db.py backups/arquivo.sql --database gridscope_restore_e2e --confirm`:
+  Restaura um dump em um banco-alvo explícito; use somente em banco descartável
+  ou de homologação e confirme explicitamente a sobrescrita.
 - `python scripts/criar_indices.py`: Recria índices de performance nas tabelas
   do banco.
 - `python -m src.etl.pipeline`: Publica um snapshot completo (bruto, Voronoi,

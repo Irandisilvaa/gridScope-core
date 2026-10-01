@@ -1161,7 +1161,8 @@ que apontem para uma camada inexistente.
   shell intermediário, respeitando `POSTGRES_USER` e `POSTGRES_DB` do ambiente
   ou do `.env` usado pelo Compose.
 - Criado `scripts/restore_db.py` para restaurar dumps SQL via `psql` com
-  `ON_ERROR_STOP=1` e arquivo enviado por stdin.
+  `ON_ERROR_STOP=1` e arquivo enviado por stdin; o destino pode ser informado
+  explicitamente com `--database`.
 - A restauração exige `--confirm`, rejeita arquivo ausente/vazio e retorna
   código de falha quando o PostgreSQL rejeita o dump.
 - O README documenta o procedimento e alerta contra restauração acidental no
@@ -1172,8 +1173,10 @@ que apontem para uma camada inexistente.
 
 ### Validação
 
-- Testes de backup/restore no Docker: 4 aprovados.
-- Suíte unitária no Docker: 97 testes, 94 aprovados e 3 ignorados.
-- `python scripts/restore_db.py --help`: aprovado.
+- Testes de backup/restore no Docker: 6 aprovados.
+- Suíte unitária no Docker: 99 testes, 96 aprovados e 3 ignorados.
+- `python scripts/restore_db.py --help` com `--database`: aprovado.
+- Restore ponta a ponta em banco descartável aleatório: tabela e marcador
+  recuperados com sucesso; o banco temporário foi removido ao final.
 - `pg_dump --schema-only` direto no serviço `db`: dump de 13.871 bytes gerado
   sem alterar dados.
