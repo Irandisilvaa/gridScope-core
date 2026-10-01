@@ -21,6 +21,12 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 PYTHON_EXEC = sys.executable
 
+API_STARTUP_ENDPOINTS = {
+    "API Principal": "http://127.0.0.1:8000/ready",
+    "API Inteligência Artificial": "http://127.0.0.1:8001/health",
+    "API Chat IA": "http://127.0.0.1:8002/ready",
+}
+
 os.makedirs(DIR_LOGS, exist_ok=True)
 
 nome_arquivo_log = f"{datetime.now().strftime('%Y-%m-%d')}_sistema.log"
@@ -232,11 +238,7 @@ if __name__ == "__main__":
 
         aguardar_servicos(
             api_processes,
-            {
-                "API Principal": "http://127.0.0.1:8000/health",
-                "API Inteligência Artificial": "http://127.0.0.1:8001/health",
-                "API Chat IA": "http://127.0.0.1:8002/ready",
-            },
+            API_STARTUP_ENDPOINTS,
         )
 
         logger.info("\n✅ APIs ONLINE — frontend Vite/PWA deve ser servido separadamente")

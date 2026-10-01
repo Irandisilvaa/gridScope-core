@@ -9,6 +9,7 @@ class ComposeSecurityTests(unittest.TestCase):
         self.assertNotIn("- .:/app", compose)
         self.assertNotIn("./.env:/app/.env", compose)
         self.assertIn('user: "${GRID_SCOPE_UID:-1000}:${GRID_SCOPE_GID:-1000}"', compose)
+        self.assertIn("http://localhost:8000/ready", compose)
 
     def test_override_de_desenvolvimento_e_explicito(self) -> None:
         dev_compose = Path("docker-compose.dev.yml").read_text(encoding="utf-8")

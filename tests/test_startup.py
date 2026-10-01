@@ -50,6 +50,12 @@ class StartupTests(unittest.TestCase):
                 interval_seconds=0,
             )
 
+    def test_startup_da_api_principal_exige_readiness(self):
+        self.assertEqual(
+            run_all.API_STARTUP_ENDPOINTS["API Principal"],
+            "http://127.0.0.1:8000/ready",
+        )
+
     @patch("src.database.get_engine")
     def test_verificacao_do_banco_reutiliza_engine_com_schema_configurado(self, get_engine):
         engine = MagicMock()
