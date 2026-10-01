@@ -1,6 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import type { Substation, Territories } from "../lib/api";
 import { StatusPill } from "./StatusPill";
+import { TerritoryMapModal } from "./TerritoryMapModal";
 import {
   MagnifyingGlassPlus,
   MagnifyingGlassMinus,
@@ -24,11 +25,14 @@ import {
   Repeat,
 } from "@phosphor-icons/react";
 
-type TerritoryMapProps = {
+export type TerritoryMapProps = {
   data: Territories;
   substations?: Substation[];
   onSelectSubstation?: (id: string) => void;
   selectedId?: string | null;
+  isModalView?: boolean;
+  onOpenModal?: () => void;
+  onCloseModal?: () => void;
 };
 
 type Position = [number, number];
@@ -113,6 +117,9 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   substations = [],
   onSelectSubstation,
   selectedId,
+  isModalView = false,
+  onOpenModal,
+  onCloseModal,
 }) => {
   // Navigation State: Zoom & Pan
   const [zoom, setZoom] = useState(1.0);
@@ -131,7 +138,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const [themeMode, setThemeMode] = useState<MapThemeMode>("criticality");
   const [showLabels, setShowLabels] = useState(true);
   const [showNodes, setShowNodes] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [internalModalOpen, setInternalModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "normal" | "attention" | "critical">("all");
 
@@ -167,7 +174,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       ro.disconnect();
       window.removeEventListener("resize", updateSize);
     };
-  }, [isFullscreen]);
+  }, [isModalView]);
 
   // Extract all coordinates to build bounding box
   const positions: Position[] = useMemo(() => {
@@ -202,6 +209,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const mapPadding = { top: 40, right: 60, bottom: 50, left: 60 };
   const innerW = Math.max(svgWidth - mapPadding.left - mapPadding.right, 60);
   const innerH = Math.max(svgHeight - mapPadding.top - mapPadding.bottom, 60);
+
+  // Infinite Ground Plane Dimensions in World Coordinates:
+  // Repositioned dynamically below camera optical focal point so the ground plane is visually infinite
+  const camWorldX = svgWidth / 2 - pan.x / zoom;
+  const camWorldY = svgHeight / 2 - pan.y / zoom;
+  // Radius expands when zooming out to guarantee coverage far past the 3D horizon frustum
+  const groundRadius = (Math.max(svgWidth, svgHeight) * 8) / Math.min(zoom, 1);
+  const groundSize = groundRadius * 2;
+  const groundX = camWorldX - groundRadius;
+  const groundY = camWorldY - groundRadius;
 
   // TRUE CONFORMAL ASPECT-RATIO PROJECTION (Eliminates horizontal stretching / "mapa deitado")
   const avgLatitude = (minLatitude + maxLatitude) / 2;
@@ -366,20 +383,23 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const isFlat2D = pitch === 0 && bearing === 0;
   const activeSubstation = hoveredId ? subMap.get(hoveredId) : (selectedId ? subMap.get(selectedId) : null);
 
-  // Esc key to exit fullscreen
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isFullscreen) setIsFullscreen(false);
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFullscreen]);
+  const handleToggleExpand = () => {
+    if (isModalView) {
+      onCloseModal?.();
+    } else if (onOpenModal) {
+      onOpenModal();
+    } else {
+      setInternalModalOpen(true);
+    }
+  };
 
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-hidden rounded-3xl border border-[#222222] bg-[#070707] double-bezel transition-all ${
-        isFullscreen ? "fixed inset-4 z-50 rounded-2xl shadow-[0_0_80px_rgba(0,0,0,0.95)]" : ""
+      className={`relative overflow-hidden transition-all ${
+        isModalView
+          ? "h-full w-full flex flex-col rounded-none border-0 bg-transparent"
+          : "rounded-3xl border border-[#222222] bg-[#070707] double-bezel"
       }`}
     >
       {/* HUD Header Toolbar */}
@@ -563,14 +583,14 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             </button>
           </div>
 
-          {/* Fullscreen Toggle */}
+          {/* Modal / Fullscreen Expand Button */}
           <button
             type="button"
-            onClick={() => setIsFullscreen(!isFullscreen)}
+            onClick={handleToggleExpand}
             className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#242424] bg-[#141414] text-[#8A8A8A] hover:border-[#FFD400] hover:text-[#FFD400] transition-colors"
-            title={isFullscreen ? "Restaurar Janela" : "Expandir Mapa"}
+            title={isModalView ? "Fechar Vista Expandida" : "Expandir Mapa em Tela Cheia (Modal)"}
           >
-            {isFullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}
+            {isModalView ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}
           </button>
         </div>
       </div>
@@ -579,7 +599,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       <div
         ref={viewportRef}
         className={`relative select-none overflow-hidden overscroll-contain ${
-          isFullscreen ? "h-[calc(100%-92px)]" : "h-[480px] md:h-[540px]"
+          isModalView ? "flex-1 min-h-0 w-full" : "h-[480px] md:h-[560px]"
         } ${isDragging ? (dragType === "orbit" ? "cursor-grab" : "cursor-grabbing") : "cursor-crosshair"}`}
         style={{
           perspective: "1200px",
@@ -597,20 +617,73 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           setCursorGeo(null);
         }}
       >
-        {/* Tactical HUD Corner Reticles (Framing 100% of the entire map viewport) */}
+        {/* 3D Atmospheric Horizon Fog Vignette (Softens the horizon into deep black in 3D mode) */}
+        {!isFlat2D && (
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 h-32 z-10 transition-opacity duration-500"
+            style={{
+              background:
+                "linear-gradient(to bottom, #060606 0%, rgba(6, 6, 6, 0.85) 35%, rgba(6, 6, 6, 0.4) 65%, rgba(6, 6, 6, 0) 100%)",
+            }}
+          />
+        )}
+
+        {/* Tactical HUD Overlay (Fixed 2D layer, never tilted by 3D transforms) */}
         <div className="pointer-events-none absolute inset-0 z-20">
-          <svg className="absolute top-3 left-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
-            <path d="M 0 16 L 0 0 L 16 0" stroke="currentColor" strokeWidth="2.5" />
-          </svg>
-          <svg className="absolute top-3 right-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
-            <path d="M 20 16 L 20 0 L 4 0" stroke="currentColor" strokeWidth="2.5" />
-          </svg>
-          <svg className="absolute bottom-3 left-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
-            <path d="M 0 4 L 0 20 L 16 20" stroke="currentColor" strokeWidth="2.5" />
-          </svg>
-          <svg className="absolute bottom-3 right-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
-            <path d="M 20 4 L 20 20 L 4 20" stroke="currentColor" strokeWidth="2.5" />
-          </svg>
+          {/* Tactical Corner Reticles: ONLY shown in 2D mode so 3D mode stays visually infinite without box borders */}
+          {isFlat2D && (
+            <>
+              <svg className="absolute top-3.5 left-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+                <path d="M 0 16 L 0 0 L 16 0" stroke="currentColor" strokeWidth="2.5" />
+              </svg>
+              <svg className="absolute top-3.5 right-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+                <path d="M 20 16 L 20 0 L 4 0" stroke="currentColor" strokeWidth="2.5" />
+              </svg>
+              <svg className="absolute bottom-3.5 left-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+                <path d="M 0 4 L 0 20 L 16 20" stroke="currentColor" strokeWidth="2.5" />
+              </svg>
+              <svg className="absolute bottom-3.5 right-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+                <path d="M 20 4 L 20 20 L 4 20" stroke="currentColor" strokeWidth="2.5" />
+              </svg>
+            </>
+          )}
+
+          {/* Compass Rose / North Indicator - Always crisp 2D HUD widget pointing to North */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setFlat2DMode();
+            }}
+            className="pointer-events-auto absolute top-3.5 right-3.5 flex h-9 w-9 items-center justify-center rounded-full border border-[#2B2B2B] bg-[#0A0A0A]/90 shadow-xl backdrop-blur-md transition-all hover:border-[#FFD400] hover:scale-105 active:scale-95"
+            title="Clique para alinhar ao Norte e retornar ao modo 2D Plano"
+          >
+            <div
+              className="relative flex items-center justify-center transition-transform duration-300"
+              style={{ transform: `rotate(${-bearing}deg)` }}
+            >
+              <svg width="24" height="24" viewBox="-12 -12 24 24">
+                <polygon points="0,-10 3,0 0,2.5 -3,0" fill="#FFD400" />
+                <polygon points="0,10 3,0 0,-2.5 -3,0" fill="#555555" />
+                <text x="0" y="-10.5" textAnchor="middle" className="font-mono text-[6.5px] font-bold fill-[#FFD400]">
+                  N
+                </text>
+              </svg>
+            </div>
+          </button>
+
+          {/* Graphic Scale Bar in HUD */}
+          <div className="absolute bottom-3.5 left-4 flex flex-col gap-0.5 font-mono text-[9px] text-[#8A8A8A]">
+            <div className="flex w-24 items-center justify-between text-[8px]">
+              <span>0</span>
+              <span>2.5km</span>
+              <span>5km</span>
+            </div>
+            <div className="flex h-1.5 w-24 border border-[#3A3A3A] bg-[#111111]/90">
+              <div className="w-1/2 bg-[#FFD400]/50 border-r border-[#3A3A3A]" />
+              <div className="w-1/2 bg-transparent" />
+            </div>
+          </div>
         </div>
 
         {/* Transforming 3D / 2D Canvas Wrapper */}
@@ -619,37 +692,108 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           style={{
             transform: `rotateX(${pitch}deg) rotateZ(${bearing}deg)`,
             transformStyle: "preserve-3d",
+            overflow: "visible",
             transition: isDragging ? "none" : "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
           <svg
             aria-label="Mapa territorial geoespacial interativo"
-            className="h-full w-full select-none block"
+            className="h-full w-full select-none block overflow-visible"
+            style={{ overflow: "visible" }}
             preserveAspectRatio="none"
             role="img"
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           >
             <defs>
-              {/* Tactical Grid Pattern */}
-              <pattern id="tacticalGridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255, 255, 255, 0.025)" strokeWidth="1" />
-                <circle cx="0" cy="0" r="1.2" fill="rgba(255, 212, 0, 0.12)" />
-              </pattern>
-
               {/* Glowing Golden Filter */}
               <filter id="territoryGlow" x="-30%" y="-30%" width="160%" height="160%">
                 <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#FFD400" floodOpacity="0.6" />
               </filter>
-            </defs>
 
-            {/* Background Grid */}
-            <rect width={svgWidth} height={svgHeight} fill="url(#tacticalGridPattern)" />
+              {/* Infinite World Tactical Ground Grid Pattern */}
+              {/* Anchored to world coordinates (patternUnits="userSpaceOnUse") so it stays fixed to the map */}
+              <pattern
+                id="worldTacticalGrid"
+                width="60"
+                height="60"
+                patternUnits="userSpaceOnUse"
+              >
+                {/* Secondary sub-grid lines 20px */}
+                <path
+                  d="M 20 0 L 20 60 M 40 0 L 40 60 M 0 20 L 60 20 M 0 40 L 60 40"
+                  stroke="#161616"
+                  strokeWidth="0.8"
+                  fill="none"
+                />
+                {/* Primary grid lines 60px */}
+                <path
+                  d="M 60 0 L 0 0 0 60"
+                  stroke="#262626"
+                  strokeWidth="1.2"
+                  fill="none"
+                />
+                {/* CAD-style corner tick at intersections */}
+                <path
+                  d="M -3 0 L 3 0 M 0 -3 L 0 3"
+                  stroke="#FFD400"
+                  strokeOpacity="0.28"
+                  strokeWidth="1.2"
+                />
+              </pattern>
+
+              {/* Radial Horizon Distance Fade for Infinite Ground Plane */}
+              {/* Centered at camera optical focal center (camWorldX, camWorldY) */}
+              <radialGradient
+                id="groundHorizonFade"
+                cx={camWorldX}
+                cy={camWorldY}
+                r={groundRadius * 0.7}
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+                <stop offset="25%" stopColor="#ffffff" stopOpacity="0.85" />
+                <stop offset="50%" stopColor="#ffffff" stopOpacity="0.5" />
+                <stop offset="70%" stopColor="#ffffff" stopOpacity="0.2" />
+                <stop offset="88%" stopColor="#ffffff" stopOpacity="0.04" />
+                <stop offset="100%" stopColor="#000000" stopOpacity="0" />
+              </radialGradient>
+
+              {/* Mask for Infinite Ground Plane Fade */}
+              <mask id="groundHorizonFadeMask" maskUnits="userSpaceOnUse">
+                <rect
+                  x={groundX}
+                  y={groundY}
+                  width={groundSize}
+                  height={groundSize}
+                  fill="url(#groundHorizonFade)"
+                />
+              </mask>
+            </defs>
 
             {/* Interactive Zoom/Pan Transform Group */}
             <g
               transform={`translate(${svgWidth / 2 + pan.x}, ${svgHeight / 2 + pan.y}) scale(${zoom}) translate(${-svgWidth / 2}, ${-svgHeight / 2})`}
               className="transition-transform duration-75 ease-out"
             >
+              {/* Infinite Ground Floor Surface (Subtle dark surface fading into horizon) */}
+              <rect
+                x={groundX}
+                y={groundY}
+                width={groundSize}
+                height={groundSize}
+                fill="#070707"
+                mask="url(#groundHorizonFadeMask)"
+              />
+
+              {/* Infinite Tactical CAD/GIS Ground Grid (Orthogonal perspective grid anchored to world coordinates) */}
+              <rect
+                x={groundX}
+                y={groundY}
+                width={groundSize}
+                height={groundSize}
+                fill="url(#worldTacticalGrid)"
+                mask="url(#groundHorizonFadeMask)"
+              />
               {/* Voronoi Territory Polygons */}
               {data.features.map((feature, index) => {
                 const props = (feature.properties ?? {}) as Record<string, unknown>;
@@ -813,44 +957,6 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               })}
             </g>
 
-            {/* Tactical Corner Reticles on Plane */}
-            <path d="M 14 36 L 14 14 L 36 14" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
-            <path d={`M ${svgWidth - 14} 36 L ${svgWidth - 14} 14 L ${svgWidth - 36} 14`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
-            <path d={`M 14 ${svgHeight - 36} L 14 ${svgHeight - 14} L 36 ${svgHeight - 14}`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
-            <path d={`M ${svgWidth - 14} ${svgHeight - 36} L ${svgWidth - 14} ${svgHeight - 14} L ${svgWidth - 36} ${svgHeight - 14}`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
-
-            {/* Compass Rose / North Indicator - Rotates with Bearing & Clickable */}
-            <g
-              transform={`translate(${svgWidth - 50}, 50)`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setFlat2DMode();
-              }}
-              className="cursor-pointer opacity-90 transition-transform duration-300"
-              style={{
-                transform: `translate(${svgWidth - 50}px, 50px) rotate(${-bearing}deg)`,
-                transformOrigin: `${svgWidth - 50}px 50px`,
-              }}
-            >
-              <title>Clique para alinhar ao Norte e retornar ao modo 2D Plano</title>
-              <circle r="18" fill="#0C0C0C" stroke="#2B2B2B" strokeWidth="1" />
-              <polygon points="0,-13 4,0 0,4 -4,0" fill="#FFD400" />
-              <polygon points="0,13 4,0 0,-4 -4,0" fill="#444444" />
-              <text x="0" y="-15" textAnchor="middle" className="font-mono text-[8px] font-bold fill-[#FFD400]">
-                N
-              </text>
-            </g>
-
-            {/* Graphic Scale Bar */}
-            <g transform={`translate(40, ${svgHeight - 32})`} className="pointer-events-none opacity-75 font-mono text-[8px] fill-[#8A8A8A]">
-              <line x1="0" y1="0" x2="80" y2="0" stroke="#8A8A8A" strokeWidth="1.5" />
-              <line x1="0" y1="-3" x2="0" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
-              <line x1="40" y1="-2" x2="40" y2="2" stroke="#8A8A8A" strokeWidth="1.5" />
-              <line x1="80" y1="-3" x2="80" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
-              <text x="0" y="-5" textAnchor="middle">0</text>
-              <text x="40" y="-5" textAnchor="middle">2.5km</text>
-              <text x="80" y="-5" textAnchor="middle">5km</text>
-            </g>
           </svg>
         </div>
 
@@ -987,6 +1093,18 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           )}
         </div>
       </div>
+
+      {/* Dedicated Fullscreen Map Modal */}
+      {!isModalView && (
+        <TerritoryMapModal
+          isOpen={internalModalOpen}
+          onClose={() => setInternalModalOpen(false)}
+          data={data}
+          substations={substations}
+          selectedId={selectedId}
+          onSelectSubstation={onSelectSubstation}
+        />
+      )}
     </div>
   );
 };

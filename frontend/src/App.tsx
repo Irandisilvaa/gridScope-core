@@ -10,6 +10,10 @@ import { BrandManualModal } from "./components/BrandManualModal";
 import { NetworkAssistant } from "./components/NetworkAssistant";
 import { CommandPalette } from "./components/CommandPalette";
 import { ReportDossierModal } from "./components/ReportDossierModal";
+import { AuthModal } from "./components/auth/AuthModal";
+import { OperatorBadge } from "./components/auth/OperatorBadge";
+import { authService } from "./lib/authService";
+import type { UserProfile, AuthMode } from "./types/auth";
 import {
   api,
   type DataStatus,
@@ -32,6 +36,7 @@ import {
   CaretLeft,
   CaretRight,
   SidebarSimple,
+  User,
 } from "@phosphor-icons/react";
 
 type View = "overview" | "substations" | "reports" | "assistant";
@@ -77,6 +82,9 @@ export function App() {
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isDossierOpen, setIsDossierOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState("");
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => authService.getCurrentUser());
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authInitialMode, setAuthInitialMode] = useState<AuthMode>("login");
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem("gridscope_sidebar_collapsed") === "true";
@@ -84,6 +92,21 @@ export function App() {
       return false;
     }
   });
+
+  const handleOpenAuth = (mode: AuthMode = "login") => {
+    setAuthInitialMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const handleAuthenticated = (user: UserProfile) => {
+    setCurrentUser(user);
+    setIsAuthModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    authService.logout();
+    setCurrentUser(null);
+  };
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed((prev) => {
@@ -312,6 +335,36 @@ export function App() {
             )}
           </button>
 
+          {/* Operator Access / Sign In Shortcut */}
+          <button
+            type="button"
+            onClick={() => (currentUser ? handleLogout() : handleOpenAuth("login"))}
+            title={
+              currentUser
+                ? `Operador: ${currentUser.name} (${currentUser.technicalId}) - Clique para encerrar sessão`
+                : "Entrar ou Cadastrar Operador"
+            }
+            className={`flex items-center rounded-xl border border-[#2B2B2B] bg-[#121212] text-xs font-medium text-[#CCCCCC] transition-colors hover:border-[#FFD400] hover:text-[#FFD400] ${
+              isSidebarCollapsed
+                ? "justify-center h-10 w-full p-0"
+                : "w-full justify-between px-3 py-2"
+            }`}
+          >
+            <span className="flex items-center gap-2 truncate">
+              <User size={16} className="text-[#FFD400] shrink-0" />
+              {!isSidebarCollapsed && (
+                <span className="truncate">
+                  {currentUser ? currentUser.technicalId : "Acesso Operador"}
+                </span>
+              )}
+            </span>
+            {!isSidebarCollapsed && (
+              <span className="font-mono text-[0.65rem] text-[#8A8A8A]">
+                {currentUser ? "Sair" : "Entrar"}
+              </span>
+            )}
+          </button>
+
           {/* Connection Status Card */}
           <div
             className={`rounded-xl border border-[#222222] bg-[#0E0E0E] ${
@@ -409,6 +462,13 @@ export function App() {
               <BrandSymbol size={16} />
               <span>Branding</span>
             </button>
+
+            {/* Operator Identity Badge / Login Trigger */}
+            <OperatorBadge
+              user={currentUser}
+              onOpenAuth={() => handleOpenAuth("login")}
+              onLogout={handleLogout}
+            />
           </div>
         </header>
 
@@ -521,6 +581,14 @@ export function App() {
         onClose={() => setIsDossierOpen(false)}
         rows={rows}
         dataStatus={dataStatus}
+      />
+
+      {/* Authentication Modal (Login / Cadastro) */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onAuthenticated={handleAuthenticated}
+        initialMode={authInitialMode}
       />
     </div>
   );
