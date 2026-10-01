@@ -41,6 +41,15 @@ export type DataStatus = {
   city_target?: string | null;
   published_at?: string | null;
   row_counts: Record<string, number>;
+  quality_report?: {
+    discarded_records?: Array<{
+      table: string;
+      reason: string;
+      count: number;
+      ids?: string[];
+      transformer_ids?: string[];
+    }>;
+  };
   mode?: "live" | "fallback";
 };
 
@@ -103,6 +112,7 @@ export class GridScopeApi {
           subestacoes: 32,
           geometrias: 32,
         },
+        quality_report: {},
         mode: "fallback",
       };
     }

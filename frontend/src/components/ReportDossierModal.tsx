@@ -26,6 +26,11 @@ export const ReportDossierModal: React.FC<ReportDossierModalProps> = ({
   const totalMwh = rows.reduce((acc, r) => acc + r.metricas_rede.consumo_anual_mwh, 0);
   const totalGdKw = rows.reduce((acc, r) => acc + r.geracao_distribuida.potencia_total_kw, 0);
   const totalGdUnits = rows.reduce((acc, r) => acc + r.geracao_distribuida.total_unidades, 0);
+  const discardedRecordCount =
+    dataStatus?.quality_report?.discarded_records?.reduce(
+      (total, event) => total + event.count,
+      0
+    ) ?? 0;
 
   const criticalRows = rows.filter(
     (r) => r.metricas_rede.nivel_criticidade_gd.toUpperCase() !== "NORMAL"
@@ -126,6 +131,12 @@ export const ReportDossierModal: React.FC<ReportDossierModalProps> = ({
               </strong>
             </div>
           </div>
+          {discardedRecordCount > 0 && (
+            <p className="font-mono text-xs text-[#F59E0B] print:text-amber-700">
+              Auditoria de qualidade: {formatNumber(discardedRecordCount)} registros descartados
+              antes da publicação.
+            </p>
+          )}
 
           {/* Executive KPI Summary */}
           <section className="space-y-2">

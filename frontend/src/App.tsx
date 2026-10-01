@@ -5,6 +5,7 @@ import { StatusPill } from "./components/StatusPill";
 import { SubstationDetail } from "./components/SubstationDetail";
 import { SubstationTable } from "./components/SubstationTable";
 import { TerritoryMap } from "./components/TerritoryMap";
+import { OverviewRankingChart, CriticalityMatrix } from "./components/EnergyCharts";
 import { BrandManualModal } from "./components/BrandManualModal";
 import { NetworkAssistant } from "./components/NetworkAssistant";
 import { CommandPalette } from "./components/CommandPalette";
@@ -51,6 +52,15 @@ function formatDate(value?: string | null) {
   if (!value) return "Carga atual publicada";
   return new Intl.DateTimeFormat("pt-BR", { dateStyle: "medium", timeStyle: "short" }).format(
     new Date(value)
+  );
+}
+
+function countDiscardedRecords(dataStatus: DataStatus | null) {
+  return (
+    dataStatus?.quality_report?.discarded_records?.reduce(
+      (total, event) => total + event.count,
+      0
+    ) ?? 0
   );
 }
 
@@ -159,6 +169,7 @@ export function App() {
     () => rows.find((row) => row.id_tecnico === selectedSubstationId) ?? null,
     [rows, selectedSubstationId]
   );
+  const discardedRecordCount = countDiscardedRecords(dataStatus);
 
   const selectSubstation = (id: string) => {
     setSelectedSubstationId(id);
@@ -333,6 +344,11 @@ export function App() {
                   <br />
                   Carga: {dataStatus?.delivery_id ?? "GS-PROD"} · Ref: {dataStatus?.reference_period ?? "2025/2026"}
                 </p>
+                {discardedRecordCount > 0 && (
+                  <p className="mt-2 font-mono text-[0.68rem] leading-relaxed text-[#F59E0B]">
+                    Auditoria: {formatNumber(discardedRecordCount)} registros descartados
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -556,6 +572,11 @@ function OverviewView({
             <span className="mt-1 text-[0.68rem] text-[#8A8A8A] block">
               Carga {dataStatus?.delivery_id ?? "GS-PROD-2026"} · {formatDate(dataStatus?.published_at)}
             </span>
+            {countDiscardedRecords(dataStatus) > 0 && (
+              <span className="mt-2 block text-[0.68rem] text-[#F59E0B]">
+                {formatNumber(countDiscardedRecords(dataStatus))} registros descartados com auditoria
+              </span>
+            )}
           </div>
         </div>
       </section>
@@ -587,6 +608,16 @@ function OverviewView({
           note={`${formatNumber(metrics.gdUnits)} sistemas instalados`}
           accent
         />
+      </section>
+
+      {/* Visual Analytics Grid: Top GD Ranking & Criticality Distribution */}
+      <section className="grid gap-6 lg:grid-cols-2">
+        <OverviewRankingChart
+          substations={rows}
+          topN={7}
+          onSelectSubstation={onSelectSubstation}
+        />
+        <CriticalityMatrix substations={rows} />
       </section>
 
       {/* Critical Assets Alert Card */}
