@@ -1059,6 +1059,22 @@ que apontem para uma camada inexistente.
 - `npm run build`: aprovado; bundle e service worker PWA gerados.
 - Detector visual Impeccable nos arquivos alterados: nenhum alerta.
 
+## 2026-09-30 — cidade canônica no dossiê operacional
+
+### Alterações
+
+- O dossiê técnico em PDF passou a exibir a cidade canônica junto da entrega,
+  período, status e total de ativos.
+- O campo mantém `Não informada` para cargas legadas sem `city_target`.
+- O contrato de `/ready` foi mantido sem alteração: ele continua verificando
+  dependências, preservando instalações antigas sem registro transacional.
+
+### Validação
+
+- `npm run typecheck`: aprovado.
+- `npm run build`: aprovado; PWA gerada.
+- Detector visual Impeccable no modal alterado: nenhum alerta.
+
 ### Política conhecida
 
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
