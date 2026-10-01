@@ -1047,3 +1047,23 @@ que apontem para uma camada inexistente.
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
   simultâneas exigirá particionar a publicação e a API, e não será simulado por
   caches locais fora do corte transacional.
+
+## 2026-09-30 — cidade canônica na proveniência da carga
+
+### Alterações
+
+- `grid_scope_publication`, `metadata_carga_atual.json` e `GET /data/status`
+  agora expõem `city_target`, deixando explícita a cidade representada pelo
+  snapshot canônico.
+- `ingest_current_delivery` e `migrar_gdb_para_sql` encaminham a cidade
+  configurada para a publicação.
+- Bancos antigos sem a coluna continuam legíveis e retornam `city_target: null`
+  até a próxima publicação, sem alterar `row_counts`.
+
+### Validação
+
+- Testes PostGIS confirmam gravação e leitura de `city_target`.
+- Compatibilidade foi verificada removendo a coluna de uma tabela scratch antiga;
+  o status continuou disponível com valor nulo.
+- Suíte Python no container: 92 testes executados, 89 aprovados e 3 testes
+  PostGIS ignorados sem `TEST_DATABASE_URL`.
