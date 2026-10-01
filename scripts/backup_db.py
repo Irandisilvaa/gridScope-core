@@ -1,17 +1,46 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
 import tempfile
 
+from dotenv import dotenv_values
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BACKUP_DIR = PROJECT_ROOT / "backups"
 MAX_BACKUPS = 5
-PG_DUMP_COMMAND = (
-    'PGPASSWORD="$POSTGRES_PASSWORD" '
-    'pg_dump --no-password -U "$POSTGRES_USER" "$POSTGRES_DB"'
-)
+DATABASE_SERVICE = "db"
+
+
+def _database_setting(name: str, default: str) -> str:
+    """Replica a precedência do Compose: ambiente do processo sobre .env."""
+
+    values = dotenv_values(PROJECT_ROOT / ".env")
+    return str(os.getenv(name) or values.get(name) or default)
+
+
+def compose_database_command(program: str, *extra_args: str) -> list[str]:
+    """Monta um comando direto para o PostgreSQL do serviço Compose."""
+
+    if program not in {"pg_dump", "psql"}:
+        raise ValueError(f"Programa PostgreSQL não permitido: {program}")
+
+    return [
+        "docker",
+        "compose",
+        "exec",
+        "-T",
+        DATABASE_SERVICE,
+        program,
+        *extra_args,
+        "--no-password",
+        "-U",
+        _database_setting("POSTGRES_USER", "postgres"),
+        "--dbname",
+        _database_setting("POSTGRES_DB", "gridscope_local"),
+    ]
 
 
 def _error_message(error: Exception) -> str:
@@ -47,17 +76,7 @@ def backup_db() -> bool:
         ) as temporary:
             temporary_path = Path(temporary.name)
             subprocess.run(
-                [
-                    "docker",
-                    "compose",
-                    "exec",
-                    "-T",
-                    "db",
-                    "sh",
-                    "-eu",
-                    "-c",
-                    PG_DUMP_COMMAND,
-                ],
+                compose_database_command("pg_dump"),
                 cwd=PROJECT_ROOT,
                 stdout=temporary,
                 stderr=subprocess.PIPE,
