@@ -1075,6 +1075,23 @@ que apontem para uma camada inexistente.
 - `npm run build`: aprovado; PWA gerada.
 - Detector visual Impeccable no modal alterado: nenhum alerta.
 
+## 2026-09-30 — auditoria de qualidade visível no frontend
+
+### Alterações
+
+- O cliente TypeScript passou a tipar `quality_report.discarded_records`.
+- O Panorama mostra um aviso discreto com a quantidade de registros descartados
+  na entrega vigente, sem tratar descarte auditado como indisponibilidade.
+- O dossiê técnico inclui a mesma informação para manter a rastreabilidade no
+  documento exportado/imprimível.
+- Cargas antigas sem `quality_report` continuam funcionando sem aviso.
+
+### Validação
+
+- `npm run typecheck`: aprovado.
+- `npm run build`: aprovado; PWA gerada.
+- Detector visual Impeccable nos três arquivos alterados: nenhum alerta.
+
 ### Política conhecida
 
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
