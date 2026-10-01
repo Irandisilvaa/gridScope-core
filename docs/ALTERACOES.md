@@ -1152,5 +1152,28 @@ que apontem para uma camada inexistente.
 - Testes PostGIS confirmam gravação e leitura de `city_target`.
 - Compatibilidade foi verificada removendo a coluna de uma tabela scratch antiga;
   o status continuou disponível com valor nulo.
-- Suíte Python no container: 92 testes executados, 89 aprovados e 3 testes
-  PostGIS ignorados sem `TEST_DATABASE_URL`.
+
+## 2026-09-30 — backup e restauração controlada
+
+### Alterações
+
+- `scripts/backup_db.py` passou a montar argumentos diretos para `pg_dump`, sem
+  shell intermediário, respeitando `POSTGRES_USER` e `POSTGRES_DB` do ambiente
+  ou do `.env` usado pelo Compose.
+- Criado `scripts/restore_db.py` para restaurar dumps SQL via `psql` com
+  `ON_ERROR_STOP=1` e arquivo enviado por stdin.
+- A restauração exige `--confirm`, rejeita arquivo ausente/vazio e retorna
+  código de falha quando o PostgreSQL rejeita o dump.
+- O README documenta o procedimento e alerta contra restauração acidental no
+  banco operacional.
+- O item `OPS-03` do `PLANO_MELHORIAS.md` foi atualizado; a restauração
+  periódica em banco descartável permanece pendente.
+- Adicionados testes de comando, atomicidade, confirmação e falha do restore.
+
+### Validação
+
+- Testes de backup/restore no Docker: 4 aprovados.
+- Suíte unitária no Docker: 97 testes, 94 aprovados e 3 ignorados.
+- `python scripts/restore_db.py --help`: aprovado.
+- `pg_dump --schema-only` direto no serviço `db`: dump de 13.871 bytes gerado
+  sem alterar dados.
