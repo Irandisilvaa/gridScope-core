@@ -84,7 +84,7 @@ export const ReportDossierModal: React.FC<ReportDossierModalProps> = ({
           </div>
 
           {/* Document Metadata Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl border border-[#222222] bg-[#121212] p-3.5 font-mono text-xs print:border-gray-300 print:bg-gray-100">
+          <div className="grid grid-cols-2 gap-3 rounded-xl border border-[#222222] bg-[#121212] p-3.5 font-mono text-xs print:border-gray-300 print:bg-gray-100 sm:grid-cols-5">
             <div>
               <span className="text-[0.66rem] text-[#8A8A8A] print:text-gray-600 block uppercase">
                 Carga / Entrega
@@ -99,6 +99,14 @@ export const ReportDossierModal: React.FC<ReportDossierModalProps> = ({
               </span>
               <strong className="text-white print:text-black font-bold">
                 {dataStatus?.reference_period ?? "2025/2026"}
+              </strong>
+            </div>
+            <div>
+              <span className="text-[0.66rem] text-[#8A8A8A] print:text-gray-600 block uppercase">
+                Cidade Canônica
+              </span>
+              <strong className="text-white print:text-black font-bold break-words">
+                {dataStatus?.city_target ?? "Não informada"}
               </strong>
             </div>
             <div>
