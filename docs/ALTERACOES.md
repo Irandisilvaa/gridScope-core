@@ -1109,6 +1109,26 @@ que apontem para uma camada inexistente.
 - Testes de startup no Docker: 7 aprovados.
 - Suíte unitária no Docker: 94 testes, 91 aprovados e 3 ignorados.
 
+## 2026-09-30 — configuração e prontidão operacional
+
+### Alterações
+
+- `.env.example` passou a documentar `DATABASE_SCHEMA` e deixou de anunciar
+  variáveis de arquivos legadas que não são consumidas pelo pipeline atual.
+- O nome padrão da distribuidora foi alinhado entre exemplo, configuração e
+  Compose.
+- O healthcheck do serviço `gridscope` passou de `/health` para `/ready`, sem
+  alterar o contrato de liveness de `/health`.
+- `run_all.py` agora exige readiness da API principal antes de considerar o
+  startup concluído; as APIs auxiliares mantêm seus endpoints apropriados.
+- Adicionados testes para proteger a política de readiness e o Compose.
+
+### Validação
+
+- `docker compose config --quiet`: aprovado.
+- Testes de startup e Compose no Docker: 10 aprovados.
+- Suíte unitária no Docker: 95 testes, 92 aprovados e 3 ignorados.
+
 ### Política conhecida
 
 - O banco canônico representa uma cidade por vez. Suporte a múltiplas cidades
