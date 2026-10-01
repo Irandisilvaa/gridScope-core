@@ -11,7 +11,12 @@ except ModuleNotFoundError as error:
     from backup_db import PROJECT_ROOT, compose_database_command
 
 
-def restore_db(backup_path: Path, *, confirm: bool = False) -> bool:
+def restore_db(
+    backup_path: Path,
+    *,
+    confirm: bool = False,
+    database: str | None = None,
+) -> bool:
     """Restaura um dump SQL no banco do Compose somente com confirmação explícita."""
 
     if not confirm:
@@ -26,11 +31,23 @@ def restore_db(backup_path: Path, *, confirm: bool = False) -> bool:
         print(f"❌ Backup vazio: {backup_path}")
         return False
 
-    print(f"⚠️ Restaurando {backup_path} no banco do serviço Compose")
+    try:
+        command = compose_database_command(
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            database=database,
+        )
+    except ValueError as error:
+        print(f"❌ Destino inválido: {error}")
+        return False
+
+    destino = database or "banco configurado pelo Compose"
+    print(f"⚠️ Restaurando {backup_path} em {destino}")
     try:
         with backup_path.open("rb") as dump_file:
             subprocess.run(
-                compose_database_command("psql", "-v", "ON_ERROR_STOP=1"),
+                command,
                 cwd=PROJECT_ROOT,
                 stdin=dump_file,
                 stderr=subprocess.PIPE,
@@ -56,5 +73,17 @@ if __name__ == "__main__":
         action="store_true",
         help="confirma que o banco configurado no Compose será sobrescrito",
     )
+    parser.add_argument(
+        "--database",
+        help="banco-alvo explícito; útil para homologação descartável",
+    )
     arguments = parser.parse_args()
-    raise SystemExit(0 if restore_db(arguments.backup, confirm=arguments.confirm) else 1)
+    raise SystemExit(
+        0
+        if restore_db(
+            arguments.backup,
+            confirm=arguments.confirm,
+            database=arguments.database,
+        )
+        else 1
+    )

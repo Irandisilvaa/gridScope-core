@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -21,11 +22,19 @@ def _database_setting(name: str, default: str) -> str:
     return str(os.getenv(name) or values.get(name) or default)
 
 
-def compose_database_command(program: str, *extra_args: str) -> list[str]:
+def compose_database_command(
+    program: str,
+    *extra_args: str,
+    database: str | None = None,
+) -> list[str]:
     """Monta um comando direto para o PostgreSQL do serviço Compose."""
 
     if program not in {"pg_dump", "psql"}:
         raise ValueError(f"Programa PostgreSQL não permitido: {program}")
+
+    database_name = database or _database_setting("POSTGRES_DB", "gridscope_local")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database_name):
+        raise ValueError(f"Nome de banco inválido: {database_name}")
 
     return [
         "docker",
@@ -39,7 +48,7 @@ def compose_database_command(program: str, *extra_args: str) -> list[str]:
         "-U",
         _database_setting("POSTGRES_USER", "postgres"),
         "--dbname",
-        _database_setting("POSTGRES_DB", "gridscope_local"),
+        database_name,
     ]
 
 

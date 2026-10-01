@@ -74,6 +74,39 @@ class BackupDatabaseTests(unittest.TestCase):
             self.assertIn("ON_ERROR_STOP=1", command)
             self.assertNotIn("sh", command)
 
+    def test_restore_permite_banco_descartavel_explicito(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backup_path = Path(temporary) / "backup.sql"
+            backup_path.write_text("SELECT 1;", encoding="utf-8")
+
+            with patch.object(restore_db.subprocess, "run") as run:
+                self.assertTrue(
+                    restore_db.restore_db(
+                        backup_path,
+                        confirm=True,
+                        database="gridscope_restore_e2e",
+                    )
+                )
+
+            command = run.call_args.args[0]
+            self.assertEqual(command[-1], "gridscope_restore_e2e")
+
+    def test_restore_rejeita_nome_de_banco_invalido(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backup_path = Path(temporary) / "backup.sql"
+            backup_path.write_text("SELECT 1;", encoding="utf-8")
+
+            with patch.object(restore_db.subprocess, "run") as run:
+                self.assertFalse(
+                    restore_db.restore_db(
+                        backup_path,
+                        confirm=True,
+                        database="gridscope_restore;DROP DATABASE gridscope_local",
+                    )
+                )
+
+            run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
