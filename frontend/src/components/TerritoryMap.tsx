@@ -291,12 +291,24 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const handleRotateLeft = () => setBearing((prev) => (prev - 30) % 360);
   const handleRotateRight = () => setBearing((prev) => (prev + 30) % 360);
 
-  // Wheel zoom handler
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY < 0 ? 0.15 : -0.15;
-    setZoom((prev) => Math.max(0.75, Math.min(4.5, prev + delta)));
-  };
+  // Native non-passive wheel event listener: confines zoom strictly to the map and completely prevents page scrolling
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const handleNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const delta = e.deltaY < 0 ? 0.18 : -0.18;
+      setZoom((prev) => Math.max(0.75, Math.min(4.5, parseFloat((prev + delta).toFixed(2)))));
+    };
+
+    el.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handleNativeWheel);
+    };
+  }, []);
 
   // Mouse drag handlers for fluid panning or 3D orbiting
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -566,15 +578,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
       {/* 3D Perspective Viewport (Hardware Accelerated) */}
       <div
         ref={viewportRef}
-        className={`relative select-none overflow-hidden ${
+        className={`relative select-none overflow-hidden overscroll-contain ${
           isFullscreen ? "h-[calc(100%-92px)]" : "h-[480px] md:h-[540px]"
         } ${isDragging ? (dragType === "orbit" ? "cursor-grab" : "cursor-grabbing") : "cursor-crosshair"}`}
         style={{
           perspective: "1200px",
           perspectiveOrigin: "50% 50%",
+          overscrollBehavior: "contain",
+          touchAction: "none",
         }}
         onContextMenu={(e) => e.preventDefault()}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
