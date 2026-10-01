@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import type { Substation, Territories } from "../lib/api";
 import { StatusPill } from "./StatusPill";
 import {
@@ -18,6 +18,10 @@ import {
   ShieldCheck,
   TrendUp,
   Buildings,
+  GlobeHemisphereWest,
+  Cube,
+  HandGrabbing,
+  Repeat,
 } from "@phosphor-icons/react";
 
 type TerritoryMapProps = {
@@ -36,6 +40,7 @@ type Geometry = {
 type Project = (position: Position) => [number, number];
 type InvertProject = (point: [number, number]) => [number, number];
 type MapThemeMode = "criticality" | "gd_power" | "consumption" | "clients";
+type DragInteractionMode = "pan" | "orbit";
 
 function isPosition(value: unknown): value is Position {
   return (
@@ -112,8 +117,15 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   // Navigation State: Zoom & Pan
   const [zoom, setZoom] = useState(1.0);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+
+  // 3D Perspective & Orbit State (Default is 2D Flat / Plano: pitch=0, bearing=0)
+  const [pitch, setPitch] = useState(0); // 0° = Plano (Ortogonal), 45° = 3D Inclinado
+  const [bearing, setBearing] = useState(0); // 0° = Alinhado ao Norte
+  const [dragMode, setDragMode] = useState<DragInteractionMode>("pan");
+
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [dragType, setDragType] = useState<"pan" | "orbit">("pan");
 
   // Map Controls State
   const [themeMode, setThemeMode] = useState<MapThemeMode>("criticality");
@@ -126,9 +138,36 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   // Hover & Coordinate State
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [cursorGeo, setCursorGeo] = useState<{ lat: number; lon: number } | null>(null);
-  const [mouseCanvasPos, setMouseCanvasPos] = useState<{ x: number; y: number } | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 1080, height: 540 });
+
+  // Dynamically observe the viewport size so tactical grid and corner reticles span 100% of where the map appears
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const updateSize = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) {
+        setViewportSize((prev) => {
+          if (prev.width === w && prev.height === h) return prev;
+          return { width: Math.round(w), height: Math.round(h) };
+        });
+      }
+    };
+
+    updateSize();
+    const ro = new ResizeObserver(updateSize);
+    ro.observe(el);
+    window.addEventListener("resize", updateSize);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", updateSize);
+    };
+  }, [isFullscreen]);
 
   // Extract all coordinates to build bounding box
   const positions: Position[] = useMemo(() => {
@@ -157,25 +196,42 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   const longitudeSpan = Math.max(maxLongitude - minLongitude, 0.001);
   const latitudeSpan = Math.max(maxLatitude - minLatitude, 0.001);
 
-  // Base SVG Canvas size
-  const svgWidth = 920;
-  const svgHeight = 480;
-  const mapPadding = { top: 35, right: 40, bottom: 45, left: 40 };
-  const innerW = svgWidth - mapPadding.left - mapPadding.right;
-  const innerH = svgHeight - mapPadding.top - mapPadding.bottom;
+  // Dynamic Responsive Canvas size based on viewport element
+  const svgWidth = Math.max(viewportSize.width, 320);
+  const svgHeight = Math.max(viewportSize.height, 320);
+  const mapPadding = { top: 40, right: 60, bottom: 50, left: 60 };
+  const innerW = Math.max(svgWidth - mapPadding.left - mapPadding.right, 60);
+  const innerH = Math.max(svgHeight - mapPadding.top - mapPadding.bottom, 60);
+
+  // TRUE CONFORMAL ASPECT-RATIO PROJECTION (Eliminates horizontal stretching / "mapa deitado")
+  const avgLatitude = (minLatitude + maxLatitude) / 2;
+  const cosLat = Math.cos((avgLatitude * Math.PI) / 180);
+  const geoWidth = longitudeSpan * cosLat;
+  const geoHeight = latitudeSpan;
+
+  // Uniform scale to fit perfectly within canvas while preserving 1:1 true geometry
+  const scaleGeo = Math.min(innerW / geoWidth, innerH / geoHeight);
+  const offsetX = mapPadding.left + (innerW - geoWidth * scaleGeo) / 2;
+  const offsetY = mapPadding.top + (innerH - geoHeight * scaleGeo) / 2;
 
   // Projection formula
-  const project: Project = ([longitude, latitude]) => [
-    mapPadding.left + ((longitude - minLongitude) / longitudeSpan) * innerW,
-    mapPadding.top + ((maxLatitude - latitude) / latitudeSpan) * innerH,
-  ];
+  const project: Project = useCallback(
+    ([longitude, latitude]: Position) => [
+      offsetX + (longitude - minLongitude) * cosLat * scaleGeo,
+      offsetY + (maxLatitude - latitude) * scaleGeo,
+    ],
+    [offsetX, minLongitude, cosLat, scaleGeo, offsetY, maxLatitude]
+  );
 
   // Invert projection to get Lat/Lon from canvas point
-  const invertProject: InvertProject = ([x, y]) => {
-    const lon = minLongitude + ((x - mapPadding.left) / innerW) * longitudeSpan;
-    const lat = maxLatitude - ((y - mapPadding.top) / innerH) * latitudeSpan;
-    return [lon, lat];
-  };
+  const invertProject: InvertProject = useCallback(
+    ([x, y]: Position) => {
+      const lon = minLongitude + (x - offsetX) / (cosLat * scaleGeo);
+      const lat = maxLatitude - (y - offsetY) / scaleGeo;
+      return [lon, lat];
+    },
+    [minLongitude, offsetX, cosLat, scaleGeo, maxLatitude, offsetY]
+  );
 
   // Substation lookup map
   const subMap = useMemo(() => {
@@ -207,16 +263,33 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     });
   }, [data, project]);
 
-  // Reset View handler
-  const handleResetView = () => {
+  // View Mode Presets
+  const setFlat2DMode = () => {
+    setPitch(0);
+    setBearing(0);
     setZoom(1.0);
     setPan({ x: 0, y: 0 });
+  };
+
+  const setTactical3DMode = () => {
+    setPitch(45);
+    setBearing(-15);
+    setZoom(1.1);
+  };
+
+  // Reset View handler
+  const handleResetView = () => {
+    setFlat2DMode();
     setHoveredId(null);
   };
 
   // Zoom handlers
   const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.35, 4.5));
   const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.35, 0.75));
+
+  // Rotation handlers
+  const handleRotateLeft = () => setBearing((prev) => (prev - 30) % 360);
+  const handleRotateRight = () => setBearing((prev) => (prev + 30) % 360);
 
   // Wheel zoom handler
   const handleWheel = (e: React.WheelEvent) => {
@@ -225,32 +298,46 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     setZoom((prev) => Math.max(0.75, Math.min(4.5, prev + delta)));
   };
 
-  // Mouse drag handlers for fluid panning
+  // Mouse drag handlers for fluid panning or 3D orbiting
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0) return; // Only left click
+    const isRightClick = e.button === 2;
+    const isShiftKey = e.shiftKey;
+    const shouldOrbit = isRightClick || isShiftKey || dragMode === "orbit";
+
     setIsDragging(true);
-    setDragStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+    setDragType(shouldOrbit ? "orbit" : "pan");
+    setDragStart({ x: e.clientX, y: e.clientY });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (isDragging) {
-      setPan({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
+      const deltaX = e.clientX - dragStart.x;
+      const deltaY = e.clientY - dragStart.y;
+
+      if (dragType === "orbit") {
+        // Orbit: Horizontal moves bearing, vertical moves pitch
+        setBearing((prev) => Math.round((prev + deltaX * 0.4) % 360));
+        setPitch((prev) => Math.max(0, Math.min(65, Math.round(prev - deltaY * 0.35))));
+        setDragStart({ x: e.clientX, y: e.clientY });
+      } else {
+        // Pan
+        setPan((prev) => ({
+          x: prev.x + deltaX,
+          y: prev.y + deltaY,
+        }));
+        setDragStart({ x: e.clientX, y: e.clientY });
+      }
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
     const clientX = e.clientX - rect.left;
     const clientY = e.clientY - rect.top;
-    setMouseCanvasPos({ x: clientX, y: clientY });
 
-    // Map screen pixel to SVG coordinate space taking pan & zoom into account
-    const scaleFactor = rect.width / svgWidth;
-    const rawSvgX = clientX / scaleFactor;
-    const rawSvgY = clientY / scaleFactor;
-
-    // Apply inverse zoom & pan
+    // Approximate Lat/Lon under cursor
+    const scaleFactorX = rect.width > 0 ? rect.width / svgWidth : 1;
+    const scaleFactorY = rect.height > 0 ? rect.height / svgHeight : 1;
+    const rawSvgX = clientX / scaleFactorX;
+    const rawSvgY = clientY / scaleFactorY;
     const centerX = svgWidth / 2;
     const centerY = svgHeight / 2;
     const transformedX = (rawSvgX - centerX - pan.x) / zoom + centerX;
@@ -264,6 +351,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     setIsDragging(false);
   };
 
+  const isFlat2D = pitch === 0 && bearing === 0;
   const activeSubstation = hoveredId ? subMap.get(hoveredId) : (selectedId ? subMap.get(selectedId) : null);
 
   // Esc key to exit fullscreen
@@ -284,27 +372,58 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     >
       {/* HUD Header Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1C1C1C] bg-[#0D0D0D]/95 px-4 py-3 text-xs backdrop-blur-md">
-        {/* Left: Title & Operational Status */}
+        {/* Left: Title & Mode Toggle */}
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="h-2 w-2 rounded-full bg-[#FFD400] shadow-[0_0_8px_#FFD400]" />
           <strong className="font-display font-semibold text-white tracking-wide uppercase text-xs">
             Mapeamento Territorial Geoespacial
           </strong>
-          <span className="font-mono text-[0.68rem] text-[#8A8A8A]">
-            ({data.features.length} zonas operacionais Voronoi)
-          </span>
 
-          {/* Quick Search Input */}
-          <div className="relative ml-2">
-            <MagnifyingGlass size={13} className="pointer-events-none absolute left-2.5 top-2 text-[#777777]" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Localizar zona..."
-              className="rounded-lg border border-[#262626] bg-[#141414] py-1 pl-7 pr-2 font-mono text-[0.7rem] text-white placeholder:text-[#555555] outline-none focus:border-[#FFD400]"
-            />
+          {/* Perspective Preset Switcher: 2D Plano (Default) vs 3D Tático */}
+          <div className="flex items-center gap-1 rounded-xl border border-[#242424] bg-[#141414] p-0.5 font-mono text-[0.68rem] ml-2">
+            <button
+              type="button"
+              onClick={setFlat2DMode}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition-all ${
+                isFlat2D
+                  ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
+                  : "text-[#8A8A8A] hover:text-white"
+              }`}
+              title="Visão 2D Ortogonal Plana (Padrão Geográfico)"
+            >
+              <GlobeHemisphereWest size={13} />
+              <span>2D Plano (Padrão)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={setTactical3DMode}
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition-all ${
+                !isFlat2D
+                  ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
+                  : "text-[#8A8A8A] hover:text-white"
+              }`}
+              title="Inclinar Mapa em Perspectiva 3D Tática"
+            >
+              <Cube size={13} />
+              <span>3D Tático</span>
+            </button>
           </div>
+
+          {/* Drag Mode Selector: Pan vs Orbit */}
+          <button
+            type="button"
+            onClick={() => setDragMode(dragMode === "pan" ? "orbit" : "pan")}
+            className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 font-mono text-[0.66rem] transition-colors ${
+              dragMode === "orbit"
+                ? "border-[#FFD400]/50 bg-[#FFD400]/15 text-[#FFD400]"
+                : "border-[#242424] bg-[#141414] text-[#8A8A8A] hover:text-white"
+            }`}
+            title="Alternar função do clique principal entre Mover (Pan) ou Rotacionar/Inclinar (Órbita 3D)"
+          >
+            {dragMode === "orbit" ? <Repeat size={13} /> : <HandGrabbing size={13} />}
+            <span>Modo: {dragMode === "orbit" ? "Órbita 3D" : "Mover (Pan)"}</span>
+          </button>
         </div>
 
         {/* Center: Theme Selector Pills */}
@@ -355,8 +474,20 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </button>
         </div>
 
-        {/* Right: Quick Action Controls */}
+        {/* Right: Zoom & Perspective Navigation Tools */}
         <div className="flex items-center gap-2">
+          {/* Quick Search Input */}
+          <div className="relative">
+            <MagnifyingGlass size={13} className="pointer-events-none absolute left-2.5 top-2 text-[#777777]" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Localizar zona..."
+              className="w-28 sm:w-36 rounded-lg border border-[#262626] bg-[#141414] py-1 pl-7 pr-2 font-mono text-[0.7rem] text-white placeholder:text-[#555555] outline-none focus:border-[#FFD400]"
+            />
+          </div>
+
           {/* Toggle Labels */}
           <button
             type="button"
@@ -372,20 +503,25 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <span>Rótulos</span>
           </button>
 
-          {/* Toggle Substation Nodes */}
-          <button
-            type="button"
-            onClick={() => setShowNodes(!showNodes)}
-            className={`flex items-center gap-1 rounded-lg border px-2 py-1 font-mono text-[0.68rem] transition-colors ${
-              showNodes
-                ? "border-[#FFD400]/40 bg-[#FFD400]/10 text-[#FFD400]"
-                : "border-[#242424] bg-[#141414] text-[#8A8A8A]"
-            }`}
-            title="Alternar Nós de Subestação"
-          >
-            <MapPin size={13} />
-            <span>Nós</span>
-          </button>
+          {/* 3D Rotation Controls */}
+          <div className="flex items-center rounded-lg border border-[#242424] bg-[#141414] p-0.5">
+            <button
+              type="button"
+              onClick={handleRotateLeft}
+              className="px-1.5 py-1 text-[#8A8A8A] hover:text-white transition-colors font-mono text-[0.68rem]"
+              title="Girar 30° para a Esquerda"
+            >
+              ↺
+            </button>
+            <button
+              type="button"
+              onClick={handleRotateRight}
+              className="px-1.5 py-1 text-[#8A8A8A] hover:text-white transition-colors font-mono text-[0.68rem] border-l border-[#242424]"
+              title="Girar 30° para a Direita"
+            >
+              ↻
+            </button>
+          </div>
 
           {/* Zoom Controls */}
           <div className="flex items-center rounded-lg border border-[#242424] bg-[#141414] p-0.5">
@@ -409,7 +545,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               type="button"
               onClick={handleResetView}
               className="p-1 text-[#8A8A8A] hover:text-[#FFD400] transition-colors border-l border-[#242424]"
-              title="Redefinir Visão (100%)"
+              title="Redefinir Visão (2D Plano, Centro)"
             >
               <ArrowsCounterClockwise size={14} />
             </button>
@@ -427,11 +563,17 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         </div>
       </div>
 
-      {/* Interactive Map Canvas Container */}
+      {/* 3D Perspective Viewport (Hardware Accelerated) */}
       <div
+        ref={viewportRef}
         className={`relative select-none overflow-hidden ${
-          isFullscreen ? "h-[calc(100%-88px)]" : "h-[460px] md:h-[500px]"
-        } ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
+          isFullscreen ? "h-[calc(100%-92px)]" : "h-[480px] md:h-[540px]"
+        } ${isDragging ? (dragType === "orbit" ? "cursor-grab" : "cursor-grabbing") : "cursor-crosshair"}`}
+        style={{
+          perspective: "1200px",
+          perspectiveOrigin: "50% 50%",
+        }}
+        onContextMenu={(e) => e.preventDefault()}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -442,231 +584,262 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           setCursorGeo(null);
         }}
       >
-        <svg
-          aria-label="Mapa territorial geoespacial interativo"
-          className="h-full w-full select-none"
-          preserveAspectRatio="xMidYMid meet"
-          role="img"
-          viewBox={`0 0 ${svgWidth} ${svgHeight}`}
+        {/* Tactical HUD Corner Reticles (Framing 100% of the entire map viewport) */}
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <svg className="absolute top-3 left-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+            <path d="M 0 16 L 0 0 L 16 0" stroke="currentColor" strokeWidth="2.5" />
+          </svg>
+          <svg className="absolute top-3 right-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+            <path d="M 20 16 L 20 0 L 4 0" stroke="currentColor" strokeWidth="2.5" />
+          </svg>
+          <svg className="absolute bottom-3 left-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+            <path d="M 0 4 L 0 20 L 16 20" stroke="currentColor" strokeWidth="2.5" />
+          </svg>
+          <svg className="absolute bottom-3 right-3 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+            <path d="M 20 4 L 20 20 L 4 20" stroke="currentColor" strokeWidth="2.5" />
+          </svg>
+        </div>
+
+        {/* Transforming 3D / 2D Canvas Wrapper */}
+        <div
+          className="w-full h-full"
+          style={{
+            transform: `rotateX(${pitch}deg) rotateZ(${bearing}deg)`,
+            transformStyle: "preserve-3d",
+            transition: isDragging ? "none" : "transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)",
+          }}
         >
-          <defs>
-            {/* High-tech Blueprint Grid Pattern */}
-            <pattern id="tacticalGridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
-              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255, 255, 255, 0.025)" strokeWidth="1" />
-              <circle cx="0" cy="0" r="1.2" fill="rgba(255, 212, 0, 0.12)" />
-            </pattern>
-
-            {/* Glowing Golden Filter */}
-            <filter id="territoryGlow" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#FFD400" floodOpacity="0.6" />
-            </filter>
-
-            {/* Critical Red Glow Filter */}
-            <filter id="criticalGlow" x="-30%" y="-30%" width="160%" height="160%">
-              <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#EF4444" floodOpacity="0.5" />
-            </filter>
-          </defs>
-
-          {/* Background Grid */}
-          <rect width={svgWidth} height={svgHeight} fill="url(#tacticalGridPattern)" />
-
-          {/* Interactive Zoom/Pan Transform Group */}
-          <g
-            transform={`translate(${svgWidth / 2 + pan.x}, ${svgHeight / 2 + pan.y}) scale(${zoom}) translate(${-svgWidth / 2}, ${-svgHeight / 2})`}
-            className="transition-transform duration-75 ease-out"
+          <svg
+            aria-label="Mapa territorial geoespacial interativo"
+            className="h-full w-full select-none block"
+            preserveAspectRatio="none"
+            role="img"
+            viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           >
-            {/* Voronoi Territory Polygons */}
-            {data.features.map((feature, index) => {
-              const props = (feature.properties ?? {}) as Record<string, unknown>;
-              const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
-              const name = String(props.NOM ?? props.NOME ?? `Zona ${index + 1}`);
-              const path = geometryPath(feature.geometry as Geometry | undefined, project);
-              if (!path) return null;
+            <defs>
+              {/* Tactical Grid Pattern */}
+              <pattern id="tacticalGridPattern" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255, 255, 255, 0.025)" strokeWidth="1" />
+                <circle cx="0" cy="0" r="1.2" fill="rgba(255, 212, 0, 0.12)" />
+              </pattern>
 
-              const sub = subMap.get(codId);
-              const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
-              const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
-              const isHovered = hoveredId === codId;
-              const isSelected = selectedId === codId;
+              {/* Glowing Golden Filter */}
+              <filter id="territoryGlow" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#FFD400" floodOpacity="0.6" />
+              </filter>
+            </defs>
 
-              // Filter out if statusFilter doesn't match
-              if (statusFilter === "normal" && (isCritical || isAttention)) return null;
-              if (statusFilter === "attention" && !isAttention) return null;
-              if (statusFilter === "critical" && !isCritical) return null;
+            {/* Background Grid */}
+            <rect width={svgWidth} height={svgHeight} fill="url(#tacticalGridPattern)" />
 
-              // Search query highlight
-              const matchesSearch =
-                searchQuery.trim().length > 0 &&
-                (name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  codId.includes(searchQuery));
+            {/* Interactive Zoom/Pan Transform Group */}
+            <g
+              transform={`translate(${svgWidth / 2 + pan.x}, ${svgHeight / 2 + pan.y}) scale(${zoom}) translate(${-svgWidth / 2}, ${-svgHeight / 2})`}
+              className="transition-transform duration-75 ease-out"
+            >
+              {/* Voronoi Territory Polygons */}
+              {data.features.map((feature, index) => {
+                const props = (feature.properties ?? {}) as Record<string, unknown>;
+                const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
+                const name = String(props.NOM ?? props.NOME ?? `Zona ${index + 1}`);
+                const path = geometryPath(feature.geometry as Geometry | undefined, project);
+                if (!path) return null;
 
-              // Compute Theme Fill Color
-              let fill = "#101010";
-              let stroke = "#242424";
-              let strokeWidth = 1.0 / zoom;
+                const sub = subMap.get(codId);
+                const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
+                const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
+                const isHovered = hoveredId === codId;
+                const isSelected = selectedId === codId;
 
-              if (themeMode === "criticality") {
-                if (isCritical) {
-                  fill = "rgba(239, 68, 68, 0.20)";
-                  stroke = "#EF4444";
-                } else if (isAttention) {
-                  fill = "rgba(245, 158, 11, 0.16)";
-                  stroke = "#F59E0B";
-                } else {
-                  fill = "rgba(255, 255, 255, 0.03)";
-                  stroke = "rgba(255, 255, 255, 0.12)";
+                // Filter out if statusFilter doesn't match
+                if (statusFilter === "normal" && (isCritical || isAttention)) return null;
+                if (statusFilter === "attention" && !isAttention) return null;
+                if (statusFilter === "critical" && !isCritical) return null;
+
+                // Search query highlight
+                const matchesSearch =
+                  searchQuery.trim().length > 0 &&
+                  (name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    codId.includes(searchQuery));
+
+                // Compute Theme Fill Color
+                let fill = "#101010";
+                let stroke = "#242424";
+                let strokeWidth = 1.0 / zoom;
+
+                if (themeMode === "criticality") {
+                  if (isCritical) {
+                    fill = "rgba(239, 68, 68, 0.22)";
+                    stroke = "#EF4444";
+                  } else if (isAttention) {
+                    fill = "rgba(245, 158, 11, 0.18)";
+                    stroke = "#F59E0B";
+                  } else {
+                    fill = "rgba(255, 255, 255, 0.04)";
+                    stroke = "rgba(255, 255, 255, 0.14)";
+                  }
+                } else if (themeMode === "gd_power") {
+                  const gdVal = sub?.geracao_distribuida.potencia_total_kw ?? 0;
+                  const ratio = Math.min(1.0, gdVal / maxGdPower);
+                  const alpha = (0.06 + ratio * 0.45).toFixed(2);
+                  fill = `rgba(255, 212, 0, ${alpha})`;
+                  stroke = ratio > 0.4 ? "#FFD400" : "rgba(255, 212, 0, 0.35)";
+                } else if (themeMode === "consumption") {
+                  const consVal = sub?.metricas_rede.consumo_anual_mwh ?? 0;
+                  const ratio = Math.min(1.0, consVal / maxConsumption);
+                  const alpha = (0.06 + ratio * 0.40).toFixed(2);
+                  fill = `rgba(59, 130, 246, ${alpha})`;
+                  stroke = ratio > 0.4 ? "#3B82F6" : "rgba(59, 130, 246, 0.35)";
+                } else if (themeMode === "clients") {
+                  const cliVal = sub?.metricas_rede.total_clientes ?? 0;
+                  const ratio = Math.min(1.0, cliVal / maxClients);
+                  const alpha = (0.06 + ratio * 0.40).toFixed(2);
+                  fill = `rgba(34, 197, 94, ${alpha})`;
+                  stroke = ratio > 0.4 ? "#22C55E" : "rgba(34, 197, 94, 0.35)";
                 }
-              } else if (themeMode === "gd_power") {
-                const gdVal = sub?.geracao_distribuida.potencia_total_kw ?? 0;
-                const ratio = Math.min(1.0, gdVal / maxGdPower);
-                const alpha = (0.05 + ratio * 0.45).toFixed(2);
-                fill = `rgba(255, 212, 0, ${alpha})`;
-                stroke = ratio > 0.4 ? "#FFD400" : "rgba(255, 212, 0, 0.3)";
-              } else if (themeMode === "consumption") {
-                const consVal = sub?.metricas_rede.consumo_anual_mwh ?? 0;
-                const ratio = Math.min(1.0, consVal / maxConsumption);
-                const alpha = (0.05 + ratio * 0.40).toFixed(2);
-                fill = `rgba(59, 130, 246, ${alpha})`;
-                stroke = ratio > 0.4 ? "#3B82F6" : "rgba(59, 130, 246, 0.3)";
-              } else if (themeMode === "clients") {
-                const cliVal = sub?.metricas_rede.total_clientes ?? 0;
-                const ratio = Math.min(1.0, cliVal / maxClients);
-                const alpha = (0.05 + ratio * 0.40).toFixed(2);
-                fill = `rgba(34, 197, 94, ${alpha})`;
-                stroke = ratio > 0.4 ? "#22C55E" : "rgba(34, 197, 94, 0.3)";
-              }
 
-              // Highlight on hover, selected, or search match
-              if (isHovered) {
-                fill = "rgba(255, 212, 0, 0.38)";
-                stroke = "#FFD400";
-                strokeWidth = 2.2 / zoom;
-              } else if (isSelected) {
-                fill = "rgba(255, 212, 0, 0.28)";
-                stroke = "#FFD400";
-                strokeWidth = 2.6 / zoom;
-              } else if (matchesSearch) {
-                fill = "rgba(255, 212, 0, 0.40)";
-                stroke = "#FFD400";
-                strokeWidth = 2.0 / zoom;
-              }
+                // Highlight on hover, selected, or search match
+                if (isHovered) {
+                  fill = "rgba(255, 212, 0, 0.40)";
+                  stroke = "#FFD400";
+                  strokeWidth = 2.4 / zoom;
+                } else if (isSelected) {
+                  fill = "rgba(255, 212, 0, 0.30)";
+                  stroke = "#FFD400";
+                  strokeWidth = 2.8 / zoom;
+                } else if (matchesSearch) {
+                  fill = "rgba(255, 212, 0, 0.42)";
+                  stroke = "#FFD400";
+                  strokeWidth = 2.2 / zoom;
+                }
 
-              return (
-                <g key={codId || `${name}-${index}`}>
-                  <path
-                    d={path}
-                    fill={fill}
-                    stroke={stroke}
-                    strokeWidth={strokeWidth}
-                    strokeLinejoin="round"
-                    className="transition-colors duration-150 cursor-pointer"
-                    onMouseEnter={() => setHoveredId(codId)}
-                    onClick={() => {
-                      if (onSelectSubstation && codId) onSelectSubstation(codId);
-                    }}
-                    filter={isHovered || isSelected ? "url(#territoryGlow)" : undefined}
+                return (
+                  <g key={codId || `${name}-${index}`}>
+                    <path
+                      d={path}
+                      fill={fill}
+                      stroke={stroke}
+                      strokeWidth={strokeWidth}
+                      strokeLinejoin="round"
+                      className="transition-colors duration-150 cursor-pointer"
+                      onMouseEnter={() => setHoveredId(codId)}
+                      onClick={() => {
+                        if (onSelectSubstation && codId) onSelectSubstation(codId);
+                      }}
+                      filter={isHovered || isSelected ? "url(#territoryGlow)" : undefined}
+                    >
+                      <title>{`${name} (ID: ${codId})`}</title>
+                    </path>
+                  </g>
+                );
+              })}
+
+              {/* Substation Centroid Pins & Labels Overlay */}
+              {data.features.map((feature, index) => {
+                const props = (feature.properties ?? {}) as Record<string, unknown>;
+                const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
+                const name = String(props.NOM ?? props.NOME ?? `Zona ${index + 1}`).replace("SUBESTACAO", "SE");
+                const centroid = featureCentroids[index]?.centroid;
+                if (!centroid) return null;
+
+                const sub = subMap.get(codId);
+                const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
+                const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
+                const isHovered = hoveredId === codId;
+                const isSelected = selectedId === codId;
+
+                const pinColor = isHovered || isSelected ? "#FFD400" : isCritical ? "#EF4444" : isAttention ? "#F59E0B" : "#FFFFFF";
+
+                return (
+                  <g
+                    key={`pin-${codId}-${index}`}
+                    transform={`translate(${centroid[0]}, ${centroid[1]})`}
+                    className="pointer-events-none"
                   >
-                    <title>{`${name} (ID: ${codId})`}</title>
-                  </path>
-                </g>
-              );
-            })}
-
-            {/* Substation Centroid Pins & Labels Overlay */}
-            {data.features.map((feature, index) => {
-              const props = (feature.properties ?? {}) as Record<string, unknown>;
-              const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
-              const name = String(props.NOM ?? props.NOME ?? `Zona ${index + 1}`).replace("SUBESTACAO", "SE");
-              const centroid = featureCentroids[index]?.centroid;
-              if (!centroid) return null;
-
-              const sub = subMap.get(codId);
-              const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
-              const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
-              const isHovered = hoveredId === codId;
-              const isSelected = selectedId === codId;
-
-              const pinColor = isHovered || isSelected ? "#FFD400" : isCritical ? "#EF4444" : isAttention ? "#F59E0B" : "#FFFFFF";
-
-              return (
-                <g
-                  key={`pin-${codId}-${index}`}
-                  transform={`translate(${centroid[0]}, ${centroid[1]})`}
-                  className="pointer-events-none"
-                >
-                  {/* Substation Centroid Node */}
-                  {showNodes && (
-                    <g>
-                      {/* Pulse Ring when Active */}
-                      {(isHovered || isSelected || isCritical) && (
+                    {/* Substation Centroid Node */}
+                    {showNodes && (
+                      <g>
+                        {/* Pulse Ring when Active */}
+                        {(isHovered || isSelected || isCritical) && (
+                          <circle
+                            r={9 / Math.sqrt(zoom)}
+                            fill="none"
+                            stroke={pinColor}
+                            strokeWidth={1.5 / zoom}
+                            opacity={0.75}
+                          />
+                        )}
+                        {/* Core Dot */}
                         <circle
-                          r={9 / Math.sqrt(zoom)}
-                          fill="none"
-                          stroke={pinColor}
-                          strokeWidth={1.5 / zoom}
-                          opacity={0.7}
+                          r={3.8 / Math.sqrt(zoom)}
+                          fill={pinColor}
+                          stroke="#000000"
+                          strokeWidth={1 / zoom}
                         />
-                      )}
-                      {/* Core Dot */}
-                      <circle
-                        r={3.8 / Math.sqrt(zoom)}
-                        fill={pinColor}
-                        stroke="#000000"
-                        strokeWidth={1 / zoom}
-                      />
-                    </g>
-                  )}
+                      </g>
+                    )}
 
-                  {/* Clean Map Label */}
-                  {showLabels && (
-                    <g transform={`translate(0, ${showNodes ? 12 / zoom : 0})`}>
-                      <text
-                        textAnchor="middle"
-                        className="select-none font-mono font-bold tracking-tight"
-                        style={{
-                          fontSize: `${Math.max(7, Math.min(11, 8.5 / Math.sqrt(zoom)))}px`,
-                          fill: isHovered || isSelected ? "#FFD400" : "#D4D4D4",
-                          textShadow: "0 1px 3px rgba(0,0,0,0.9)",
-                        }}
-                      >
-                        {name}
-                      </text>
-                    </g>
-                  )}
-                </g>
-              );
-            })}
-          </g>
+                    {/* Clean Map Label */}
+                    {showLabels && (
+                      <g transform={`translate(0, ${showNodes ? 12 / zoom : 0})`}>
+                        <text
+                          textAnchor="middle"
+                          className="select-none font-mono font-bold tracking-tight"
+                          style={{
+                            fontSize: `${Math.max(7.5, Math.min(11, 8.5 / Math.sqrt(zoom)))}px`,
+                            fill: isHovered || isSelected ? "#FFD400" : "#E2E2E2",
+                            textShadow: "0 1px 3px rgba(0,0,0,0.95)",
+                          }}
+                        >
+                          {name}
+                        </text>
+                      </g>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
 
-          {/* Fixed Tactical Overlays (Never affected by zoom/pan) */}
+            {/* Tactical Corner Reticles on Plane */}
+            <path d="M 14 36 L 14 14 L 36 14" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
+            <path d={`M ${svgWidth - 14} 36 L ${svgWidth - 14} 14 L ${svgWidth - 36} 14`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
+            <path d={`M 14 ${svgHeight - 36} L 14 ${svgHeight - 14} L 36 ${svgHeight - 14}`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
+            <path d={`M ${svgWidth - 14} ${svgHeight - 36} L ${svgWidth - 14} ${svgHeight - 14} L ${svgWidth - 36} ${svgHeight - 14}`} stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.8" />
 
-          {/* Tactical Corner Reticles */}
-          <path d="M 16 32 L 16 16 L 32 16" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.75" />
-          <path d="M 904 32 L 904 16 L 888 16" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.75" />
-          <path d="M 16 448 L 16 464 L 32 464" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.75" />
-          <path d="M 904 448 L 904 464 L 888 464" stroke="#FFD400" strokeWidth="2" fill="none" opacity="0.75" />
+            {/* Compass Rose / North Indicator - Rotates with Bearing & Clickable */}
+            <g
+              transform={`translate(${svgWidth - 50}, 50)`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setFlat2DMode();
+              }}
+              className="cursor-pointer opacity-90 transition-transform duration-300"
+              style={{
+                transform: `translate(${svgWidth - 50}px, 50px) rotate(${-bearing}deg)`,
+                transformOrigin: `${svgWidth - 50}px 50px`,
+              }}
+            >
+              <title>Clique para alinhar ao Norte e retornar ao modo 2D Plano</title>
+              <circle r="18" fill="#0C0C0C" stroke="#2B2B2B" strokeWidth="1" />
+              <polygon points="0,-13 4,0 0,4 -4,0" fill="#FFD400" />
+              <polygon points="0,13 4,0 0,-4 -4,0" fill="#444444" />
+              <text x="0" y="-15" textAnchor="middle" className="font-mono text-[8px] font-bold fill-[#FFD400]">
+                N
+              </text>
+            </g>
 
-          {/* Compass Rose / North Indicator */}
-          <g transform="translate(865, 55)" className="pointer-events-none opacity-80">
-            <circle r="18" fill="#0C0C0C" stroke="#2B2B2B" strokeWidth="1" />
-            <polygon points="0,-13 4,0 0,4 -4,0" fill="#FFD400" />
-            <polygon points="0,13 4,0 0,-4 -4,0" fill="#444444" />
-            <text x="0" y="-15" textAnchor="middle" className="font-mono text-[8px] font-bold fill-[#FFD400]">
-              N
-            </text>
-          </g>
-
-          {/* Graphic Scale Bar */}
-          <g transform="translate(45, 445)" className="pointer-events-none opacity-75 font-mono text-[8px] fill-[#8A8A8A]">
-            <line x1="0" y1="0" x2="80" y2="0" stroke="#8A8A8A" strokeWidth="1.5" />
-            <line x1="0" y1="-3" x2="0" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
-            <line x1="40" y1="-2" x2="40" y2="2" stroke="#8A8A8A" strokeWidth="1" />
-            <line x1="80" y1="-3" x2="80" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
-            <text x="0" y="-5" textAnchor="middle">0</text>
-            <text x="40" y="-5" textAnchor="middle">2.5km</text>
-            <text x="80" y="-5" textAnchor="middle">5km</text>
-          </g>
-        </svg>
+            {/* Graphic Scale Bar */}
+            <g transform={`translate(40, ${svgHeight - 32})`} className="pointer-events-none opacity-75 font-mono text-[8px] fill-[#8A8A8A]">
+              <line x1="0" y1="0" x2="80" y2="0" stroke="#8A8A8A" strokeWidth="1.5" />
+              <line x1="0" y1="-3" x2="0" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
+              <line x1="40" y1="-2" x2="40" y2="2" stroke="#8A8A8A" strokeWidth="1.5" />
+              <line x1="80" y1="-3" x2="80" y2="3" stroke="#8A8A8A" strokeWidth="1.5" />
+              <text x="0" y="-5" textAnchor="middle">0</text>
+              <text x="40" y="-5" textAnchor="middle">2.5km</text>
+              <text x="80" y="-5" textAnchor="middle">5km</text>
+            </g>
+          </svg>
+        </div>
 
         {/* Floating Active Substation HUD Card */}
         {activeSubstation && (
@@ -747,7 +920,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </span>
           <span className="text-[#333333]">|</span>
           <span className="text-[#777777]">
-            Zoom: {(zoom * 100).toFixed(0)}% · Arraste para navegar
+            {isFlat2D ? "2D Plano (Ortogonal)" : `3D Tático (${pitch}° inclinação · ${bearing}° azimute)`} · Zoom: {(zoom * 100).toFixed(0)}%
           </span>
         </div>
 
