@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import pandas as pd
+from pathlib import Path
 from shapely import make_valid
 from shapely.ops import voronoi_diagram
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
@@ -23,8 +24,17 @@ try:
         salvar_voronoi,
         salvar_voronoi_municipal,
     )
-    from limites_municipais import carregar_limites_municipais
+    from limites_municipais import (
+        carregar_limites_municipais,
+        carregar_limites_para_territorio,
+    )
     from municipalities import normalizar_codigo_municipio
+    from geospatial import crs_projetado_bdgd
+    from qualidade_geografica import (
+        GeospatialCoverageError,
+        analisar_cobertura_geografica,
+        persistir_diagnostico_geografico,
+    )
 except ImportError:
     CIDADE_ALVO = "Aracaju, Brazil"
     DIR_RAIZ = os.getcwd()
@@ -36,7 +46,15 @@ except ImportError:
     def carregar_subestacoes(*args, **kwargs): raise RuntimeError("Camada de banco indisponível")
     def carregar_transformadores(*args, **kwargs): raise RuntimeError("Camada de banco indisponível")
     def carregar_limites_municipais(*args, **kwargs): raise RuntimeError("Camada de limites indisponível")
+    def carregar_limites_para_territorio(*args, **kwargs):
+        raise RuntimeError("Camada de limites indisponível")
     def normalizar_codigo_municipio(value): return str(value).strip() if value else None
+    from src.geospatial import crs_projetado_bdgd
+    from src.qualidade_geografica import (
+        GeospatialCoverageError,
+        analisar_cobertura_geografica,
+        persistir_diagnostico_geografico,
+    )
 
 NOME_IMAGEM_SAIDA = "territorios_voronoi.png"
 NOME_JSON_SAIDA = "subestacoes_logicas.geojson"
@@ -59,7 +77,7 @@ def obter_limite_municipal(cidade_alvo):
     logger.info(f"Obtendo limites oficiais de {cidade_alvo}...")
     try:
         gdf_cidade = ox.geocode_to_gdf(cidade_alvo)
-        gdf_cidade = gdf_cidade.to_crs(epsg=31984)
+        gdf_cidade = gdf_cidade.to_crs(crs_projetado_bdgd(gdf_cidade))
         gdf_cidade['geometry'] = gdf_cidade.geometry.make_valid()
         return gdf_cidade
     except Exception as e:
@@ -156,9 +174,32 @@ def _limite_estudo(transformadores: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     }
     if not codigos:
         raise RuntimeError("Nenhum município válido nos transformadores")
-    limites = carregar_limites_municipais(sorted(codigos)).to_crs(epsg=31984)
+    limites = carregar_limites_municipais(sorted(codigos))
     if limites.empty:
         raise RuntimeError("Limites municipais vazios")
+    return limites
+
+
+def _limite_validacao(transformadores: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    """Malha usada só para julgar se uma coordenada está na área de operação.
+
+    O recorte publicado continua vindo de ``_limite_estudo`` (municípios
+    declarados). Aqui a malha cobre toda a UF para que erro de atribuição de
+    ``MUN`` não seja interpretado como coordenada fora do estado.
+    """
+
+    if "MUN" not in transformadores.columns:
+        raise RuntimeError("Transformadores sem MUN para validar a cobertura")
+    codigos = [
+        codigo
+        for codigo in transformadores["MUN"].map(normalizar_codigo_municipio)
+        if codigo
+    ]
+    if not codigos:
+        raise RuntimeError("Nenhum município válido nos transformadores")
+    limites = carregar_limites_para_territorio(sorted(set(codigos)))
+    if limites.empty:
+        raise RuntimeError("Limites de validação vazios")
     return limites
 
 
@@ -167,43 +208,55 @@ def _validar_pontos_no_limite(
     limites: gpd.GeoDataFrame,
     tolerancia_metros: float = MARGEM_PONTOS_FORA_LIMITE_METROS,
 ) -> dict:
-    limite = limites.geometry.union_all()
-    distancias = sites.geometry.distance(limite)
-    fora = ~sites.geometry.map(limite.covers)
-    acima_tolerancia = fora & (distancias > tolerancia_metros)
-    if bool(acima_tolerancia.any()):
-        exemplos = sites.loc[acima_tolerancia, ["COD_ID", "geometry"]].head(5)
-        detalhes = "; ".join(
-            f"{row.COD_ID}@{row.geometry.x:.3f},{row.geometry.y:.3f}"
-            for row in exemplos.itertuples()
-        )
-        raise RuntimeError(
-            f"{int(acima_tolerancia.sum())} transformadores estão além da tolerância "
-            f"de {tolerancia_metros:.0f} m dos limites municipais: {detalhes}"
-        )
+    # ``sites.COD_ID`` é a SUB; a auditoria deve expor ambos os identificadores.
+    transformadores = sites.rename(columns={"COD_ID": "SUB", "municipio_codigo": "MUN"}).copy()
+    transformadores["COD_ID"] = transformadores["transformador_id"]
+    report, ocorrencias = analisar_cobertura_geografica(
+        transformadores, limites, tolerancia_metros=tolerancia_metros
+    )
     excecoes = []
-    if bool(fora.any()):
+    if report["outside_within_tolerance_count"]:
         logger.warning(
             "%s transformadores estão fora do limite oficial, mas dentro da tolerância de %s m",
-            int(fora.sum()),
+            report["outside_within_tolerance_count"],
             tolerancia_metros,
         )
-        for row in sites.loc[fora].itertuples():
+        for row in ocorrencias.loc[ocorrencias["classification"] == "outside_within_tolerance"].itertuples():
             excecoes.append(
                 {
                     "transformador_id": str(row.transformador_id),
-                    "subestacao_id": str(row.COD_ID),
+                    "subestacao_id": str(row.subestacao_id),
                     "municipio_codigo": normalizar_codigo_municipio(row.municipio_codigo),
-                    "distance_m": round(float(row.geometry.distance(limite)), 3),
+                    "distance_m": round(float(row.distance_to_study_boundary_m), 3),
                     "action": "retained_as_seed_clipped_to_official_boundary",
                 }
             )
-    return {
+    compatible_report = {
         "policy": "official_clip_external_seeds",
         "outside_tolerance_m": tolerancia_metros,
         "outside_official_boundary_count": len(excecoes),
         "outside_official_boundary": excecoes,
     }
+    compatible_report.update(report)
+    manifest_path = os.getenv("GRIDSCOPE_GEOSPATIAL_MESH_MANIFEST")
+    if manifest_path:
+        expected = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        if expected != report["boundary_provenance"]:
+            compatible_report["status"] = "blocked"
+            compatible_report["mesh_manifest_mismatch"] = True
+            report["outside_above_tolerance_count"] = 0
+    if compatible_report.get("status") == "blocked":
+        diagnostic_dir = os.getenv("GRIDSCOPE_GEOSPATIAL_DIAGNOSTIC_DIR")
+        if diagnostic_dir:
+            try:
+                location = persistir_diagnostico_geografico(
+                    Path(diagnostic_dir), compatible_report, ocorrencias
+                )
+                logger.error("Diagnóstico final do Voronoi salvo em %s", location)
+            except Exception:
+                logger.exception("Falha ao persistir diagnóstico final do Voronoi")
+        raise GeospatialCoverageError(compatible_report, ocorrencias)
+    return compatible_report
 
 
 def _adicionar_ponto_rotulo(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
@@ -229,6 +282,7 @@ def gerar_territorios_por_transformadores(
     transformadores: gpd.GeoDataFrame,
     subestacoes: gpd.GeoDataFrame,
     limites: gpd.GeoDataFrame,
+    limites_validacao: gpd.GeoDataFrame | None = None,
 ) -> gpd.GeoDataFrame:
     """Gera uma área por subestação a partir de todos os transformadores."""
 
@@ -252,8 +306,9 @@ def gerar_territorios_por_transformadores(
     trafos = trafos.dropna(subset=["COD_ID"])
     if trafos.empty:
         raise RuntimeError("Nenhum transformador elegível para gerar Voronoi")
-    trafos = trafos.to_crs(epsg=31984).reset_index(drop=True)
-    limites = limites.to_crs(epsg=31984)
+    crs_projetado = crs_projetado_bdgd(limites)
+    trafos = trafos.to_crs(crs_projetado).reset_index(drop=True)
+    limites = limites.to_crs(crs_projetado)
 
     sites = trafos[["COD_ID", "transformador_id", "municipio_codigo", "geometry"]].copy()
     sites["_coordenada"] = sites.geometry.map(lambda geometry: geometry.wkb)
@@ -261,7 +316,11 @@ def gerar_territorios_por_transformadores(
     if bool((conflitos > 1).any()):
         raise RuntimeError("Transformadores de SUBs diferentes compartilham coordenadas")
     sites = sites.drop_duplicates("_coordenada").drop(columns="_coordenada")
-    relatorio_geografico = _validar_pontos_no_limite(sites, limites)
+    # A cobertura é julgada contra a malha de validação; o recorte publicado
+    # continua sendo a união de ``limites``.
+    relatorio_geografico = _validar_pontos_no_limite(
+        sites, limites_validacao if limites_validacao is not None else limites
+    )
 
     nomes = {}
     localizacoes = {}
@@ -368,8 +427,9 @@ def gerar_recortes_municipais(
 ) -> gpd.GeoDataFrame:
     """Recorta os territórios globais pelos limites oficiais dos municípios."""
 
-    territorios_proj = territorios.to_crs(epsg=31984)
-    limites_proj = limites.to_crs(epsg=31984)
+    crs_projetado = crs_projetado_bdgd(limites)
+    territorios_proj = territorios.to_crs(crs_projetado)
+    limites_proj = limites.to_crs(crs_projetado)
     colunas_territorio = [
         coluna
         for coluna in (
@@ -425,11 +485,13 @@ def processar_voronoi_toda_base():
     logger.info("Carregando transformadores para o Voronoi de toda a base...")
     transformadores = carregar_transformadores()
     limites = _limite_estudo(transformadores)
+    limites_validacao = _limite_validacao(transformadores)
     subestacoes = carregar_subestacoes()
     territorios = gerar_territorios_por_transformadores(
         transformadores,
         subestacoes,
         limites,
+        limites_validacao,
     )
     recortes = gerar_recortes_municipais(territorios, limites)
     return (

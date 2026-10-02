@@ -153,6 +153,47 @@ class ProcessarVoronoiTests(unittest.TestCase):
                 self._limite(),
             )
 
+    def test_gera_territorios_fora_da_zona_utm_de_sergipe(self):
+        limites = gpd.GeoDataFrame(
+            {"municipio_codigo": ["3304557"]},
+            geometry=[
+                Polygon(
+                    [
+                        (-43.35, -23.05),
+                        (-43.05, -23.05),
+                        (-43.05, -22.80),
+                        (-43.35, -22.80),
+                    ]
+                )
+            ],
+            crs="EPSG:4326",
+        )
+        transformadores = gpd.GeoDataFrame(
+            {
+                "COD_ID": ["RJ-A", "RJ-B"],
+                "SUB": ["SUB-RJ-A", "SUB-RJ-B"],
+                "MUN": ["3304557", "3304557"],
+            },
+            geometry=[Point(-43.28, -22.92), Point(-43.12, -22.92)],
+            crs="EPSG:4326",
+        )
+        subestacoes = gpd.GeoDataFrame(
+            {
+                "COD_ID": ["SUB-RJ-A", "SUB-RJ-B"],
+                "NOME": ["Rio A", "Rio B"],
+            },
+            geometry=[Point(-43.28, -22.92), Point(-43.12, -22.92)],
+            crs="EPSG:4326",
+        )
+
+        territorios = gerar_territorios_por_transformadores(
+            transformadores, subestacoes, limites
+        )
+
+        self.assertEqual(territorios.crs.to_epsg(), 4326)
+        self.assertEqual(set(territorios["COD_ID"]), {"SUB-RJ-A", "SUB-RJ-B"})
+        self.assertTrue(territorios.geometry.is_valid.all())
+
 
 if __name__ == "__main__":
     unittest.main()

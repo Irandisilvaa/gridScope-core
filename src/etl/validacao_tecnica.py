@@ -10,6 +10,7 @@ import logging
 # Configuração
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import CIDADE_ALVO, DATABASE_URL, DIR_RAIZ
+from geospatial import crs_projetado_bdgd
 
 # Arquivo gerado pelo script anterior
 ARQUIVO_GEOJSON = os.path.join(DIR_RAIZ, "subestacoes_logicas.geojson")
@@ -30,9 +31,8 @@ def calcular_validacao():
 
     gdf_territorios = gpd.read_file(ARQUIVO_GEOJSON)
     
-    # --- CORREÇÃO CRÍTICA: FORÇAR PROJEÇÃO UTM ---
-    # Convertendo para SIRGAS 2000 / UTM 24S (Metros)
-    gdf_territorios = gdf_territorios.to_crs(epsg=31984)
+    crs_projetado = crs_projetado_bdgd(gdf_territorios)
+    gdf_territorios = gdf_territorios.to_crs(crs_projetado)
     
     logger.info(f"Territórios carregados: {len(gdf_territorios)}")
 
@@ -46,7 +46,7 @@ def calcular_validacao():
     gdf_pontos = gpd.read_postgis(sql, engine, geom_col='geometry')
     
     # --- CORREÇÃO CRÍTICA: MESMA PROJEÇÃO ---
-    gdf_pontos = gdf_pontos.to_crs(epsg=31984)
+    gdf_pontos = gdf_pontos.to_crs(crs_projetado)
 
     # Filtrar apenas pontos das subestações que existem no GeoJSON
     # (Ignora subestações pequenas que removemos no filtro de ruído)

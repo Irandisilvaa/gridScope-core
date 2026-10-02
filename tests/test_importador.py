@@ -22,6 +22,42 @@ class SnapshotImporterTests(unittest.TestCase):
             delivery_id="delivery-a",
         )
 
+    def test_escrita_tabular_nao_expande_insert_multi(self) -> None:
+        dataframe = MagicMock(spec=pd.DataFrame)
+        engine = MagicMock()
+
+        SnapshotImporter._write_layer(dataframe, "consumidores", "staging_teste", engine)
+
+        self.assertIsNone(dataframe.to_sql.call_args.kwargs["method"])
+        self.assertEqual(dataframe.to_sql.call_args.kwargs["chunksize"], 5000)
+
+    def test_preflight_resolve_alias_ucbt(self) -> None:
+        importer = self._make_importer()
+        layers = [["UNTRMT", "Point"], ["UCBT", None], ["UGBT_tab", None], ["SUB", "Point"], ["SSDMT", "LineString"]]
+
+        with patch("src.etl.importador.pyogrio.list_layers", return_value=layers):
+            resolved = importer._resolve_layers()
+
+        self.assertEqual(resolved["UCBT_tab"], "UCBT")
+
+    def test_preflight_rejeita_alias_ambiguo(self) -> None:
+        importer = self._make_importer()
+        layers = [["UNTRMT", "Point"], ["UCBT", None], ["UCBT_tab", None], ["UGBT_tab", None], ["SUB", "Point"], ["SSDMT", "LineString"]]
+
+        with patch("src.etl.importador.pyogrio.list_layers", return_value=layers), self.assertRaisesRegex(
+            SnapshotImportError, "ambígua"
+        ):
+            importer._resolve_layers()
+
+    def test_preflight_rejeita_camada_obrigatoria_ausente(self) -> None:
+        importer = self._make_importer()
+        layers = [["UNTRMT", "Point"], ["UCBT", None], ["UGBT_tab", None], ["SUB", "Point"]]
+
+        with patch("src.etl.importador.pyogrio.list_layers", return_value=layers), self.assertRaisesRegex(
+            SnapshotImportError, "SSDMT"
+        ):
+            importer._resolve_layers()
+
     def test_publica_derivados_somente_depois_da_preparacao(self) -> None:
         importer = self._make_importer()
         engine = MagicMock()
@@ -303,6 +339,47 @@ class SnapshotImporterTests(unittest.TestCase):
                 "UCBT_tab",
                 consumidores.drop(columns=["CLAS_SUB"]),
             )
+
+
+
+class QuarentenaGeograficaNoImportadorTests(unittest.TestCase):
+    """A exclusão auditada deve seguir o mesmo caminho das demais descartes."""
+
+    def test_normaliza_os_ids_devolvidos_pelo_preflight(self) -> None:
+        ids = SnapshotImporter._quarantined_transformer_ids(
+            ["  T2 ", "T1", "", "  ", "T1"]
+        )
+        self.assertEqual(ids, {"T1", "T2"})
+
+    def test_recusa_id_nao_textual_para_nao_excluir_em_silencio(self) -> None:
+        # str(None) viraria "None", que não casa com transformador nenhum e
+        # deixaria a exclusão sem efeito nenhum, sem erro visível.
+        with self.assertRaisesRegex(SnapshotImportError, "não é texto"):
+            SnapshotImporter._quarantined_transformer_ids([None])
+
+    def test_preflight_sem_quarentena_nao_exclui_nada(self) -> None:
+        self.assertEqual(SnapshotImporter._quarantined_transformer_ids(None), set())
+        self.assertEqual(SnapshotImporter._quarantined_transformer_ids(frozenset()), set())
+
+    def test_remove_a_semente_da_camada_de_origem(self) -> None:
+        dataframe = pd.DataFrame({"COD_ID": ["T1", "T2", "T3"]})
+        quarentenados = {"T2"}
+        ids = dataframe["COD_ID"].astype("string").str.strip()
+        remaining = dataframe.loc[~ids.isin(quarentenados)].copy()
+
+        self.assertEqual(list(remaining["COD_ID"]), ["T1", "T3"])
+
+    def test_cascateia_para_as_camadas_dependentes(self) -> None:
+        dependentes = pd.DataFrame(
+            {"UNI_TR_MT": ["T1", "T2", "T9"], "CLAS_SUB": [1, 2, 3]}
+        )
+        restantes, reports = SnapshotImporter._discard_transformer_dependents(
+            dependentes, {"T2"}, "UCBT_tab"
+        )
+
+        self.assertEqual(list(restantes["UNI_TR_MT"]), ["T1", "T9"])
+        self.assertEqual(reports[0]["reason"], "discarded_transformer")
+        self.assertEqual(reports[0]["transformer_ids"], ["T2"])
 
 
 if __name__ == "__main__":

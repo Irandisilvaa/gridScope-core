@@ -41,7 +41,6 @@ DATA_MAX_DOWNLOAD_BYTES = int(os.getenv("DATA_MAX_DOWNLOAD_BYTES", str(2 * 1024 
 DATA_MAX_ARCHIVE_ENTRIES = int(os.getenv("DATA_MAX_ARCHIVE_ENTRIES", "100000"))
 DATA_INGEST_ON_STARTUP = os.getenv("DATA_INGEST_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
 TRAIN_MODEL_ON_STARTUP = os.getenv("TRAIN_MODEL_ON_STARTUP", "false").lower() in {"1", "true", "yes"}
-ALLOW_FILE_CACHE = os.getenv("ALLOW_FILE_CACHE", "true").lower() in {"1", "true", "yes"}
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
@@ -90,8 +89,6 @@ def atualizar_cidade_alvo(nova_cidade):
                     f.write(f"CIDADE_ALVO={nova_cidade}\n")
         except Exception:
             pass
-CRS_PROJETADO = "EPSG:31984"
-
 ANEEL_API_HUB_URL = os.getenv("ANEEL_API_HUB_URL", "https://hub.arcgis.com/api/search/v1/collections/all/items")
 DISTRIBUIDORA_ALVO = os.getenv("DISTRIBUIDORA_ALVO", "Energisa SE")
 

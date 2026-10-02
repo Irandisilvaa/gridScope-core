@@ -1,6 +1,130 @@
 # GridScope Core
 
 **GridScope Core** é uma plataforma avançada de monitoramento de redes elétricas e simulação de geração distribuída.
+
+### Aquisição pelo catálogo ANEEL
+
+O monitor consulta qualquer distribuidora sem alterar a publicação por padrão:
+
+```bash
+python -m src.etl.monitor_aneel --distribuidora "Light"
+```
+
+Para baixar e preservar o GDB em `dados/`:
+
+```bash
+python -m src.etl.monitor_aneel --distribuidora "Light" --baixar
+```
+
+Para baixar, validar os derivados e substituir atomicamente a publicação vigente:
+
+```bash
+python -m src.etl.monitor_aneel --distribuidora "Light" --publicar
+```
+
+Use `--publicar` conscientemente: o GridScope mantém uma publicação operacional por banco.
+
+#### Compatibilidade BDGD
+
+O importador normaliza as entregas para um contrato interno único e valida antes
+do corte transacional:
+
+- camadas `SUB`, `UNTRMT`, `UCBT_tab` (ou `UCBT`), `UGBT_tab` (ou `UGBT`) e `SSDMT`;
+- chaves, colunas mensais, geometrias, CRS e referências entre as camadas;
+- código IBGE `MUN` nos transformadores;
+- SIRGAS 2000 / UTM selecionada automaticamente para concessões compactas;
+- SIRGAS 2000 / Brazil Polyconic para concessões que atravessam zonas UTM.
+
+Uma incompatibilidade cancela o staging e preserva integralmente a publicação
+anterior. O banco mantém uma publicação ativa; publicar outra distribuidora
+substitui atomicamente a vigente.
+
+Quando a cobertura municipal bloquear uma entrega, o diagnóstico persistido
+fica em `dados/diagnosticos/<delivery_id>/<tentativa>/`. Para investigá-la sem
+carregar consumidores nem publicar dados:
+
+```bash
+python -m src.etl.diagnosticar_geografia --gdb "dados/Light-<id>.gdb" --saida "dados/diagnosticos/light"
+```
+
+O comando grava `resumo.json`, `transformadores_fora.csv` e, quando aplicável,
+`transformadores_fora.geojson`. O código de saída `2` indica pontos além da
+tolerância de qualidade de 250 m; a tolerância nunca expande a malha publicada.
+
+Para comparar as ocorrências preservadas com uma malha oficial candidata local,
+sem mudar a publicação ou o cache operacional:
+
+```powershell
+python -m src.etl.comparar_cobertura `
+  --ocorrencias "<tentativa>/preflight/transformadores_fora.csv" `
+  --manifesto-atual "<tentativa>/malhas.json" `
+  --malha-candidata "<malha-oficial-candidata>.gpkg" `
+  --coluna-codigo "<campo-IBGE>" `
+  --saida "dados/diagnosticos/light/comparacao"
+```
+
+Opcionalmente, `--referencia-ampla` e `--coluna-codigo-referencia` classificam
+os pontos por município espacial, inclusive municípios não selecionados. As
+opções `--malha-candidata-ibge-uf` e `--referencia-ibge-uf` baixam a malha
+municipal máxima estadual do IBGE direto na comparação. A comparação é somente
+diagnóstica: não altera a malha operacional nem amplia o território publicado.
+
+### Escopo da malha de validação
+
+Duas malhas distintas participam da publicação, e elas não podem ser confundidas:
+
+| Uso | Escopo | Configuração |
+| --- | --- | --- |
+| Malha de **validação** (bloqueia a publicação) | Todos os municípios da(s) UF(s) presentes em `MUN` | Fixo |
+| Malha de **publicação** (recorte do Voronoi e tabela `limites_municipais`) | Somente os municípios declarados em `MUN` | fixo por desenho |
+
+O motivo: `MUN` é um atributo declarado pelo distribuidor e não é fonte confiável
+de território. Na entrega Light auditada (`f5a569a8…`), **1.307 das 99.490
+sementes (1,31%)** com `MUN` válido caem espacialmente em outro município do
+próprio estado — por exemplo, 486 ativos da subestação `18520902` declarados em
+Queimados (`3302858`) estão dentro de Nilópolis (`3303203`). Se a malha de
+validação fosse montada apenas a partir de `MUN`, esse erro de atribuição
+apareceria como erro de coordenada e bloquearia a entrega sem evidência real.
+
+A validação julga a coordenada contra a
+divisão municipal oficial do estado — uma referência que não depende do atributo
+auditado. O resultado é que erro de atribuição deixa de bloquear, e a detecção
+de coordenadas fora da área de operação continua válida: dos 1.161 bloqueios da
+entrega Light, 1.054 (90,8%) eram falso positivo de atribuição e 107 são pontos
+fisicamente fora do RJ (96 em MG, 10 em SP), de 251 m a 5.023 m da fronteira.
+
+### Quarentena auditada de outliers
+
+Alguns pontos não são corrigíveis por malha: o `MUN` declara um município do
+estado, mas a coordenada cai fisicamente em município de outra UF. Não existe
+malha oficial que conserte a coordenada, e a malha publicada nunca é ampliada
+para acomodá-los. A quarentena exclui esses registros da carga **de forma
+explícita e auditável**, em vez de bloquear a entrega inteira.
+
+É delimitada por quatro regras:
+
+1. Só se aplica a sementes cuja única pendência é posição geográfica
+   (`outside_above_tolerance`). Geometria inválida, coordenada não finita,
+   identificador ou município ausentes continuam bloqueando.
+2. Nunca remove uma fração relevante da base: acima de
+   `GRIDSCOPE_QUARENTENA_FRACAO_MAXIMA` (0,5% por padrão) a publicação é
+   bloqueada, porque esse volume indica falha sistêmica da entrega, não
+   outliers isolados.
+3. Exige `transformador_id` identificável em todas as linhas excluídas.
+4. Grava `quarentena.csv` no diretório de diagnóstico com cada registro
+   excluído e seu motivo, e registra cada identificador removido em
+   `quality_report.discarded_records` da publicação, que é o registro
+   auditável do que ficou de fora. Registros de `UCBT_tab`/`UGBT_tab` ligados
+   aos transformadores excluídos são descartados na mesma cascata usada pelas
+   demais exclusões.
+
+O console mostra apenas um resumo: a proveniência completa das malhas e a lista
+de identificadores ficam no arquivo de metadados e no diagnóstico, não no log.
+
+Na entrega Light auditada isso afetou 107 sementes de 99.490 (0,108%), em 8
+subestações de fronteira, das quais 96 caem em MG e 10 em SP. A publicação
+ficou com 99.383 transformadores e os 30 municípios declarados na malha.
+
 O sistema utiliza uma arquitetura moderna orientada a serviços para processar dados geoespaciais e fornecer insights em tempo real.
 
 ---

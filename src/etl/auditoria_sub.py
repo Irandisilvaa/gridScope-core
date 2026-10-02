@@ -7,6 +7,7 @@ import sys
 # Setup de caminhos
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from config import CIDADE_ALVO, DATABASE_URL
+from geospatial import crs_projetado_bdgd
 
 def get_engine():
     return create_engine(DATABASE_URL)
@@ -43,8 +44,7 @@ def auditar_subestacoes():
     # Converte para string primeiro para evitar erro se houver None
     gdf_subs['nome_normalizado'] = gdf_subs['nome_original'].astype(str).str.strip().str.upper()
     
-    # Convertemos para UTM para medir distâncias em METROS
-    gdf_subs = gdf_subs.to_crs(epsg=31984)
+    gdf_subs = gdf_subs.to_crs(crs_projetado_bdgd(gdf_subs))
 
     # 2. Agrupamos pelo NOME para ver quem está duplicado
     agrupado = gdf_subs.groupby('nome_normalizado')

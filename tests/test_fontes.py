@@ -26,6 +26,10 @@ class LocalFileSourceTests(unittest.TestCase):
 
 
 class HttpFileSourceArchiveTests(unittest.TestCase):
+    def test_formata_tamanhos_binarios_corretamente(self) -> None:
+        self.assertEqual(HttpFileSource._format_bytes(1024**3), "1.0 GiB")
+        self.assertEqual(HttpFileSource._format_bytes(5519 * 1024**2), "5.4 GiB")
+
     def test_extract_encontra_um_gdb(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -266,7 +266,9 @@ def analisar_mercado():
     print("1. Carregando e Normalizando Territórios...")
     try:
         gdf_voronoi = carregar_voronoi()
-        gdf_voronoi = gdf_voronoi.to_crs(epsg=31984) 
+        from geospatial import crs_projetado_bdgd
+        crs_projetado = crs_projetado_bdgd(gdf_voronoi)
+        gdf_voronoi = gdf_voronoi.to_crs(crs_projetado)
 
         if 'COD_ID' not in gdf_voronoi.columns:
             raise RuntimeError("Voronoi sem coluna COD_ID")
@@ -284,7 +286,7 @@ def analisar_mercado():
         raise RuntimeError("Falha ao carregar territórios Voronoi") from e
     print("2. Mapeando Transformadores (Spatial Join)...")
     try:
-        gdf_trafos = carregar_transformadores().to_crs(epsg=31984)
+        gdf_trafos = carregar_transformadores().to_crs(crs_projetado)
 
         gdf_voronoi['COD_ID_CLEAN'] = gdf_voronoi['COD_ID'].apply(limpar_id)
         gdf_voronoi = gdf_voronoi.dropna(subset=['COD_ID_CLEAN'])

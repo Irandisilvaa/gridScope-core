@@ -284,7 +284,9 @@ def analisar_territorio(nome_subestacao: str) -> Dict[str, Any]:
         if territorio.empty:
             return {"erro": "Território não encontrado para esta subestação"}
         
-        territorio_proj = territorio.to_crs('EPSG:31984')
+        from geospatial import crs_projetado_bdgd
+
+        territorio_proj = territorio.to_crs(crs_projetado_bdgd(territorio))
         area_m2 = territorio_proj.geometry.area.iloc[0]
         area_km2 = area_m2 / 1_000_000
         
@@ -330,7 +332,9 @@ def buscar_subestacoes_proximas(nome_referencia: str, limite: int = 5) -> List[D
         if sub_ref is None:
             return [{"erro": "Subestação de referência não encontrada"}]
         
-        gdf_proj = gdf_subs.to_crs('EPSG:31984')
+        from geospatial import crs_projetado_bdgd
+
+        gdf_proj = gdf_subs.to_crs(crs_projetado_bdgd(gdf_subs))
         ponto_ref = gdf_proj[gdf_proj['COD_ID'] == sub_ref['COD_ID']].geometry.iloc[0]
         
         distancias = []

@@ -5,7 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Callable, Iterable, Mapping
@@ -16,7 +19,30 @@ import pyogrio
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
+from src.qualidade_geografica import GeospatialCoverageError
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _progress_heartbeat(message: str, interval_seconds: int = 30):
+    """Mantém operações GDAL/PostGIS longas visíveis sem alterar seu processamento."""
+
+    stopped = threading.Event()
+    started = time.monotonic()
+
+    def report() -> None:
+        while not stopped.wait(interval_seconds):
+            elapsed = int(time.monotonic() - started)
+            logger.info("%s (%ss decorridos)", message, elapsed)
+
+    thread = threading.Thread(target=report, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stopped.set()
+        thread.join(timeout=1)
 
 CAMADAS_ALVO: Mapping[str, str] = {
     "UNTRMT": "transformadores",
@@ -24,6 +50,13 @@ CAMADAS_ALVO: Mapping[str, str] = {
     "UGBT_tab": "geracao_gd",
     "SUB": "subestacoes",
     "SSDMT": "rede_mt",
+}
+_LAYER_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "UNTRMT": ("UNTRMT",),
+    "UCBT_tab": ("UCBT_tab", "UCBT"),
+    "UGBT_tab": ("UGBT_tab", "UGBT"),
+    "SUB": ("SUB",),
+    "SSDMT": ("SSDMT",),
 }
 _IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 # Colunas que não podem vir nulas: nelas se apoiam junções e agregações.
@@ -56,7 +89,7 @@ _OPTIONAL_COLUMNS: Mapping[str, set[str]] = {
     "UGBT_tab": {"MUN"},
 }
 _REQUIRED_COLUMNS: Mapping[str, set[str]] = {
-    "UNTRMT": {"COD_ID", "SUB", "geometry"},
+    "UNTRMT": {"COD_ID", "SUB", "MUN", "geometry"},
     "UCBT_tab": {
         "UNI_TR_MT", "CLAS_SUB", "PN_CON", "DAT_CON",
         *(f"ENE_{month:02d}" for month in range(1, 13)),
@@ -91,12 +124,18 @@ class SnapshotImporter:
         delivery_id: str,
         layers: Mapping[str, str] = CAMADAS_ALVO,
         publication_metadata: Mapping[str, object] | None = None,
+        validate_transformers: Callable[
+            [gpd.GeoDataFrame | pd.DataFrame], Iterable[str] | None
+        ] | None = None,
     ) -> None:
         self._database_url = database_url
         self._source_path = source_path
         self._delivery_id = delivery_id
         self._layers = layers
         self._publication_metadata = dict(publication_metadata or {})
+        self._resolved_layers: dict[str, str] = {}
+        self._layer_feature_counts: dict[str, int | None] = {}
+        self._validate_transformers = validate_transformers
 
     def run(
         self,
@@ -138,6 +177,9 @@ class SnapshotImporter:
                 counts,
                 quality_report,
             )
+        except GeospatialCoverageError:
+            logger.exception("Cobertura geográfica bloqueou o snapshot %s", self._delivery_id)
+            raise
         except Exception as exc:
             logger.exception("Falha na importação do snapshot %s", self._delivery_id)
             raise SnapshotImportError(
@@ -159,17 +201,77 @@ class SnapshotImporter:
             connection.execute(text(f'CREATE SCHEMA "{schema}"'))
 
     def _load_layers(self, engine: Engine, schema: str) -> tuple[dict[str, int], dict[str, object]]:
+        logger.info("[PREFLIGHT] Inspecionando camadas e aliases da entrega...")
+        self._resolved_layers = self._resolve_layers()
+        logger.info(
+            "[PREFLIGHT] Schema compatível: %s",
+            ", ".join(
+                f"{canonical}={physical}"
+                for canonical, physical in self._resolved_layers.items()
+            ),
+        )
         counts: dict[str, int] = {}
         loaded: dict[str, pd.DataFrame] = {}
         discarded_records: list[dict[str, object]] = []
         excluded_transformer_ids: set[str] = set()
-        for layer_name, table_name in self._layers.items():
+        total_layers = len(self._layers)
+        for layer_index, (layer_name, table_name) in enumerate(self._layers.items(), start=1):
             if not _IDENTIFIER.match(table_name):
                 raise SnapshotImportError(f"Nome de tabela inválido: {table_name}")
-            dataframe = self._read_layer(layer_name)
+            estimated = self._layer_feature_counts.get(layer_name)
+            estimate_text = (
+                f" (~{estimated:,} registros)" if estimated is not None else ""
+            )
+            logger.info(
+                "[%s/%s] Lendo camada %s%s...",
+                layer_index,
+                total_layers,
+                self._resolved_layers.get(layer_name, layer_name),
+                estimate_text,
+            )
+            with _progress_heartbeat(
+                f"[{layer_index}/{total_layers}] Ainda lendo {layer_name}"
+            ):
+                dataframe = self._read_layer(layer_name)
+            logger.info(
+                "[%s/%s] Validando camada %s: %s registros lidos...",
+                layer_index,
+                total_layers,
+                layer_name,
+                f"{len(dataframe):,}",
+            )
             self._validate_layer_schema(layer_name, dataframe)
             if layer_name == "UNTRMT":
-                dataframe, reports = self._discard_transformers_without_substation(dataframe)
+                quarentenados: set[str] = set()
+                reports: list[dict] = []
+                if self._validate_transformers:
+                    logger.info("[GEO] Validando cobertura municipal antes das camadas pesadas...")
+                    quarentenados = self._quarantined_transformer_ids(
+                        self._validate_transformers(dataframe)
+                    )
+                    if quarentenados:
+                        excluded_transformer_ids.update(quarentenados)
+                        discarded_records.append(
+                            {
+                                "table": table_name,
+                                "reason": "geospatial_outlier_quarantine",
+                                "count": len(quarentenados),
+                                "ids": sorted(quarentenados),
+                            }
+                        )
+                    dataframe, reports = self._discard_transformers_without_substation(dataframe)
+                if quarentenados:
+                    # A exclusão tem de ocorrer também na camada de origem; basta
+                    # cascatear para as dependentes sem isso.
+                    ids = dataframe["COD_ID"].astype("string").str.strip()
+                    excluidos = ids.isin(quarentenados)
+                    if bool(excluidos.any()):
+                        logger.warning(
+                            "[GEO] Removendo %s sementes em quarentena da camada %s",
+                            f"{int(excluidos.sum()):,}",
+                            layer_name,
+                        )
+                        dataframe = dataframe.loc[~excluidos].copy()
                 for report in reports:
                     discarded_records.append({"table": table_name, **report})
                     if report["reason"] == "missing_substation":
@@ -185,15 +287,67 @@ class SnapshotImporter:
                 )
             if dataframe.empty:
                 raise SnapshotImportError(f"Camada obrigatória vazia: {layer_name}")
-            self._write_layer(dataframe, table_name, schema, engine)
+            logger.info(
+                "[%s/%s] Gravando %s em staging...",
+                layer_index,
+                total_layers,
+                table_name,
+            )
+            with _progress_heartbeat(
+                f"[{layer_index}/{total_layers}] Ainda gravando {table_name}"
+            ):
+                self._write_layer(dataframe, table_name, schema, engine)
             counts[table_name] = len(dataframe)
             loaded[table_name] = dataframe
-            logger.info("Camada %s carregada em staging: %s registros", layer_name, len(dataframe))
+            logger.info(
+                "[%s/%s] Camada %s concluída: %s registros",
+                layer_index,
+                total_layers,
+                layer_name,
+                f"{len(dataframe):,}",
+            )
+        logger.info("[VALIDAÇÃO] Conferindo integridade referencial entre camadas...")
         self._validate_references(loaded)
-        quality_report: dict[str, object] = {}
+        logger.info("[VALIDAÇÃO] Integridade referencial aprovada")
+        quality_report: dict[str, object] = {
+            "source_schema": {"layers": dict(self._resolved_layers)}
+        }
         if discarded_records:
             quality_report["discarded_records"] = discarded_records
         return counts, quality_report
+
+    @staticmethod
+    def _quarantined_transformer_ids(
+        returned: Iterable[str] | None,
+    ) -> set[str]:
+        """Normaliza os IDs devolvidos pelo preflight geográfico.
+
+        O preflight decide a quarentena e devolve identificadores; quemremove as
+        linhas é o carregador, para que a exclusão siga exatamente o mesmo
+        caminho das demais descartes e chegue às camadas dependentes.
+        """
+
+        if not returned:
+            return set()
+        ids = set()
+        for value in returned:
+            # str(None) produz "None", que casaria com transformador nenhum e
+            # deixaria a exclusão silenciosamente sem efeito. IDs precisam ser
+            # texto para que a exclusão seja auditável e verificável.
+            if not isinstance(value, str):
+                raise SnapshotImportError(
+                    "O preflight geográfico devolveu um identificador que não "
+                    f"é texto; a exclusão não seria auditável ({value!r})"
+                )
+            normalizado = value.strip()
+            if normalizado:
+                ids.add(normalizado)
+        if ids:
+            logger.warning(
+                "Transformadores em quarentena geográfica serão descartados: %s registro(s)",
+                f"{len(ids):,}",
+            )
+        return ids
 
     @staticmethod
     def _discard_transformers_without_substation(
@@ -261,11 +415,12 @@ class SnapshotImporter:
         return dataframe.loc[~discarded].copy(), reports
 
     def _read_layer(self, layer_name: str) -> gpd.GeoDataFrame | pd.DataFrame:
-        columns = self._colunas_utiles(layer_name)
+        physical_name = self._resolved_layers.get(layer_name, layer_name)
+        columns = self._colunas_utiles(layer_name, physical_name)
         try:
             return gpd.read_file(
                 self._source_path,
-                layer=layer_name,
+                layer=physical_name,
                 engine="pyogrio",
                 use_arrow=True,
                 columns=columns,
@@ -275,14 +430,55 @@ class SnapshotImporter:
             try:
                 return gpd.read_file(
                     self._source_path,
-                    layer=layer_name,
+                    layer=physical_name,
                     engine="pyogrio",
                     columns=columns,
                 )
             except Exception as exc:
                 raise SnapshotImportError(f"Falha ao ler camada {layer_name}: {exc}") from exc
 
-    def _colunas_utiles(self, layer_name: str) -> list[str] | None:
+    def _resolve_layers(self) -> dict[str, str]:
+        try:
+            listed = pyogrio.list_layers(self._source_path)
+        except Exception as error:
+            raise SnapshotImportError(f"Não foi possível inspecionar as camadas: {error}") from error
+
+        available = [str(row[0]) for row in listed]
+        resolved: dict[str, str] = {}
+        used: set[str] = set()
+        for canonical in self._layers:
+            aliases = _LAYER_ALIASES.get(canonical, (canonical,))
+            candidates = [
+                name
+                for name in available
+                if any(name.casefold() == alias.casefold() for alias in aliases)
+            ]
+            if not candidates:
+                raise SnapshotImportError(
+                    f"Camada obrigatória ausente: {canonical} "
+                    f"(aliases aceitos: {', '.join(aliases)})"
+                )
+            if len(candidates) > 1:
+                raise SnapshotImportError(
+                    f"Camada {canonical} ambígua: {', '.join(sorted(candidates))}"
+                )
+            physical = candidates[0]
+            if physical in used:
+                raise SnapshotImportError(f"Camada física reutilizada: {physical}")
+            resolved[canonical] = physical
+            used.add(physical)
+            try:
+                feature_count = pyogrio.read_info(
+                    self._source_path, layer=physical
+                ).get("features")
+                self._layer_feature_counts[canonical] = (
+                    int(feature_count) if feature_count is not None and int(feature_count) >= 0 else None
+                )
+            except Exception:
+                self._layer_feature_counts[canonical] = None
+        return resolved
+
+    def _colunas_utiles(self, layer_name: str, physical_name: str | None = None) -> list[str] | None:
         """Projeta a camada nas colunas que o resto do sistema efetivamente le.
 
         A entrega traz dezenas de colunas que ninguém consome: em uma camada
@@ -299,7 +495,9 @@ class SnapshotImporter:
         if not desejadas:
             return None
         try:
-            info = pyogrio.read_info(self._source_path, layer=layer_name)
+            info = pyogrio.read_info(
+                self._source_path, layer=physical_name or layer_name
+            )
         except Exception:
             logger.warning("Sem metadados de %s; lendo todas as colunas", layer_name)
             return None
@@ -341,7 +539,10 @@ class SnapshotImporter:
             if_exists="replace",
             index=False,
             chunksize=5000,
-            method="multi",
+            # Deixe o driver executar lotes. ``method="multi"`` expande todos
+            # os valores em um único AST SQL e pode travar por minutos ao
+            # compilar camadas BDGD largas antes de enviar qualquer dado.
+            method=None,
         )
 
     @staticmethod
@@ -432,6 +633,7 @@ class SnapshotImporter:
         quality_report: Mapping[str, object],
         publication_id: str,
     ) -> None:
+        logger.info("[CORTE] Iniciando substituição atômica das tabelas públicas...")
         old_suffix = uuid.uuid4().hex
         with engine.begin() as connection:
             for table_name in table_names:
@@ -561,6 +763,7 @@ class SnapshotImporter:
                     """
                 )
             )
+        logger.info("[CORTE] Tabelas e metadados publicados atomicamente")
 
     @staticmethod
     def _drop_schema(engine: Engine, schema: str) -> None:

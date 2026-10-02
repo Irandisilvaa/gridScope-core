@@ -1,11 +1,9 @@
 # utils.py
-import json
 import os
 import sys
 import math
 import numpy as np
 import pandas as pd
-import geopandas as gpd
 from shapely.geometry import mapping
 import logging
 
@@ -113,40 +111,11 @@ def limpar_float(val):
 
 def carregar_dados_cache(cidade_alvo=None, municipio_codigo="all"):
     try:
-        from config import ALLOW_FILE_CACHE, get_cidade_alvo, get_city_slug, DIR_DADOS
         from municipalities import ESCOPO_TODA_BASE, normalizar_escopo
 
         escopo = normalizar_escopo(municipio_codigo)
         if not escopo:
             raise DataCacheError("Código de município inválido")
-        cidade = cidade_alvo or get_cidade_alvo()
-        slug = "toda_base" if escopo == ESCOPO_TODA_BASE else get_city_slug(cidade)
-        
-        path_geojson = os.path.join(DIR_DADOS, f"voronoi_{slug}.geojson")
-        path_json = os.path.join(DIR_DADOS, "cache_mercado_toda_base.json")
-
-        # O corte canônico não reescreve esses arquivos; se uma entrega já foi
-        # publicada, eles ficariam obsoletos e o banco deve ser a única fonte.
-        sem_publicacao_canonica = not os.path.exists(
-            os.path.join(DIR_DADOS, "metadata_carga_atual.json")
-        )
-
-        if (
-            escopo == ESCOPO_TODA_BASE
-            and
-            ALLOW_FILE_CACHE
-            and sem_publicacao_canonica
-            and os.path.exists(path_geojson)
-            and os.path.exists(path_json)
-        ):
-            try:
-                gdf = gpd.read_file(path_geojson)
-                with open(path_json, 'r', encoding='utf-8') as f:
-                    dados_mercado = json.load(f)
-                return gdf, dados_mercado
-            except Exception as e:
-                logger.warning(f"Aviso ao ler cache específico de {cidade}: {e}")
-
         from database import (
             carregar_cache_mercado,
             carregar_subestacoes,

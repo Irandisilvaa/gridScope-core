@@ -83,9 +83,9 @@ def _get_substation_area_km2(substation_id: str) -> str:
         if gdf_filtered.empty:
             return "N/D"
         
-        # Reprojecta para UTM (zona 24S - Aracaju/SE) para calcular área em metros²
-        # EPSG:31984 é UTM zona 24S
-        gdf_proj = gdf_filtered.to_crs(epsg=31984)
+        from geospatial import crs_projetado_bdgd
+
+        gdf_proj = gdf_filtered.to_crs(crs_projetado_bdgd(gdf_filtered))
         
         # Calcula área em m², converte para km²
         area_m2 = gdf_proj.geometry.area.iloc[0]

@@ -116,6 +116,22 @@ class PipelineTests(unittest.TestCase):
         invalidate_cache.assert_called_once_with("publication-c")
         delivery.cleanup.assert_called_once_with()
 
+    @patch("src.etl.pipeline.SnapshotImporter")
+    def test_interrupcao_limpa_entrega_temporaria(self, snapshot_importer):
+        delivery = Mock(
+            local_path=Path("/tmp/entrega.gdb"),
+            delivery_id="entrega-interrompida",
+            source="local_file",
+            reference_period=None,
+            cleanup=Mock(),
+        )
+        snapshot_importer.return_value.run.side_effect = KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            pipeline.ingest_delivery(delivery)
+
+        delivery.cleanup.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()
