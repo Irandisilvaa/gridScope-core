@@ -50,6 +50,11 @@ _REFERENCES: Mapping[str, tuple[tuple[str, str, str], ...]] = {
     "consumidores": (("UNI_TR_MT", "transformadores", "COD_ID"),),
     "geracao_gd": (("UNI_TR_MT", "transformadores", "COD_ID"),),
 }
+_OPTIONAL_COLUMNS: Mapping[str, set[str]] = {
+    "UNTRMT": {"MUN"},
+    "UCBT_tab": {"MUN"},
+    "UGBT_tab": {"MUN"},
+}
 _REQUIRED_COLUMNS: Mapping[str, set[str]] = {
     "UNTRMT": {"COD_ID", "SUB", "geometry"},
     "UCBT_tab": {
@@ -68,6 +73,7 @@ class SnapshotImportError(RuntimeError):
 
 @dataclass(frozen=True)
 class SnapshotImportResult:
+    publication_id: str
     delivery_id: str
     source_path: Path
     row_counts: dict[str, int]
@@ -95,7 +101,9 @@ class SnapshotImporter:
     def run(
         self,
         *,
-        prepare_publish: Callable[[str], Mapping[str, int]] | None = None,
+        prepare_publish: Callable[
+            [str], Mapping[str, int] | tuple[Mapping[str, int], Mapping[str, object]]
+        ] | None = None,
     ) -> SnapshotImportResult:
         self._validate_source()
         engine = create_engine(self._database_url, pool_pre_ping=True)
@@ -106,11 +114,25 @@ class SnapshotImporter:
             counts, quality_report = self._load_layers(engine, staging_schema)
             self._validate_counts(counts)
             if prepare_publish:
-                derived_counts = dict(prepare_publish(staging_schema))
+                prepared = prepare_publish(staging_schema)
+                if isinstance(prepared, tuple):
+                    derived_counts = dict(prepared[0])
+                    quality_report.update(dict(prepared[1]))
+                else:
+                    derived_counts = dict(prepared)
                 self._validate_counts(derived_counts)
                 counts.update(derived_counts)
-            self._publish(engine, staging_schema, counts.keys(), counts, quality_report)
+            publication_id = str(uuid.uuid4())
+            self._publish(
+                engine,
+                staging_schema,
+                counts.keys(),
+                counts,
+                quality_report,
+                publication_id,
+            )
             return SnapshotImportResult(
+                publication_id,
                 self._delivery_id,
                 self._source_path,
                 counts,
@@ -239,18 +261,24 @@ class SnapshotImporter:
         return dataframe.loc[~discarded].copy(), reports
 
     def _read_layer(self, layer_name: str) -> gpd.GeoDataFrame | pd.DataFrame:
+        columns = self._colunas_utiles(layer_name)
         try:
             return gpd.read_file(
                 self._source_path,
                 layer=layer_name,
                 engine="pyogrio",
                 use_arrow=True,
-                columns=self._colunas_utiles(layer_name),
+                columns=columns,
             )
         except Exception as pyogrio_error:
             logger.warning("Fallback de leitura para %s: %s", layer_name, pyogrio_error)
             try:
-                return gpd.read_file(self._source_path, layer=layer_name)
+                return gpd.read_file(
+                    self._source_path,
+                    layer=layer_name,
+                    engine="pyogrio",
+                    columns=columns,
+                )
             except Exception as exc:
                 raise SnapshotImportError(f"Falha ao ler camada {layer_name}: {exc}") from exc
 
@@ -263,7 +291,11 @@ class SnapshotImporter:
         fora da projeção para que a validação de esquema continue reportando
         o que falta, em vez de estourar no leitor.
         """
-        desejadas = _REQUIRED_COLUMNS.get(layer_name, set()) | set(_KEY_COLUMNS.get(layer_name, ()))
+        desejadas = (
+            _REQUIRED_COLUMNS.get(layer_name, set())
+            | set(_KEY_COLUMNS.get(layer_name, ()))
+            | set(_OPTIONAL_COLUMNS.get(layer_name, ()))
+        )
         if not desejadas:
             return None
         try:
@@ -398,6 +430,7 @@ class SnapshotImporter:
         table_names: Iterable[str],
         row_counts: Mapping[str, int],
         quality_report: Mapping[str, object],
+        publication_id: str,
     ) -> None:
         old_suffix = uuid.uuid4().hex
         with engine.begin() as connection:
@@ -428,6 +461,7 @@ class SnapshotImporter:
                     """
                     CREATE TABLE IF NOT EXISTS public.grid_scope_publication (
                         publication_key SMALLINT PRIMARY KEY CHECK (publication_key = 1),
+                        publication_id UUID NOT NULL,
                         delivery_id TEXT NOT NULL,
                         source TEXT NOT NULL,
                         reference_period TEXT,
@@ -436,6 +470,23 @@ class SnapshotImporter:
                         row_counts JSONB NOT NULL,
                         quality_report JSONB NOT NULL DEFAULT '{}'::jsonb
                     )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE public.grid_scope_publication
+                    ADD COLUMN IF NOT EXISTS publication_id UUID
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE public.grid_scope_publication
+                    SET publication_id = gen_random_uuid()
+                    WHERE publication_id IS NULL
                     """
                 )
             )
@@ -461,6 +512,7 @@ class SnapshotImporter:
                     INSERT INTO public.grid_scope_publication
                         (
                             publication_key,
+                            publication_id,
                             delivery_id,
                             source,
                             reference_period,
@@ -471,6 +523,7 @@ class SnapshotImporter:
                         )
                     VALUES (
                         1,
+                        CAST(:publication_id AS uuid),
                         :delivery_id,
                         :source,
                         :reference_period,
@@ -481,6 +534,7 @@ class SnapshotImporter:
                     )
                     ON CONFLICT (publication_key) DO UPDATE SET
                         delivery_id = EXCLUDED.delivery_id,
+                        publication_id = EXCLUDED.publication_id,
                         source = EXCLUDED.source,
                         reference_period = EXCLUDED.reference_period,
                         city_target = EXCLUDED.city_target,
@@ -490,6 +544,7 @@ class SnapshotImporter:
                     """
                 ),
                 {
+                    "publication_id": publication_id,
                     "delivery_id": self._delivery_id,
                     "source": str(self._publication_metadata.get("source", "unknown")),
                     "reference_period": self._publication_metadata.get("reference_period"),
@@ -497,6 +552,14 @@ class SnapshotImporter:
                     "row_counts": json.dumps(dict(row_counts), ensure_ascii=False),
                     "quality_report": json.dumps(dict(quality_report), ensure_ascii=False),
                 },
+            )
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE public.grid_scope_publication
+                    ALTER COLUMN publication_id SET NOT NULL
+                    """
+                )
             )
 
     @staticmethod

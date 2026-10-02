@@ -38,7 +38,7 @@ def migrar_gdb_para_sql(
             "city_target": get_cidade_alvo(),
         },
     ).run(prepare_publish=_build_derived_tables)
-    _invalidate_runtime_cache(result.delivery_id)
+    _invalidate_runtime_cache(result.publication_id)
     return result
 
 

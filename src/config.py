@@ -45,6 +45,15 @@ ALLOW_FILE_CACHE = os.getenv("ALLOW_FILE_CACHE", "true").lower() in {"1", "true"
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+AUTH_SESSION_TTL_SECONDS = int(os.getenv("AUTH_SESSION_TTL_SECONDS", str(8 * 60 * 60)))
+AUTH_COOKIE_NAME = os.getenv("AUTH_COOKIE_NAME", "gridscope_session")
+AUTH_COOKIE_SECURE = os.getenv("AUTH_COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
+AUTH_LOGIN_RATE_LIMIT = int(os.getenv("AUTH_LOGIN_RATE_LIMIT", "8"))
+AUTH_LOGIN_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_LOGIN_RATE_WINDOW_SECONDS", "900"))
+AUTH_CHAT_RATE_LIMIT = int(os.getenv("AUTH_CHAT_RATE_LIMIT", "20"))
+AUTH_CHAT_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_CHAT_RATE_WINDOW_SECONDS", "60"))
+AUTH_ADMIN_RATE_LIMIT = int(os.getenv("AUTH_ADMIN_RATE_LIMIT", "30"))
+AUTH_ADMIN_RATE_WINDOW_SECONDS = int(os.getenv("AUTH_ADMIN_RATE_WINDOW_SECONDS", "60"))
 
 import re
 

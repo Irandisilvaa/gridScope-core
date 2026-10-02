@@ -1,20 +1,18 @@
 import streamlit as st
 import requests
 import time
-import socket
 import plotly.graph_objects as go
 import json
 
 CHAT_API_URL = "http://127.0.0.1:8002"
 
 
-def consultar_chat(mensagem: str, historico: list, conversa_id: int = None, usuario_id: str = None) -> dict:
+def consultar_chat(mensagem: str, historico: list, conversa_id: int = None) -> dict:
     try:
         payload = {
             "mensagem": mensagem,
             "historico": historico,
             "conversa_id": conversa_id,
-            "usuario_id": usuario_id
         }
         
         response = requests.post(
@@ -56,9 +54,6 @@ def tab_chat():
     if "conversa_id" not in st.session_state:
         st.session_state.conversa_id = None
     
-    if "usuario_id" not in st.session_state:
-        st.session_state.usuario_id = socket.gethostname()
-    
     with st.sidebar:
         st.subheader("Histórico")
         
@@ -73,7 +68,6 @@ def tab_chat():
         try:
             response = requests.get(
                 f"{CHAT_API_URL}/chat/conversas",
-                params={"usuario_id": st.session_state.usuario_id},
                 timeout=5
             )
             
@@ -190,8 +184,7 @@ def tab_chat():
             resultado = consultar_chat(
                 pergunta_input, 
                 st.session_state.chat_historico,
-                st.session_state.conversa_id,
-                st.session_state.usuario_id
+                st.session_state.conversa_id
             )
         
         resposta_ia = resultado.get("resposta", "Erro ao processar resposta")

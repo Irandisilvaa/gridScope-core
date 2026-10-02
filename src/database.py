@@ -13,20 +13,39 @@ from typing import Optional, List
 import re
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from config import DATABASE_SCHEMA, DATABASE_URL
+from config import DATABASE_SCHEMA, DATABASE_URL, DATA_SOURCE, FILE_GDB, get_cidade_alvo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Database")
 
 _COLUNAS_PERMITIDAS = {
     "subestacoes": {"COD_ID", "NOME", "geometry"},
-    "transformadores": {"COD_ID", "SUB", "geometry"},
+    "transformadores": {"COD_ID", "SUB", "MUN", "geometry"},
     "consumidores": {
-        "UNI_TR_MT", "CLAS_SUB", "PN_CON", "DAT_CON",
+        "UNI_TR_MT", "CLAS_SUB", "PN_CON", "DAT_CON", "MUN",
         *(f"ENE_{mes:02d}" for mes in range(1, 13)),
     },
-    "geracao_gd": {"UNI_TR_MT", "POT_INST", "PN_CON", "DAT_CON"},
+    "geracao_gd": {"UNI_TR_MT", "POT_INST", "PN_CON", "DAT_CON", "MUN"},
     "rede_mt": {"COD_ID", "SUB", "geometry"},
+    "limites_municipais": {
+        "municipio_codigo",
+        "nome",
+        "uf",
+        "fonte",
+        "qualidade",
+        "revisao",
+        "fonte_url",
+        "checksum_sha256",
+        "obtido_em",
+        "geometry",
+    },
+    "territorios_voronoi_municipais": {
+        "municipio_codigo", "COD_ID", "NOM", "SITE_LON", "SITE_LAT",
+        "LABEL_LON", "LABEL_LAT", "geometry"
+    },
+    "territorios_voronoi": {
+        "COD_ID", "NOM", "SITE_LON", "SITE_LAT", "LABEL_LON", "LABEL_LAT", "geometry"
+    },
 }
 
 
@@ -75,17 +94,122 @@ def get_engine():
         raise
 
 
+def _inicializar_grid_scope_publication() -> Optional[dict]:
+    """Cria e popula grid_scope_publication a partir das tabelas existentes caso o banco tenha sido restaurado sem metadados."""
+    try:
+        engine = get_engine()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS public.grid_scope_publication (
+                        publication_key SMALLINT PRIMARY KEY CHECK (publication_key = 1),
+                        publication_id UUID NOT NULL,
+                        delivery_id TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        reference_period TEXT,
+                        city_target TEXT,
+                        published_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        row_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                        quality_report JSONB NOT NULL DEFAULT '{}'::jsonb
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.grid_scope_publication
+                    ADD COLUMN IF NOT EXISTS publication_id UUID
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.grid_scope_publication
+                    SET publication_id = gen_random_uuid()
+                    WHERE publication_id IS NULL
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.grid_scope_publication
+                    ALTER COLUMN publication_id SET NOT NULL
+                    """
+                )
+            )
+            # Verifica se existem subestações carregadas
+            sub_count = conn.execute(text("SELECT count(*) FROM public.subestacoes")).scalar()
+            if not sub_count:
+                return None
+
+            delivery_id = os.path.splitext(FILE_GDB)[0] if FILE_GDB else "GS-PROD-2026"
+            city_target = get_cidade_alvo()
+            counts = {"subestacoes": int(sub_count)}
+            for tbl in ("transformadores", "consumidores", "geracao_gd"):
+                try:
+                    c = conn.execute(text(f"SELECT count(*) FROM public.{tbl}")).scalar()
+                    if c is not None:
+                        counts[tbl] = int(c)
+                except Exception:
+                    pass
+
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO public.grid_scope_publication
+                        (publication_key, publication_id, delivery_id, source, reference_period, city_target, published_at, row_counts, quality_report)
+                    VALUES
+                        (1, gen_random_uuid(), :delivery_id, :source, '2024-12-31', :city_target, NOW(), CAST(:row_counts AS jsonb), '{}'::jsonb)
+                    ON CONFLICT (publication_key) DO UPDATE SET
+                        city_target = EXCLUDED.city_target
+                    """
+                ),
+                {
+                    "delivery_id": delivery_id,
+                    "source": DATA_SOURCE or "local_file",
+                    "city_target": city_target,
+                    "row_counts": json.dumps(counts),
+                },
+            )
+        return carregar_publication_metadata()
+    except Exception as exc:
+        logger.warning("Não foi possível auto-inicializar grid_scope_publication: %s", exc)
+        return None
+
+
 def carregar_publication_metadata() -> Optional[dict]:
     """Carrega a identificação da última publicação confirmada no banco."""
 
     engine = None
     try:
         engine = get_engine()
-        with engine.connect() as conn:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    ALTER TABLE public.grid_scope_publication
+                    ADD COLUMN IF NOT EXISTS publication_id UUID
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.grid_scope_publication
+                    SET publication_id = gen_random_uuid()
+                    WHERE publication_id IS NULL
+                    """
+                )
+            )
             row = conn.execute(
                 text(
                     """
                     SELECT
+                        publication.publication_id,
                         publication.delivery_id,
                         publication.source,
                         publication.reference_period,
@@ -102,7 +226,7 @@ def carregar_publication_metadata() -> Optional[dict]:
                 )
             ).mappings().first()
             if row is None:
-                return None
+                return _inicializar_grid_scope_publication()
 
             row_counts = row["row_counts"]
             if isinstance(row_counts, str):
@@ -111,12 +235,14 @@ def carregar_publication_metadata() -> Optional[dict]:
             if isinstance(quality_report, str):
                 quality_report = json.loads(quality_report)
             published_at = row["published_at"]
+            city_target = row["city_target"] or get_cidade_alvo()
             return {
                 "status": "published",
                 "source": row["source"],
+                "publication_id": str(row["publication_id"]),
                 "delivery_id": row["delivery_id"],
                 "reference_period": row["reference_period"],
-                "city_target": row["city_target"],
+                "city_target": city_target,
                 "published_at": published_at.isoformat() if hasattr(published_at, "isoformat") else published_at,
                 "row_counts": row_counts if isinstance(row_counts, dict) else {},
                 "quality_report": quality_report if isinstance(quality_report, dict) else {},
@@ -125,7 +251,7 @@ def carregar_publication_metadata() -> Optional[dict]:
         # Banco publicado antes do registro transacional ainda não tem a tabela.
         if getattr(getattr(error, "orig", None), "pgcode", None) == "42P01":
             logger.info("Banco ainda sem registro de publicação (grid_scope_publication)")
-            return None
+            return _inicializar_grid_scope_publication()
         logger.warning("Não foi possível ler metadados da publicação: %s", error)
         return None
     finally:
@@ -257,6 +383,68 @@ def carregar_geracao_gd(colunas: Optional[List[str]] = None, ignore_geometry: bo
         engine.dispose()
 
 
+def carregar_cobertura_municipios() -> list[dict]:
+    """Retorna a cobertura disponível por código IBGE na carga atual."""
+
+    engine = get_engine()
+    try:
+        consumidores = _qualified_table("consumidores")
+        transformadores = _qualified_table("transformadores")
+        geracao_gd = _qualified_table("geracao_gd")
+        query = text(f"""
+            WITH municipios AS (
+                SELECT DISTINCT NULLIF(BTRIM(CAST("MUN" AS TEXT)), '') AS codigo
+                FROM {consumidores}
+                WHERE "MUN" IS NOT NULL
+                UNION
+                SELECT DISTINCT NULLIF(BTRIM(CAST("MUN" AS TEXT)), '') AS codigo
+                FROM {transformadores}
+                WHERE "MUN" IS NOT NULL
+                UNION
+                SELECT DISTINCT NULLIF(BTRIM(CAST("MUN" AS TEXT)), '') AS codigo
+                FROM {geracao_gd}
+                WHERE "MUN" IS NOT NULL
+            ), consumidores_por_municipio AS (
+                SELECT BTRIM(CAST("MUN" AS TEXT)) AS codigo, COUNT(*) AS total
+                FROM {consumidores}
+                WHERE "MUN" IS NOT NULL
+                GROUP BY BTRIM(CAST("MUN" AS TEXT))
+            ), transformadores_por_municipio AS (
+                SELECT
+                    BTRIM(CAST("MUN" AS TEXT)) AS codigo,
+                    COUNT(DISTINCT "COD_ID") AS total,
+                    COUNT(DISTINCT "SUB") AS subestacoes
+                FROM {transformadores}
+                WHERE "MUN" IS NOT NULL
+                GROUP BY BTRIM(CAST("MUN" AS TEXT))
+            ), gd_por_municipio AS (
+                SELECT BTRIM(CAST("MUN" AS TEXT)) AS codigo, COUNT(*) AS total
+                FROM {geracao_gd}
+                WHERE "MUN" IS NOT NULL
+                GROUP BY BTRIM(CAST("MUN" AS TEXT))
+            )
+            SELECT
+                municipios.codigo,
+                COALESCE(consumidores_por_municipio.total, 0) AS consumidores,
+                COALESCE(transformadores_por_municipio.total, 0) AS transformadores,
+                COALESCE(transformadores_por_municipio.subestacoes, 0) AS subestacoes,
+                COALESCE(gd_por_municipio.total, 0) AS unidades_gd
+            FROM municipios
+            LEFT JOIN consumidores_por_municipio USING (codigo)
+            LEFT JOIN transformadores_por_municipio USING (codigo)
+            LEFT JOIN gd_por_municipio USING (codigo)
+            WHERE municipios.codigo IS NOT NULL
+            ORDER BY municipios.codigo
+        """)
+        with engine.connect() as connection:
+            return [dict(row) for row in connection.execute(query).mappings()]
+    except Exception as error:
+        logger.warning("Não foi possível calcular a cobertura municipal: %s", error)
+        return []
+    finally:
+        engine.dispose()
+
+
 def carregar_rede_mt(colunas: Optional[List[str]] = None) -> gpd.GeoDataFrame:
     """
     Carrega dados da tabela 'rede_mt' (SSDMT)
@@ -304,6 +492,56 @@ def carregar_voronoi() -> gpd.GeoDataFrame:
         return gdf
     except Exception as e:
         logger.error(f"❌ Erro ao carregar Voronoi: {e}")
+        raise
+    finally:
+        engine.dispose()
+
+
+def carregar_limites_municipais() -> gpd.GeoDataFrame:
+    """Carrega a malha municipal da publicação atual."""
+
+    engine = get_engine()
+    try:
+        gdf = gpd.read_postgis(
+            f"SELECT * FROM {_qualified_table('limites_municipais')}",
+            engine,
+            geom_col="geometry",
+        )
+        logger.info("📥 Carregados %s limites municipais do banco", len(gdf))
+        return gdf
+    except Exception as error:
+        logger.error("❌ Erro ao carregar limites municipais: %s", error)
+        raise
+    finally:
+        engine.dispose()
+
+
+def carregar_voronoi_municipal(municipio_codigo: str) -> gpd.GeoDataFrame:
+    """Carrega os recortes municipais do Voronoi global."""
+
+    engine = get_engine()
+    try:
+        query = text(
+            f"""
+            SELECT *
+            FROM {_qualified_table('territorios_voronoi_municipais')}
+            WHERE municipio_codigo = :municipio_codigo
+            """
+        )
+        gdf = gpd.read_postgis(
+            query,
+            engine,
+            params={"municipio_codigo": municipio_codigo},
+            geom_col="geometry",
+        )
+        logger.info(
+            "📥 Carregados %s territórios municipais para %s",
+            len(gdf),
+            municipio_codigo,
+        )
+        return gdf
+    except Exception as error:
+        logger.error("❌ Erro ao carregar territórios municipais: %s", error)
         raise
     finally:
         engine.dispose()
@@ -357,6 +595,52 @@ def salvar_voronoi(gdf: gpd.GeoDataFrame) -> None:
         engine.dispose()
 
 
+def salvar_limites_municipais(gdf: gpd.GeoDataFrame) -> None:
+    """Persiste a malha municipal usada para recortar os derivados."""
+
+    _avisar_publicacao_direta()
+    engine = get_engine()
+    try:
+        if gdf.crs and gdf.crs.to_string() != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
+        gdf.to_postgis(
+            "limites_municipais",
+            engine,
+            schema=DATABASE_SCHEMA,
+            if_exists="replace",
+            index=False,
+        )
+        logger.info("💾 Salvos %s limites municipais no banco", len(gdf))
+    except Exception as error:
+        logger.error("❌ Erro ao salvar limites municipais: %s", error)
+        raise
+    finally:
+        engine.dispose()
+
+
+def salvar_voronoi_municipal(gdf: gpd.GeoDataFrame) -> None:
+    """Persiste os recortes municipais do Voronoi global."""
+
+    _avisar_publicacao_direta()
+    engine = get_engine()
+    try:
+        if gdf.crs and gdf.crs.to_string() != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
+        gdf.to_postgis(
+            "territorios_voronoi_municipais",
+            engine,
+            schema=DATABASE_SCHEMA,
+            if_exists="replace",
+            index=False,
+        )
+        logger.info("💾 Salvos %s recortes municipais do Voronoi", len(gdf))
+    except Exception as error:
+        logger.error("❌ Erro ao salvar recortes municipais: %s", error)
+        raise
+    finally:
+        engine.dispose()
+
+
 def criar_tabela_cache():
     """
     Cria tabela de cache de mercado se não existir
@@ -368,10 +652,38 @@ def criar_tabela_cache():
         with engine.connect() as conn:
             conn.execute(text(f"""
                 CREATE TABLE IF NOT EXISTS {_qualified_table('cache_mercado')} (
-                    id_subestacao VARCHAR PRIMARY KEY,
+                    municipio_codigo VARCHAR NOT NULL DEFAULT 'all',
+                    id_subestacao VARCHAR NOT NULL,
                     dados_json JSONB NOT NULL,
-                    data_atualizacao TIMESTAMP DEFAULT NOW()
+                    data_atualizacao TIMESTAMP DEFAULT NOW(),
+                    PRIMARY KEY (municipio_codigo, id_subestacao)
                 )
+            """))
+            cache_table = _qualified_table("cache_mercado")
+            conn.execute(text(f"""
+                ALTER TABLE {cache_table}
+                ADD COLUMN IF NOT EXISTS municipio_codigo VARCHAR
+            """))
+            conn.execute(text(f"""
+                UPDATE {cache_table}
+                SET municipio_codigo = 'all'
+                WHERE municipio_codigo IS NULL
+            """))
+            conn.execute(text(f"""
+                ALTER TABLE {cache_table}
+                ALTER COLUMN municipio_codigo SET DEFAULT 'all',
+                ALTER COLUMN municipio_codigo SET NOT NULL
+            """))
+            # Compatibilidade com a tabela anterior, cuja chave era apenas o
+            # identificador da subestação.
+            conn.execute(text(f"""
+                ALTER TABLE {cache_table}
+                DROP CONSTRAINT IF EXISTS cache_mercado_pkey
+            """))
+            conn.execute(text(f"""
+                ALTER TABLE {cache_table}
+                ADD CONSTRAINT cache_mercado_pkey
+                PRIMARY KEY (municipio_codigo, id_subestacao)
             """))
             conn.commit()
             logger.info("✅ Tabela cache_mercado verificada/criada")
@@ -403,17 +715,23 @@ def salvar_cache_mercado(dados_mercado: list) -> None:
             
             for item in dados_mercado:
                 id_sub = item.get('id_tecnico', str(item.get('subestacao', '')))
+                municipio_codigo = item.get("municipio_codigo", "all") or "all"
                 
                 item_clean = {k: v for k, v in item.items() if k != 'geometry'}
                 
                 conn.execute(
                     text(f"""
-                        INSERT INTO {cache_table} (id_subestacao, dados_json, data_atualizacao)
-                        VALUES (:id, CAST(:dados AS jsonb), NOW())
-                        ON CONFLICT (id_subestacao) 
+                        INSERT INTO {cache_table}
+                            (municipio_codigo, id_subestacao, dados_json, data_atualizacao)
+                        VALUES (:municipio_codigo, :id, CAST(:dados AS jsonb), NOW())
+                        ON CONFLICT (municipio_codigo, id_subestacao)
                         DO UPDATE SET dados_json = CAST(:dados AS jsonb), data_atualizacao = NOW()
                     """),
-                    {"id": id_sub, "dados": json.dumps(item_clean, ensure_ascii=False)}
+                    {
+                        "municipio_codigo": municipio_codigo,
+                        "id": id_sub,
+                        "dados": json.dumps(item_clean, ensure_ascii=False),
+                    }
                 )
             
             conn.commit()
@@ -426,7 +744,7 @@ def salvar_cache_mercado(dados_mercado: list) -> None:
         engine.dispose()
 
 
-def carregar_cache_mercado() -> list:
+def carregar_cache_mercado(municipio_codigo: str = "all") -> list:
     """
     Carrega dados agregados de mercado do banco de dados
     
@@ -440,11 +758,13 @@ def carregar_cache_mercado() -> list:
     try:
         with engine.connect() as conn:
             cache_table = _qualified_table("cache_mercado")
+            criar_tabela_cache()
             result = conn.execute(text(f"""
                 SELECT dados_json 
                 FROM {cache_table}
+                WHERE municipio_codigo = :municipio_codigo
                 ORDER BY id_subestacao
-            """))
+            """), {"municipio_codigo": municipio_codigo or "all"})
             
             dados = []
             for row in result:
@@ -528,6 +848,8 @@ def verificar_tabelas() -> dict:
         'geracao_gd',
         'rede_mt',
         'territorios_voronoi',
+        'limites_municipais',
+        'territorios_voronoi_municipais',
         'cache_mercado'
     ]
     
@@ -581,6 +903,7 @@ def criar_tabela_feedback():
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS chat_feedback (
                     id SERIAL PRIMARY KEY,
+                    auth_user_id UUID REFERENCES auth_users(id) ON DELETE SET NULL,
                     pergunta TEXT NOT NULL,
                     resposta TEXT NOT NULL,
                     feedback BOOLEAN NOT NULL,
@@ -593,22 +916,34 @@ def criar_tabela_feedback():
                 CREATE INDEX IF NOT EXISTS idx_feedback_created 
                 ON chat_feedback(created_at)
             """))
+            conn.execute(text("""
+                ALTER TABLE chat_feedback
+                ADD COLUMN IF NOT EXISTS auth_user_id UUID REFERENCES auth_users(id) ON DELETE SET NULL
+            """))
             
             conn.commit()
             logger.info("✅ Tabela chat_feedback verificada/criada")
             
     except Exception as e:
         logger.error(f"❌ Erro ao criar tabela chat_feedback: {e}")
+        raise
 
 
-def salvar_feedback_chat(pergunta: str, resposta: str, feedback: bool, comentario: str = None):
+def salvar_feedback_chat(
+    pergunta: str,
+    resposta: str,
+    feedback: bool,
+    comentario: str = None,
+    usuario_id: str = None,
+):
     try:
         engine = get_engine()
         with engine.connect() as conn:
             conn.execute(text("""
-                INSERT INTO chat_feedback (pergunta, resposta, feedback, comentario)
-                VALUES (:pergunta, :resposta, :feedback, :comentario)
+                INSERT INTO chat_feedback (auth_user_id, pergunta, resposta, feedback, comentario)
+                VALUES (CAST(:usuario_id AS uuid), :pergunta, :resposta, :feedback, :comentario)
             """), {
+                "usuario_id": usuario_id,
                 "pergunta": pergunta,
                 "resposta": resposta,
                 "feedback": feedback,
@@ -617,10 +952,11 @@ def salvar_feedback_chat(pergunta: str, resposta: str, feedback: bool, comentari
             conn.commit()
             
             emoji = "👍" if feedback else "👎"
-            logger.info(f"{emoji} Feedback salvo: {pergunta[:50]}")
+            logger.info("%s Feedback salvo para usuário autenticado", emoji)
             
     except Exception as e:
         logger.warning(f"⚠️ Erro ao salvar feedback: {e}")
+        raise
 
 
 def criar_tabelas_historico():
@@ -631,6 +967,7 @@ def criar_tabelas_historico():
                 CREATE TABLE IF NOT EXISTS chat_conversas (
                     id SERIAL PRIMARY KEY,
                     usuario_id TEXT NOT NULL,
+                    auth_user_id UUID REFERENCES auth_users(id) ON DELETE CASCADE,
                     titulo TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT NOW(),
                     updated_at TIMESTAMP DEFAULT NOW()
@@ -652,6 +989,10 @@ def criar_tabelas_historico():
                 ON chat_conversas(usuario_id)
             """))
             conn.execute(text("""
+                ALTER TABLE chat_conversas
+                ADD COLUMN IF NOT EXISTS auth_user_id UUID REFERENCES auth_users(id) ON DELETE CASCADE
+            """))
+            conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS idx_mensagens_conversa 
                 ON chat_mensagens(conversa_id)
             """))
@@ -661,6 +1002,7 @@ def criar_tabelas_historico():
             
     except Exception as e:
         logger.error(f"❌ Erro ao criar tabelas de histórico: {e}")
+        raise
 
 
 def criar_conversa(usuario_id: str, titulo: str):
@@ -668,8 +1010,8 @@ def criar_conversa(usuario_id: str, titulo: str):
         engine = get_engine()
         with engine.connect() as conn:
             result = conn.execute(text("""
-                INSERT INTO chat_conversas (usuario_id, titulo)
-                VALUES (:usuario_id, :titulo)
+                INSERT INTO chat_conversas (usuario_id, auth_user_id, titulo)
+                VALUES (:usuario_id, CAST(:usuario_id AS uuid), :titulo)
                 RETURNING id
             """), {
                 "usuario_id": usuario_id,
@@ -679,7 +1021,7 @@ def criar_conversa(usuario_id: str, titulo: str):
             conversa_id = result.fetchone()[0]
             conn.commit()
             
-            logger.info(f"📝 Nova conversa criada: {conversa_id} - {titulo[:30]}")
+            logger.info("📝 Nova conversa criada: %s", conversa_id)
             return conversa_id
             
     except Exception as e:
@@ -687,10 +1029,22 @@ def criar_conversa(usuario_id: str, titulo: str):
         return None
 
 
-def salvar_mensagem(conversa_id: int, role: str, content: str):
+def salvar_mensagem(conversa_id: int, role: str, content: str, usuario_id: str) -> bool:
     try:
         engine = get_engine()
-        with engine.connect() as conn:
+        with engine.begin() as conn:
+            ownership = conn.execute(text("""
+                UPDATE chat_conversas
+                SET updated_at = NOW()
+                WHERE id = :conversa_id
+                  AND auth_user_id = CAST(:usuario_id AS uuid)
+            """), {
+                "conversa_id": conversa_id,
+                "usuario_id": usuario_id,
+            })
+            if ownership.rowcount != 1:
+                return False
+
             conn.execute(text("""
                 INSERT INTO chat_mensagens (conversa_id, role, content)
                 VALUES (:conversa_id, :role, :content)
@@ -700,16 +1054,11 @@ def salvar_mensagem(conversa_id: int, role: str, content: str):
                 "content": content
             })
             
-            conn.execute(text("""
-                UPDATE chat_conversas 
-                SET updated_at = NOW() 
-                WHERE id = :conversa_id
-            """), {"conversa_id": conversa_id})
-            
-            conn.commit()
+            return True
             
     except Exception as e:
         logger.warning(f"⚠️ Erro ao salvar mensagem: {e}")
+        return False
 
 
 def carregar_conversas(usuario_id: str, limite: int = 50):
@@ -720,7 +1069,7 @@ def carregar_conversas(usuario_id: str, limite: int = 50):
             result = conn.execute(text("""
                 SELECT id, titulo, created_at, updated_at
                 FROM chat_conversas
-                WHERE usuario_id = :usuario_id
+                WHERE auth_user_id = CAST(:usuario_id AS uuid)
                 ORDER BY updated_at DESC
                 LIMIT :limite
             """), {
@@ -741,14 +1090,26 @@ def carregar_conversas(usuario_id: str, limite: int = 50):
             
     except Exception as e:
         logger.warning(f"⚠️ Erro ao carregar conversas: {e}")
-        return []
+        raise
 
 
-def carregar_mensagens(conversa_id: int):
+def carregar_mensagens(conversa_id: int, usuario_id: str):
     """Carrega mensagens de uma conversa"""
     try:
         engine = get_engine()
         with engine.connect() as conn:
+            owned = conn.execute(text("""
+                SELECT 1
+                FROM chat_conversas
+                WHERE id = :conversa_id
+                  AND auth_user_id = CAST(:usuario_id AS uuid)
+            """), {
+                "conversa_id": conversa_id,
+                "usuario_id": usuario_id,
+            }).first()
+            if not owned:
+                return None
+
             result = conn.execute(text("""
                 SELECT role, content, created_at
                 FROM chat_mensagens
@@ -767,4 +1128,4 @@ def carregar_mensagens(conversa_id: int):
             
     except Exception as e:
         logger.warning(f"⚠️ Erro ao carregar mensagens: {e}")
-        return []
+        raise

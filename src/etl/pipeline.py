@@ -31,6 +31,7 @@ def _write_metadata(delivery, result) -> None:
         "status": "published",
         "source": delivery.source,
         "delivery_id": delivery.delivery_id,
+        "publication_id": result.publication_id,
         "format": delivery.format,
         "reference_period": delivery.reference_period,
         "city_target": get_cidade_alvo(),
@@ -55,15 +56,17 @@ def _write_metadata(delivery, result) -> None:
     temporary_path.replace(METADATA_PATH)
 
 
-def _invalidate_runtime_cache(delivery_id: str | None = None) -> int:
+def _invalidate_runtime_cache(publication_id: str | None = None) -> int:
     """Remove respostas Redis que poderiam refletir a carga anterior."""
 
     try:
         from src.cache_redis import definir_versao_publicacao, limpar_cache
 
-        if delivery_id:
-            definir_versao_publicacao(delivery_id)
-        removidas = limpar_cache()
+        removidas = 0
+        if publication_id:
+            definir_versao_publicacao(publication_id)
+        removidas += limpar_cache()
+        removidas += limpar_cache("coverage_cache:*")
         logger.info("Cache Redis invalidado: %s chaves removidas", removidas)
         return int(removidas)
     except Exception:
@@ -71,7 +74,9 @@ def _invalidate_runtime_cache(delivery_id: str | None = None) -> int:
         return 0
 
 
-def _build_derived_tables(staging_schema: str) -> dict[str, int]:
+def _build_derived_tables(
+    staging_schema: str,
+) -> tuple[dict[str, int], dict[str, object]]:
     """Gera os derivados usando o mesmo schema temporário do snapshot."""
 
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", staging_schema):
@@ -80,6 +85,12 @@ def _build_derived_tables(staging_schema: str) -> dict[str, int]:
     environment = os.environ.copy()
     environment["DATABASE_SCHEMA"] = staging_schema
     environment["GRIDSCOPE_DERIVED_STAGING"] = "1"
+    quality_report_file = tempfile.NamedTemporaryFile(
+        prefix="geospatial-quality-", suffix=".json", delete=False
+    )
+    quality_report_path = Path(quality_report_file.name)
+    quality_report_file.close()
+    environment["GRIDSCOPE_GEOSPATIAL_QUALITY_REPORT"] = str(quality_report_path)
     python_path = environment.get("PYTHONPATH", "")
     source_path = str(PROJECT_ROOT / "src")
     environment["PYTHONPATH"] = os.pathsep.join(
@@ -94,6 +105,7 @@ def _build_derived_tables(staging_schema: str) -> dict[str, int]:
             check=False,
         )
         if completed.returncode != 0:
+            quality_report_path.unlink(missing_ok=True)
             raise RuntimeError(f"Job derivado falhou: {job.name}")
 
     from sqlalchemy import create_engine, text
@@ -102,14 +114,23 @@ def _build_derived_tables(staging_schema: str) -> dict[str, int]:
     try:
         counts: dict[str, int] = {}
         with engine.connect() as connection:
-            for table_name in ("territorios_voronoi", "cache_mercado"):
+            for table_name in (
+                "limites_municipais",
+                "territorios_voronoi",
+                "territorios_voronoi_municipais",
+                "cache_mercado",
+            ):
                 count = connection.execute(
                     text(f'SELECT COUNT(*) FROM "{staging_schema}"."{table_name}"')
                 ).scalar_one()
                 counts[table_name] = int(count)
-        return counts
+        geospatial_quality = {}
+        if quality_report_path.exists() and quality_report_path.stat().st_size:
+            geospatial_quality = json.loads(quality_report_path.read_text(encoding="utf-8"))
+        return counts, {"geospatial": geospatial_quality}
     finally:
         engine.dispose()
+        quality_report_path.unlink(missing_ok=True)
 
 
 def ingest_current_delivery() -> dict:
@@ -134,10 +155,11 @@ def ingest_current_delivery() -> dict:
             logger.exception(
                 "Falha ao atualizar espelho de metadados; o registro transacional do banco permanece vigente"
             )
-        _invalidate_runtime_cache(delivery.delivery_id)
+        _invalidate_runtime_cache(result.publication_id)
         logger.info("Entrega %s publicada: %s", delivery.delivery_id, result.row_counts)
         return {
             "delivery_id": delivery.delivery_id,
+            "publication_id": result.publication_id,
             "city_target": get_cidade_alvo(),
             "row_counts": result.row_counts,
             "quality_report": result.quality_report,

@@ -9,18 +9,22 @@ from datetime import datetime, timedelta
 from google import genai
 from google.genai import types
 from google.genai.errors import ServerError
-from fastapi import FastAPI, HTTPException, Path, Query
-from pydantic import BaseModel, Field
+from fastapi import Depends, FastAPI, HTTPException, Path, Query
+from pydantic import BaseModel, ConfigDict, Field
 import uvicorn
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import CHAT_API_KEY, CHAT_MODEL, CIDADE_ALVO, DISTRIBUIDORA_ALVO
-from ai.chat_queries import FUNCOES_DISPONIVEIS
+from ai.chat_queries import FUNCOES_DISPONIVEIS, definir_escopo_chat
+from municipalities import ESCOPO_TODA_BASE, nome_municipio, normalizar_escopo
 from database import (criar_tabela_feedback, salvar_feedback_chat,
                     criar_tabelas_historico, criar_conversa, salvar_mensagem, 
                     carregar_conversas, carregar_mensagens)
+from auth.dependencies import current_user, require_csrf
+from auth.rate_limit import RateLimitExceeded, RateLimitUnavailable, enforce_rate_limit
+from auth.store import UserRecord, ensure_auth_tables
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +35,16 @@ chat_storage_ready = False
 @asynccontextmanager
 async def lifespan(_app):
     global chat_storage_ready
+    auth_ready = False
+    try:
+        ensure_auth_tables()
+        auth_ready = True
+    except Exception:
+        logger.exception("Falha ao inicializar tabelas de autenticação do chat")
     try:
         criar_tabela_feedback()
         criar_tabelas_historico()
-        chat_storage_ready = True
+        chat_storage_ready = auth_ready
     except Exception:
         chat_storage_ready = False
         logger.exception("Falha ao inicializar tabelas do chat")
@@ -284,10 +294,12 @@ tools = [
 ]
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mensagem: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
     historico: List[Dict[str, str]] = Field(default_factory=list)
     conversa_id: Optional[int] = Field(default=None, gt=0)
-    usuario_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    municipio: str = Field(default=ESCOPO_TODA_BASE, max_length=32)
 
 class ChatResponse(BaseModel):
     resposta: str
@@ -296,6 +308,8 @@ class ChatResponse(BaseModel):
     graficos: Optional[List[Dict[str, Any]]] = None
 
 class FeedbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     pergunta: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CHARS)
     resposta: str = Field(..., min_length=1, max_length=MAX_TOOL_RESULT_CHARS)
     feedback: bool
@@ -307,6 +321,8 @@ def _validar_limites_chat(request: ChatRequest) -> None:
         raise HTTPException(status_code=422, detail="A mensagem não pode ser vazia")
     if len(request.historico) > MAX_HISTORY_MESSAGES:
         raise HTTPException(status_code=422, detail="Histórico excede o limite permitido")
+    if not normalizar_escopo(request.municipio):
+        raise HTTPException(status_code=422, detail="Município inválido; use um código IBGE de 7 dígitos")
 
     total_chars = len(request.mensagem)
     for message in request.historico:
@@ -323,20 +339,58 @@ def _validar_limites_chat(request: ChatRequest) -> None:
     if total_chars > MAX_CHAT_TOTAL_CHARS:
         raise HTTPException(status_code=422, detail="Conteúdo total do chat excede o limite permitido")
 
-@app.post("/chat/message", response_model=ChatResponse)
-def enviar_mensagem(request: ChatRequest):
+
+def _enforce_chat_rate_limit(user: UserRecord) -> None:
     try:
+        from config import AUTH_CHAT_RATE_LIMIT, AUTH_CHAT_RATE_WINDOW_SECONDS
+
+        enforce_rate_limit(
+            "chat-user",
+            str(user.id),
+            AUTH_CHAT_RATE_LIMIT,
+            AUTH_CHAT_RATE_WINDOW_SECONDS,
+        )
+    except RateLimitExceeded as error:
+        raise HTTPException(
+            status_code=429,
+            detail="Limite de mensagens atingido; tente novamente mais tarde",
+            headers={"Retry-After": str(error.retry_after)},
+        ) from error
+    except RateLimitUnavailable as error:
+        raise HTTPException(status_code=503, detail="Controle de tentativas indisponível") from error
+
+@app.post("/chat/message", response_model=ChatResponse)
+def enviar_mensagem(
+    request: ChatRequest,
+    user: UserRecord = Depends(current_user),
+    _csrf: None = Depends(require_csrf),
+):
+    try:
+        if not chat_storage_ready:
+            raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
         _validar_limites_chat(request)
+        escopo = definir_escopo_chat(request.municipio)
+        _enforce_chat_rate_limit(user)
+        usuario_id = str(user.id)
         conversa_id = request.conversa_id
-        if not conversa_id and request.usuario_id:
+        if not conversa_id:
             titulo = request.mensagem[:50] + "..." if len(request.mensagem) > 50 else request.mensagem
-            conversa_id = criar_conversa(request.usuario_id, titulo)
+            conversa_id = criar_conversa(usuario_id, titulo)
             print(f"📝 Nova conversa criada: ID {conversa_id}")
+            if not conversa_id:
+                raise HTTPException(status_code=503, detail="Não foi possível persistir a conversa")
         if conversa_id:
-            salvar_mensagem(conversa_id, "user", request.mensagem)
+            if not salvar_mensagem(conversa_id, "user", request.mensagem, usuario_id):
+                raise HTTPException(status_code=404, detail="Conversa não encontrada")
             print(f"💾 Mensagem do usuário salva na conversa {conversa_id}")
         
-        contents = [types.Content(role="user", parts=[types.Part(text=CONTEXTO_SISTEMA)])]
+        escopo_descricao = (
+            "Toda a base"
+            if escopo == ESCOPO_TODA_BASE
+            else f"{nome_municipio(escopo)} (código IBGE {escopo})"
+        )
+        contexto_escopo = f"{CONTEXTO_SISTEMA}\n\nEscopo municipal ativo nesta conversa: {escopo_descricao}."
+        contents = [types.Content(role="user", parts=[types.Part(text=contexto_escopo)])]
         
         for msg in request.historico:
             role = "user" if msg["role"] == "user" else "model"
@@ -523,7 +577,7 @@ def enviar_mensagem(request: ChatRequest):
         historico_atual.append({"role": "assistant", "content": resposta_final})
 
         if conversa_id:
-            salvar_mensagem(conversa_id, "assistant", resposta_final)
+            salvar_mensagem(conversa_id, "assistant", resposta_final, usuario_id)
             print(f"💾 Resposta do assistente salva na conversa {conversa_id}")
         
         return ChatResponse(
@@ -533,53 +587,84 @@ def enviar_mensagem(request: ChatRequest):
             graficos=graficos_gerados if graficos_gerados else None
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao processar mensagem do chat")
         raise HTTPException(status_code=500, detail="Erro interno ao processar o chat") from e
 
 @app.post("/chat/feedback")
-def enviar_feedback(request: FeedbackRequest):
+def enviar_feedback(
+    request: FeedbackRequest,
+    user: UserRecord = Depends(current_user),
+    _csrf: None = Depends(require_csrf),
+):
     try:
+        if not chat_storage_ready:
+            raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
+        _enforce_chat_rate_limit(user)
         salvar_feedback_chat(
             pergunta=request.pergunta,
             resposta=request.resposta,
             feedback=request.feedback,
-            comentario=request.comentario
+            comentario=request.comentario,
+            usuario_id=str(user.id),
         )
         return {"status": "ok", "mensagem": "Obrigado pelo feedback!"}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao salvar feedback do chat")
         raise HTTPException(status_code=500, detail="Erro interno ao salvar o feedback") from e
 
 @app.post("/chat/conversa/nova")
 def nova_conversa(
-    usuario_id: str = Query(..., min_length=1, max_length=128),
     titulo: str = Query(..., min_length=1, max_length=200),
+    user: UserRecord = Depends(current_user),
+    _csrf: None = Depends(require_csrf),
 ):
     try:
-        conversa_id = criar_conversa(usuario_id, titulo)
+        if not chat_storage_ready:
+            raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
+        _enforce_chat_rate_limit(user)
+        conversa_id = criar_conversa(str(user.id), titulo)
         if conversa_id:
             return {"status": "ok", "conversa_id": conversa_id}
         else:
             raise HTTPException(status_code=500, detail="Erro ao criar conversa")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao criar conversa")
         raise HTTPException(status_code=500, detail="Erro interno ao criar a conversa") from e
 
 @app.get("/chat/conversas")
-def listar_conversas(usuario_id: str = Query(..., min_length=1, max_length=128)):
+def listar_conversas(user: UserRecord = Depends(current_user)):
     try:
-        conversas = carregar_conversas(usuario_id)
+        if not chat_storage_ready:
+            raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
+        conversas = carregar_conversas(str(user.id))
         return {"conversas": conversas}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao listar conversas")
         raise HTTPException(status_code=500, detail="Erro interno ao listar conversas") from e
 
 @app.get("/chat/conversa/{conversa_id}")
-def obter_conversa(conversa_id: int = Path(..., gt=0)):
+def obter_conversa(
+    conversa_id: int = Path(..., gt=0),
+    user: UserRecord = Depends(current_user),
+):
     try:
-        mensagens = carregar_mensagens(conversa_id)
+        if not chat_storage_ready:
+            raise HTTPException(status_code=503, detail="Armazenamento do chat indisponível")
+        mensagens = carregar_mensagens(conversa_id, str(user.id))
+        if mensagens is None:
+            raise HTTPException(status_code=404, detail="Conversa não encontrada")
         return {"mensagens": mensagens}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Falha ao carregar conversa")
         raise HTTPException(status_code=500, detail="Erro interno ao carregar a conversa") from e

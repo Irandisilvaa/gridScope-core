@@ -1,14 +1,25 @@
 import sys
 import os
+from contextvars import ContextVar
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from database import carregar_cache_mercado
+from municipalities import ESCOPO_TODA_BASE, normalizar_escopo
 from typing import List, Dict, Any, Optional
 
 
+_escopo_chat: ContextVar[str] = ContextVar("gridscope_chat_scope", default=ESCOPO_TODA_BASE)
+
+
+def definir_escopo_chat(value: object) -> str:
+    escopo = normalizar_escopo(value)
+    _escopo_chat.set(escopo or ESCOPO_TODA_BASE)
+    return escopo or ESCOPO_TODA_BASE
+
+
 def _carregar_dados_filtrados() -> List[Dict[str, Any]]:
-    dados = carregar_cache_mercado()
+    dados = carregar_cache_mercado(_escopo_chat.get())
     return [
         d for d in dados 
         if d.get('metricas_rede', {}).get('total_clientes', 0) > 10
@@ -242,10 +253,19 @@ def obter_insights_inteligentes() -> Dict[str, Any]:
 def analisar_territorio(nome_subestacao: str) -> Dict[str, Any]:
     """Analisa o território Voronoi de uma subestação"""
     try:
-        from database import carregar_voronoi, carregar_subestacoes
+        from database import (
+            carregar_subestacoes,
+            carregar_voronoi,
+            carregar_voronoi_municipal,
+        )
         import geopandas as gpd
         
-        gdf_voronoi = carregar_voronoi()
+        escopo = _escopo_chat.get()
+        gdf_voronoi = (
+            carregar_voronoi()
+            if escopo == ESCOPO_TODA_BASE
+            else carregar_voronoi_municipal(escopo)
+        )
         gdf_subs = carregar_subestacoes()
         
         nome_upper = nome_subestacao.upper()

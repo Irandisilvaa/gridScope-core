@@ -59,7 +59,7 @@ def _recuperar_versao_publicada() -> str:
     if not isinstance(metadata, dict):
         return "unpublished"
 
-    versao = str(metadata.get("delivery_id") or metadata.get("published_at") or "unpublished")
+    versao = str(metadata.get("publication_id") or "unpublished")
     definir_versao_publicacao(versao)
     _VERSAO_RECUPERADA = versao
     return versao
@@ -82,15 +82,15 @@ def _publication_version() -> str:
     return _recuperar_versao_publicada()
 
 
-def definir_versao_publicacao(delivery_id: str) -> bool:
-    """Registra no Redis a entrega que pode ser usada como namespace de cache."""
+def definir_versao_publicacao(publication_id: str) -> bool:
+    """Registra no Redis o corte publicado usado como namespace de cache."""
 
     global _VERSAO_RECUPERADA
 
     if not is_redis_available():
         return False
     try:
-        redis_client.set(PUBLICATION_VERSION_KEY, str(delivery_id))
+        redis_client.set(PUBLICATION_VERSION_KEY, str(publication_id))
         _VERSAO_RECUPERADA = None
         return True
     except Exception:
@@ -101,10 +101,16 @@ def cache_json(ttl_seconds: int = 300, key_prefix: str = "api_cache"):
     """
     Decorator para cachear respostas JSON de endpoints.
     Chave do cache: prefixo + nome_funcao + argumentos
+
+    Os testes de contrato podem desabilitar o backend operacional com
+    ``GRIDSCOPE_DISABLE_RUNTIME_CACHE=1``. Isso evita que fixtures sejam
+    persistidas no Redis usado pelo dashboard.
     """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
+            if os.getenv("GRIDSCOPE_DISABLE_RUNTIME_CACHE") == "1":
+                return func(*args, **kwargs)
             if not is_redis_available():
                 return func(*args, **kwargs)
 
@@ -125,6 +131,10 @@ def cache_json(ttl_seconds: int = 300, key_prefix: str = "api_cache"):
             result = func(*args, **kwargs)
 
             try:
+                # Não permita que uma resposta iniciada no corte anterior seja
+                # gravada no namespace que deixou de ser autoritativo.
+                if _publication_version() != key_parts[1].split("=", 1)[1]:
+                    return result
                 if hasattr(result, 'to_json'):
                     to_save = result.to_json()
                 elif hasattr(result, 'dict'):

@@ -9,7 +9,7 @@ import holidays
 import calendar   
 import geopandas as gpd
 from sqlalchemy import text as sql_text
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from datetime import datetime
 from shapely.geometry import Point
@@ -21,6 +21,11 @@ try:
     from src.ai.model_contract import FEATURE_COLUMNS, model_is_compatible
 except ImportError:
     from model_contract import FEATURE_COLUMNS, model_is_compatible
+
+try:
+    from src.auth.dependencies import current_user, require_csrf
+except ImportError:
+    from auth.dependencies import current_user, require_csrf
 
 app = FastAPI(title="GridScope AI", version="1.0")
 
@@ -217,7 +222,7 @@ def prever_curva_ml(data_alvo, dna):
     t = np.linspace(0, 24, 24)
     return np.maximum(10 + 5 * np.sin((t - 10) * np.pi / 12), 0.1)
 
-@app.post("/predict/duck-curve")
+@app.post("/predict/duck-curve", dependencies=[Depends(current_user), Depends(require_csrf)])
 def calcular_curva_inteligente(payload: DuckCurveRequest):
     try:
         # 1. Resolver Local e Data
