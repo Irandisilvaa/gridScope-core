@@ -76,6 +76,26 @@ interna do Compose.
 
 ---
 
+## 🔐 Autenticação e usuários
+
+O acesso à plataforma é autenticado por sessão de servidor. Não existe cadastro
+público: usuários são criados somente por um administrador autenticado, e o
+primeiro administrador é provisionado explicitamente:
+
+```bash
+docker compose run --rm gridscope \
+  python -m src.auth.bootstrap_admin \
+  --email admin@gridscope.local \
+  --name "Administrador GridScope"
+```
+
+As senhas são armazenadas com `scrypt`, usuários e sessões usam UUID, operações
+de escrita exigem CSRF e login, chat e administração possuem limites Redis
+configuráveis no `.env.example`. O comando de bootstrap não cria outro
+administrador quando já existe um administrador ativo.
+
+---
+
 ## � Ferramentas de Manutenção
 
 O projeto inclui scripts utilitários para gerenciamento do banco de dados:

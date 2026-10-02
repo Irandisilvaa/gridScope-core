@@ -4,6 +4,111 @@ Este arquivo registra as alterações realizadas no GridScope Core. Toda mudanç
 posterior deve acrescentar uma entrada aqui, incluindo arquivos afetados,
 motivo, validação executada e pendências conhecidas.
 
+## 2026-10-01 — validação integrada e correções pós-revisão
+
+### Alterações realizadas
+
+- O recorte final do Voronoi passou a usar somente a união oficial das malhas
+  municipais. A margem de 250 m permanece apenas como tolerância de qualidade;
+  o envelope expandido é exclusivamente computacional.
+- As células são associadas às sementes antes do recorte, preservando a
+  identidade de pontos próximos ou ligeiramente externos à malha.
+- Territórios e recortes persistem `SITE_LON`/`SITE_LAT` para separar o ponto
+  físico da subestação do ponto representativo da área.
+- A malha IBGE persiste revisão, URL e checksum SHA-256 por município.
+- O cache Redis dos testes de contrato foi isolado do Redis operacional; a
+  invalidação do pipeline também funciona sem `delivery_id`.
+- O importador carrega `MUN` quando a camada fornece a coluna, sem tornar esse
+  campo obrigatório para fixtures legadas.
+- O mapa diferencia áreas sem métricas com preenchimento tracejado e usa o
+  ponto físico da subestação quando disponível.
+
+### Validação
+
+- `docker compose exec -T gridscope python -m src.etl.pipeline`: aprovado com
+  publicação atômica da entrega `d4aa0b...`.
+- Derivados publicados: 75 limites, 38 territórios globais, 237 recortes e
+  220 registros de cache de mercado.
+- Diferença entre a união global e a união municipal: `0.000000 km²`.
+- Geometrias inválidas: 0 globais e 0 municipais.
+- 55.724 transformadores estão cobertos pelo território do próprio `SUB`; 4
+  pontos de `SUB=30290941` ficam 47,309–163,741 m fora da malha IBGE e são
+  reportados sem expandir a geometria publicada.
+- API autenticada: 75 municípios, 38 features globais, 12 recortes em Aracaju
+  e ranking global com 38 registros.
+- Suíte Python: 121 aprovados, 3 ignorados em 124 testes executados.
+- `docker compose build gridscope frontend` e detector visual do mapa:
+  aprovados.
+
+### Pendências
+
+- Corrigir ou formalizar com a fonte a posição dos quatro transformadores fora
+  da malha; a publicação atual mantém a área oficial estrita.
+- Executar E2E visual em navegador desktop/mobile e definir a política de
+  atribuição do provedor de mapas, se tiles externos forem adicionados.
+
+## 2026-10-01 — correção do Voronoi global e recortes municipais
+
+### Alterações realizadas
+
+- `src/modelos/processar_voronoi.py` deixou de reduzir os transformadores a um
+  centro por subestação; cada transformador com `SUB` válido agora é uma semente
+  do Voronoi, e as células são unidas somente depois por `SUB`.
+- O resultado global é recortado explicitamente pela união das malhas municipais
+  do IBGE. O envelope do GEOS não é mais tratado como recorte geográfico.
+- Criados `limites_municipais` e `territorios_voronoi_municipais`, com o segundo
+  derivado pela interseção dos territórios globais com os limites oficiais.
+- A API municipal lê os recortes espaciais; não usa mais o ranking para remover
+  áreas sem métricas e não acrescenta a geometria cadastral de subestações sem
+  território.
+- O pipeline invalida também o prefixo de cache da cobertura municipal.
+- A geração registra quatro transformadores a até 250 m fora da malha oficial;
+  eles continuam sementes do cálculo, mas a geometria publicada permanece
+  estritamente recortada pela malha oficial. Desvios maiores interrompem a
+  publicação.
+
+### Validação
+
+- 55.728 transformadores elegíveis processados.
+- 38 territórios globais gerados.
+- 75 limites municipais e 237 recortes municipais persistidos.
+- 55.724 transformadores ficaram dentro do território do próprio `SUB`; os
+  quatro pontos externos são exceções de qualidade registradas acima.
+- Suíte Python: 121 aprovados, 3 ignorados em 124 testes executados.
+
+### Pendências
+
+- A validação integrada posterior desta entrada confirmou a revisão/checksum e
+  a publicação completa; ver a entrada de validação acima.
+
+## 2026-10-01 — cobertura municipal e visão de toda a base
+
+### Alterações realizadas
+
+- Criado `src/municipalities.py` com catálogo IBGE versionado e normalização de
+  escopo (`all` ou código municipal de sete dígitos).
+- Adicionado `GET /coverage/municipalities`, com nomes, UF e contagens por
+  município presentes em consumidores, transformadores e GD.
+- `cache_mercado` passou a usar chave composta por município e subestação;
+  cargas derivadas materializam o escopo global e os municípios disponíveis.
+- O ETL usa o vínculo direto transformador → subestação (`SUB`) quando
+  disponível, preservando a cobertura fora do Voronoi legado de Aracaju.
+- Ranking, GeoJSON, exportação, simulação e chat aceitam o escopo municipal.
+- O frontend ganhou o seletor “Toda a base”/municípios.
+- Removidos definitivamente o botão e o componente de Manual de Marca.
+
+### Validação histórica
+
+- A validação anterior registrava 75 municípios, 45 registros no ranking global,
+  10 em Aracaju e 64 geometrias; esses números pertenciam ao Voronoi legado e
+  não são mais o critério atual.
+- Docker: `gridscope`, `frontend`, PostgreSQL e Redis saudáveis.
+
+### Pendências
+
+- Versionar o catálogo junto dos metadados de cada publicação e confirmar com a
+  distribuidora a semântica definitiva de subestações compartilhadas.
+
 ## 2026-09-29 — ingestão, API, frontend e infraestrutura
 
 ### Objetivo
@@ -1180,3 +1285,47 @@ que apontem para uma camada inexistente.
   recuperados com sucesso; o banco temporário foi removido ao final.
 - `pg_dump --schema-only` direto no serviço `db`: dump de 13.871 bytes gerado
   sem alterar dados.
+
+## 2026-10-01 — autenticação administrativa, UUID e controle de acesso
+
+### Alterações
+
+- Criados `auth_users` e `auth_sessions` com UUID, papéis `admin`/`user`, estado
+  ativo, expiração/revogação de sessão e registro do último acesso.
+- Senhas usam `hashlib.scrypt`; tokens de sessão são opacos e somente seu hash
+  é persistido. Cookies de sessão são `HttpOnly` e o cookie separado de CSRF é
+  exigido nas operações de escrita.
+- Adicionados login/logout/me e endpoints administrativos para listar, criar,
+  suspender, reativar, alterar papel e redefinir senha de usuários. Não há rota
+  de cadastro público.
+- Adicionado `src.auth.bootstrap_admin` para o primeiro administrador.
+- Rate limiting Redis foi aplicado por IP/e-mail no login, por usuário no chat
+  e por administrador nas operações de usuários; falha do Redis bloqueia a
+  operação protegida.
+- Dados, simulação, IA e chat passaram a exigir sessão; conversas/feedback são
+  associados ao UUID autenticado e não aceitam `usuario_id` fornecido pelo
+  cliente.
+- O frontend removeu usuários demo/fallbacks locais, adicionou login real,
+  painel administrativo e integração autenticada do chat. O Nginx encaminha o
+  chat para a API interna na porta 8002.
+- O fallback do importador mantém a projeção de colunas solicitada, evitando
+  reintroduzir colunas desnecessárias quando a leitura Arrow não está disponível.
+
+### Validação
+
+- `npm run build` no frontend: aprovado.
+- `PYTHONPYCACHEPREFIX=/tmp/opencode/pycache python3 -m compileall -q src tests run_all.py`: aprovado.
+- `python3 -m unittest tests.test_auth_security`: 4 aprovados.
+- Adicionados `tests/test_auth_controls.py` e `tests/test_auth_api.py` para
+  CSRF, cookies, rate limiting, login, criação administrativa e ausência de
+  cadastro público; incluídos na suíte completa.
+- Suíte Python completa: 114 aprovados e 3 ignorados em ambiente virtual com
+  dependências instaladas e no container Docker.
+- `docker compose build gridscope frontend`: aprovado.
+- Integração contra PostgreSQL/Redis reais: login, sessão, CSRF, criação
+  administrativa, logout e rate limiting aprovados; dados de teste removidos.
+
+### Pendências
+
+- Executar a suíte no container com PostgreSQL/Redis e validar o fluxo real de
+  bootstrap, login, CSRF, rate limit e ownership de conversas.

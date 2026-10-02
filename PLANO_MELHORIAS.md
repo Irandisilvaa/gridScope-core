@@ -1,6 +1,6 @@
 # Plano de qualidade e evolução — GridScope Core
 
-> Auditoria estática do repositório em 29/09/2026. Este documento é um roteiro de implementação, não um registro de correções já aplicadas. As ocorrências citadas foram observadas no código; hipóteses sobre comportamento em produção devem ser confirmadas por testes e medições.
+> Auditoria estática do repositório em 29/09/2026. Este documento é o roteiro de implementação e, na seção 7, mantém o estado atualizado das entregas já verificadas. As ocorrências citadas foram observadas no código; hipóteses sobre comportamento em produção devem ser confirmadas por testes e medições.
 
 ## 1. Objetivo, escopo e decisões iniciais
 
@@ -319,3 +319,100 @@ Para **cada** item entregue:
 ## 6. Limitações desta auditoria
 
 A análise cobriu arquivos rastreados e fluxos relevantes por leitura estática. **Não** houve execução de Docker, acesso ao banco/serviços externos ou à distribuidora, revisão de dados reais, auditoria de dependências por CVE, benchmark, teste em navegador/dispositivo nem validação científica das fórmulas. Canal, formato, autorização e frequência de entrega da distribuidora **ainda não foram confirmados**; por isso não se pode garantir atualização em tempo real nem implementar o conector definitivo sem o contrato FONTE-01. Metas numéricas de desempenho, classificação elétrica definitiva, estimativas de esforço e decisão de autenticação devem ser fechadas com o ambiente e o responsável apropriados. Itens não citados nominalmente ainda podem surgir nos testes integrados; registrar novos achados com o mesmo formato (evidência, impacto, aceite e prioridade).
+## 7. Estado de execução — 2026-10-01
+
+Este bloco complementa o roteiro sem apagar os achados originais.
+
+### Concluído e verificado
+
+- **SEC-01:** autenticação por sessão de servidor, usuários `admin`/`user`,
+  cookies HttpOnly, CSRF, rate limiting Redis, ownership de conversas por UUID
+  e remoção de identidade/`usuario_id` controlados pelo cliente.
+- **SEC-02:** uso de `ast.literal_eval`/validação e allowlists para consultas e
+  colunas; testes de segurança SQL existentes continuam aprovados.
+- **SEC-05 (contenção):** limites de mensagem/histórico/ferramentas, validação
+  de papéis, orçamento de iterações e rate limit por usuário no chat.
+- **DATA-01/DATA-05:** staging, validação de esquema/CRS/referências,
+  publicação atômica, metadados da carga, invalidação/versionamento de cache e
+  propagação de falhas.
+- **OPS-03:** backup/restore controlados, confirmação explícita e restore em
+  banco descartável verificado.
+- **ENG-01:** suíte rastreada com **121 testes aprovados e 3 ignorados em 124
+  execuções**; testes
+  de autenticação, CSRF, cookies, rate limit e acesso cruzado incluídos.
+- **WEB-01/WEB-03 (primeiro corte):** frontend React/Vite dedicado, login real,
+  painel administrativo, proxy same-origin, rotas protegidas e chat autenticado.
+- **WEB-04 (base):** manifesto/service worker PWA e build Docker do frontend
+  aprovados.
+- **UX:** removidos o botão de Branding, o Manual de Marca e seus gatilhos;
+  a identidade visual básica do produto permanece no logo e nos tokens.
+- **GEO-01/GEO-02:** catálogo IBGE para os códigos `MUN`, limites municipais
+  persistidos, Voronoi global baseado em cada transformador, recortes municipais
+  derivados e escopo `all`/“Toda a base” implementados. Ranking, mapa, simulação,
+  exportação client-side e chat aceitam o município selecionado; a carga atual
+  expõe 75 municípios.
+
+### Parcial ou ainda em aberto
+
+- **FONTE-01/02/03/04/05:** falta contrato real com a distribuidora; o fluxo
+  atual ainda usa arquivo local/ANEEL. Uma carga recente foi corretamente
+  rejeitada por 24 referências órfãs, mantendo a carga anterior.
+- **SEC-03/SEC-04:** revisar perfil de produção, segredos, portas expostas,
+  `AUTH_COOKIE_SECURE`, mounts e endurecimento completo de arquivos recebidos.
+- **SEC-05/SEC-06:** definir retenção/privacidade do chat, política de envio ao
+  provedor externo, rotação de logs e redaction operacional.
+- **DOM-01/02/03/04/06/07:** revisão técnica das fórmulas, unidades,
+  coordenadas, modelo, relatórios e contratos de resposta ainda pendente.
+- **OPS-01/02/04/05/06:** separar ETL/treino do boot, consolidar dependências e
+  CI, observabilidade, perfis de Compose e processos independentes.
+- **WEB-02/WEB-04:** concluir paridade funcional, testes de navegador/mobile,
+  acessibilidade, offline seguro e retirada definitiva do Streamlit.
+- **GEO-01/GEO-02 (pós-primeiro corte):** revisão, URL e checksum da malha
+  municipal já são persistidos em cada publicação; permanece pendente incluir
+  municípios novos de outras UFs e formalizar com a fonte os quatro pontos fora
+  dos limites. A regra de filtrar antes da agregação já está aplicada;
+  subestações compartilhadas continuam aparecendo somente nos escopos em que
+  possuem transformadores relacionados.
+- **ENG-02/03/04 e UX-01/02:** modularização, migrações, benchmarks,
+  performance e refinamentos de usabilidade ainda não fechados.
+
+### Evidências executadas
+
+- `docker compose build gridscope frontend`: aprovado.
+- Suíte completa no container: **121 OK, 3 skipped em 124 testes**.
+- Pipeline canônico com o GDB disponível: publicado atomicamente com 75 limites,
+  38 territórios globais, 237 recortes municipais e 220 registros de cache.
+- União dos territórios globais contra a união dos recortes municipais: diferença
+  de **0,000000 km²**; geometrias globais e municipais inválidas: **0**.
+- Integração real da cobertura: endpoint retorna 75 municípios, ranking retorna
+  38 territórios em “Toda a base”, Aracaju possui 12 recortes geográficos
+  (9 subestações com métricas e 3 áreas sem métricas no ranking); 55.724 dos
+  55.728 transformadores com `SUB` válido estão dentro do território correto e
+  4 exceções externas estão registradas sem expandir a malha oficial.
+- Integração real PostgreSQL/Redis: login, sessão, CSRF, criação administrativa,
+  logout, rate limit e ownership de conversas aprovados; dados de teste removidos.
+- `npm run build`, `compileall`, `docker compose config --quiet` e `git diff
+  --check`: aprovados.
+
+### Próximos portões
+
+1. Confirmar contrato/canal da distribuidora e corrigir a entrega com referências
+   órfãs antes de publicar nova carga.
+2. Separar ingestão e treinamento do startup e formalizar readiness/alertas.
+3. Executar E2E no navegador, revisar produção/segredos e concluir a retirada do
+   Streamlit somente após paridade funcional.
+4. Confirmar a semântica de subestações compartilhadas com a distribuidora e
+   versionar o catálogo/escopo junto da próxima publicação transacional.
+
+### Requisito funcional adicionado
+
+O frontend deverá oferecer um seletor com **“Toda a base”** e municípios
+disponíveis na carga atual, sem exigir alteração de `.env` ou reinicialização.
+`CIDADE_ALVO` deixa de ser a fonte de seleção da interface e permanece apenas
+como compatibilidade de ingestões legadas até a migração do catálogo. O backend
+deverá expor a lista de municípios/códigos e aceitar o escopo selecionado em
+ranking, mapa, indicadores, exportações e chat. A primeira implementação deve
+usar o código IBGE como chave estável e exibir o nome oficial do catálogo.
+Depois que todas as cargas e consumidores usarem o catálogo por código, a
+variável `CIDADE_ALVO`, os slugs de cache por cidade e os caminhos legados que
+dependem dela podem ser removidos em uma migração versionada.

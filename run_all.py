@@ -5,15 +5,16 @@ import os
 import logging
 import urllib.error
 import urllib.request
+import platform
 from datetime import datetime
 
 DIR_RAIZ = os.path.dirname(os.path.abspath(__file__))
 DIR_SRC = os.path.join(DIR_RAIZ, "src")
 DIR_LOGS = os.path.join(DIR_RAIZ, "logs")
+DIR_FRONTEND = os.path.join(DIR_RAIZ, "frontend")
 
 CAMINHO_MODELO_PKL = os.path.join(DIR_SRC, "ai", "modelo_consumo.pkl")
 
-import sys
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
 if hasattr(sys.stderr, 'reconfigure'):
@@ -26,6 +27,8 @@ API_STARTUP_ENDPOINTS = {
     "API Inteligência Artificial": "http://127.0.0.1:8001/health",
     "API Chat IA": "http://127.0.0.1:8002/ready",
 }
+
+FRONTEND_DEV_URL = "http://localhost:5173"
 
 os.makedirs(DIR_LOGS, exist_ok=True)
 
@@ -59,6 +62,7 @@ def get_env_with_src():
     original_path = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{DIR_SRC}{os.pathsep}{original_path}"
     env["PYTHONIOENCODING"] = "utf-8"
+    env["NODE_ENV"] = env.get("NODE_ENV", "development")
     return env
 
 
@@ -101,21 +105,59 @@ def run_module(module_name, description):
 def start_api_process(module_name, port, log_filename, description):
     logger.info(f"🚀 SUBINDO {description} na porta {port}...")
 
-    log_file = open(os.path.join(DIR_LOGS, log_filename), "w", encoding="utf-8")
+    log_path = os.path.join(DIR_LOGS, log_filename)
+    log_file = open(log_path, "w", encoding="utf-8")
 
-    import platform
-    workers = "1" if platform.system() == "Windows" else "4"
+    workers = os.getenv("UVICORN_WORKERS", "1")
 
     env_vars = get_env_with_src()
     env_vars["PYTHONIOENCODING"] = "utf-8"
 
     try:
         return subprocess.Popen(
-            [PYTHON_EXEC, "-m", "uvicorn", module_name, "--host", "0.0.0.0", "--port", str(port), "--workers", workers],
+            [
+                PYTHON_EXEC,
+                "-m",
+                "uvicorn",
+                module_name,
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(port),
+                "--workers",
+                workers,
+            ],
             cwd=DIR_RAIZ,
             env=env_vars,
             stdout=log_file,
-            stderr=log_file
+            stderr=log_file,
+        )
+    finally:
+        log_file.close()
+
+
+def start_frontend_process(log_filename="frontend_dev.log", description="Frontend (Vite)"):
+    logger.info(f"🚀 SUBINDO {description} em http://localhost:5173...")
+
+    if not os.path.exists(DIR_FRONTEND):
+        raise FileNotFoundError(f"Pasta frontend não encontrada: {DIR_FRONTEND}")
+
+    log_path = os.path.join(DIR_LOGS, log_filename)
+    log_file = open(log_path, "w", encoding="utf-8")
+
+    npm_cmd = "npm.cmd" if platform.system() == "Windows" else "npm"
+
+    env_vars = os.environ.copy()
+    env_vars["NODE_ENV"] = env_vars.get("NODE_ENV", "development")
+    env_vars["VITE_HOST"] = env_vars.get("VITE_HOST", "0.0.0.0")
+
+    try:
+        return subprocess.Popen(
+            [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0"],
+            cwd=DIR_FRONTEND,
+            env=env_vars,
+            stdout=log_file,
+            stderr=log_file,
         )
     finally:
         log_file.close()
@@ -125,22 +167,35 @@ def _stop_api_processes(processes):
     for description, process in processes:
         if process.poll() is None:
             logger.info("🛑 Encerrando %s...", description)
-            process.terminate()
+            try:
+                process.terminate()
+            except Exception:
+                pass
 
     for description, process in processes:
         try:
-            process.wait(timeout=5)
+            process.wait(timeout=8)
         except subprocess.TimeoutExpired:
             logger.warning("⚠️ %s não encerrou no prazo; forçando parada", description)
-            process.kill()
-            process.wait(timeout=5)
+            try:
+                process.kill()
+                process.wait(timeout=5)
+            except Exception:
+                pass
 
 
-def aguardar_servicos(processes, endpoints, timeout_seconds=60, interval_seconds=1):
+def aguardar_servicos(
+    processes,
+    endpoints,
+    timeout_seconds=90,
+    interval_seconds=1,
+    request_timeout_seconds=10,
+):
     """Aguarda healthchecks HTTP em vez de usar um atraso fixo no startup."""
 
     deadline = time.monotonic() + timeout_seconds
     pendentes = dict(endpoints)
+    ultimos_erros = {}
     while pendentes and time.monotonic() < deadline:
         for description, process in processes:
             if process.poll() is not None:
@@ -148,18 +203,52 @@ def aguardar_servicos(processes, endpoints, timeout_seconds=60, interval_seconds
 
         for description, url in tuple(pendentes.items()):
             try:
-                with urllib.request.urlopen(url, timeout=2) as response:
+                with urllib.request.urlopen(url, timeout=request_timeout_seconds) as response:
                     if response.status == 200:
                         logger.info("✅ Healthcheck aprovado: %s", description)
                         del pendentes[description]
-            except urllib.error.URLError:
-                continue
+            except urllib.error.HTTPError as error:
+                try:
+                    detalhe = error.read().decode("utf-8", errors="replace")
+                except OSError:
+                    detalhe = str(error)
+                ultimos_erros[description] = f"HTTP {error.code}: {detalhe}"
+            except (urllib.error.URLError, TimeoutError, ConnectionRefusedError, OSError) as error:
+                ultimos_erros[description] = str(error)
 
         if pendentes:
             time.sleep(interval_seconds)
 
     if pendentes:
-        raise RuntimeError(f"Serviços não ficaram prontos: {', '.join(pendentes)}")
+        diagnosticos = "; ".join(
+            f"{description}: {ultimos_erros.get(description, 'sem resposta')}"
+            for description in pendentes
+        )
+        raise RuntimeError(f"Serviços não ficaram prontos: {diagnosticos}")
+
+
+def aguardar_frontend(processes, url=FRONTEND_DEV_URL, timeout_seconds=120, interval_seconds=1.5):
+    """Aguarda o Vite subir o dev server no localhost."""
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        for description, process in processes:
+            if process.poll() is not None:
+                raise RuntimeError(f"{description} encerrou durante o startup")
+
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "GridScope-Startup"})
+            with urllib.request.urlopen(req, timeout=2) as response:
+                if response.status < 500:
+                    logger.info("✅ Frontend (Vite) respondendo em %s", url)
+                    return True
+        except (urllib.error.URLError, TimeoutError, ConnectionRefusedError, OSError):
+            pass
+
+        time.sleep(interval_seconds)
+
+    logger.warning("⚠️ Frontend não respondeu dentro do timeout (%ss). Pode estar ainda compilando - veja logs/frontend_dev.log", timeout_seconds)
+    return False
 
 
 def verificar_banco_populado():
@@ -168,8 +257,6 @@ def verificar_banco_populado():
 
     engine = None
     try:
-        # Reutiliza o search_path/schema validado pela DAL; a engine anterior
-        # sempre consultava public, mesmo quando DATABASE_SCHEMA era outro.
         engine = get_engine()
 
         with engine.connect() as conn:
@@ -217,38 +304,49 @@ def run_pipeline():
     else:
         logger.info("✅ Modelo de IA existente. Pulando treinamento no boot.")
 
+
 if __name__ == "__main__":
-    logger.info("--- ⚡ INICIANDO SISTEMA GRIDSCOPE (HACKATHON MODE) ⚡ ---")
-    api_processes = []
+    logger.info("--- ⚡ INICIANDO SISTEMA GRIDSCOPE⚡ ---")
+    services = []
 
     try:
         run_pipeline()
 
-        logger.info("--- INICIANDO SERVIDORES ---")
+        logger.info("--- INICIANDO SERVIÇOS ---")
 
-        api_processes.append(
+        services.append(
             ("API Principal", start_api_process("src.api:app", 8000, "api_service.log", "API Principal"))
         )
-        api_processes.append(
+        services.append(
             ("API Inteligência Artificial", start_api_process("src.ai.ai_service:app", 8001, "api_ai.log", "API Inteligência Artificial"))
         )
-        api_processes.append(
+        services.append(
             ("API Chat IA (Gemini)", start_api_process("src.ai.chat_service:app", 8002, "api_chat.log", "API Chat IA (Gemini)"))
+        )
+        services.append(
+            ("Frontend (Vite)", start_frontend_process("frontend_dev.log", "Frontend (Vite)"))
         )
 
         aguardar_servicos(
-            api_processes,
+            services,
             API_STARTUP_ENDPOINTS,
+            timeout_seconds=150,
         )
 
-        logger.info("\n✅ APIs ONLINE — frontend Vite/PWA deve ser servido separadamente")
+        aguardar_frontend(services, timeout_seconds=120)
+
+        logger.info("\n✅ SISTEMA COMPLETO ONLINE!")
+        logger.info("🌐 Frontend: http://localhost:5173")
+        logger.info("🔌 API Principal: http://localhost:8000/docs")
+        logger.info("🧠 API IA: http://localhost:8001/docs")
+        logger.info("💬 API Chat: http://localhost:8002/docs")
         logger.info("📝 Logs detalhados disponíveis na pasta /logs")
         logger.info("Press Ctrl+C para encerrar tudo.\n")
 
         while True:
             time.sleep(2)
             encerrado = next(
-                ((description, process) for description, process in api_processes if process.poll() is not None),
+                ((description, process) for description, process in services if process.poll() is not None),
                 None,
             )
             if encerrado:
@@ -257,5 +355,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("\n🛑 Encerrando serviços...")
     finally:
-        _stop_api_processes(api_processes)
+        _stop_api_processes(services)
         logger.info("GridScope encerrado com sucesso.")
