@@ -16,6 +16,55 @@ class AnaliseMercadoTests(unittest.TestCase):
         )
         self.assertEqual(classificada.loc[0, "TIPO"], "Outros")
 
+    def test_agregacao_municipal_nao_mistura_clientes_de_cidades(self) -> None:
+        territorios = gpd.GeoDataFrame(
+            {"COD_ID_CLEAN": ["SUB-1"], "NOM": ["Sub 1"]},
+            geometry=[Point(0, 0)],
+            crs="EPSG:4326",
+        )
+        consumidores = pd.DataFrame(
+            {
+                "ID_SUBESTACAO": ["SUB-1", "SUB-1", "SUB-1"],
+                "TRAFO_LINK": ["T-1", "T-2", "T-3"],
+                "CONSUMO_ANUAL": [100.0, 200.0, 400.0],
+                "TIPO": ["Residencial"] * 3,
+                "ANO_MES": ["2026-01"] * 3,
+                "MUNICIPIO_CODIGO": ["2800308", "2800308", "2802106"],
+            }
+        )
+        geracao = pd.DataFrame(
+            {
+                "ID_SUBESTACAO": ["SUB-1", "SUB-1"],
+                "TRAFO_LINK": ["T-1", "T-3"],
+                "POT_INST": [10.0, 40.0],
+                "TIPO": ["Residencial"] * 2,
+                "ANO_MES": ["2026-01"] * 2,
+                "MUNICIPIO_CODIGO": ["2800308", "2802106"],
+            }
+        )
+
+        cidade_a = analise_mercado._construir_relatorio_escopo(
+            territorios,
+            territorios,
+            consumidores,
+            geracao,
+            "2800308",
+            {"SUB-1"},
+        )[0]
+        cidade_b = analise_mercado._construir_relatorio_escopo(
+            territorios,
+            territorios,
+            consumidores,
+            geracao,
+            "2802106",
+            {"SUB-1"},
+        )[0]
+
+        self.assertEqual(cidade_a["metricas_rede"]["total_clientes"], 2)
+        self.assertEqual(cidade_b["metricas_rede"]["total_clientes"], 1)
+        self.assertEqual(cidade_a["geracao_distribuida"]["potencia_total_kw"], 10.0)
+        self.assertEqual(cidade_b["geracao_distribuida"]["potencia_total_kw"], 40.0)
+
     @patch.object(analise_mercado, "carregar_consumidores")
     @patch.object(analise_mercado.gpd, "sjoin")
     @patch.object(analise_mercado, "carregar_transformadores")

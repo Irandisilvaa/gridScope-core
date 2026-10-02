@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from uuid import uuid4
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,12 +14,25 @@ from shapely.geometry import Point
 import geopandas as gpd
 
 import src.api as api_module
-from src.cache_redis import limpar_cache
+from src.auth.store import UserRecord
 
 
 class ApiContractTests(unittest.TestCase):
     def setUp(self) -> None:
-        limpar_cache()
+        # API contract fixtures must not read/write the Redis instance used by
+        # the app, but other test modules still exercise the real decorator.
+        self._previous_cache_flag = os.environ.get("GRIDSCOPE_DISABLE_RUNTIME_CACHE")
+        os.environ["GRIDSCOPE_DISABLE_RUNTIME_CACHE"] = "1"
+        self.addCleanup(self._restore_runtime_cache)
+        self.auth_user = UserRecord(
+            id=uuid4(),
+            email="teste@gridscope.local",
+            name="Usuário de teste",
+            role="user",
+            is_active=True,
+        )
+        api_module.app.dependency_overrides[api_module.current_user] = lambda: self.auth_user
+        self.addCleanup(api_module.app.dependency_overrides.clear)
         self.client = TestClient(api_module.app)
         self.snapshot = [
             {
@@ -40,6 +55,12 @@ class ApiContractTests(unittest.TestCase):
                 "geometry": Point(-37.0731, -10.9472),
             }
         ]
+
+    def _restore_runtime_cache(self) -> None:
+        if self._previous_cache_flag is None:
+            os.environ.pop("GRIDSCOPE_DISABLE_RUNTIME_CACHE", None)
+        else:
+            os.environ["GRIDSCOPE_DISABLE_RUNTIME_CACHE"] = self._previous_cache_flag
 
     def test_ranking_com_fusao_real_nao_quebra_a_geometria(self) -> None:
         """Cobre a fusão de verdade: o banco entrega lista de dicts sem geometria."""
@@ -73,6 +94,64 @@ class ApiContractTests(unittest.TestCase):
         self.assertEqual(body[0]["id_tecnico"], "A")
         self.assertEqual(body[0]["geracao_distribuida"]["detalhe_por_classe"]["Residencial"]["qtd"], 2)
 
+    def test_ranking_aplica_escopo_municipal(self) -> None:
+        with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])) as carregar_cache, patch.object(
+            api_module, "fundir_dados_geo_mercado", return_value=self.snapshot
+        ):
+            response = self.client.get("/mercado/ranking?municipio=2800308")
+
+        self.assertEqual(response.status_code, 200)
+        carregar_cache.assert_called_once_with(municipio_codigo="2800308")
+
+    def test_ranking_rejeita_escopo_municipal_invalido(self) -> None:
+        response = self.client.get("/mercado/ranking?municipio=aracaju")
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_geojson_municipal_preserva_areas_sem_metricas_no_ranking(self) -> None:
+        territories = gpd.GeoDataFrame(
+            {"COD_ID": ["A", "B"], "NOM": ["SE-A", "SE-B"]},
+            geometry=[Point(-37.1, -11.0), Point(-37.0, -11.0)],
+            crs="EPSG:4326",
+        )
+        with patch.object(
+            api_module,
+            "carregar_dados_cache",
+            return_value=(territories, [{"id_tecnico": "A"}]),
+        ):
+            response = self.client.get("/mercado/geojson?municipio=2800308")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()["features"]), 2)
+
+    def test_geojson_vazio_para_escopo_valido_nao_e_falha_de_infraestrutura(self) -> None:
+        empty = gpd.GeoDataFrame(geometry=[], crs="EPSG:4326")
+        with patch.object(api_module, "carregar_dados_cache", return_value=(empty, [])):
+            response = self.client.get("/mercado/geojson?municipio=2800308")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"type": "FeatureCollection", "features": []})
+
+    def test_cobertura_municipal_retorna_catalogo_com_contagens(self) -> None:
+        with patch.object(
+            api_module,
+            "carregar_cobertura_municipios",
+            return_value=[
+                {
+                    "codigo": "2800308",
+                    "consumidores": 12,
+                    "transformadores": 3,
+                    "subestacoes": 1,
+                    "unidades_gd": 2,
+                }
+            ],
+        ):
+            response = self.client.get("/coverage/municipalities")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["nome"], "Aracaju")
+        self.assertEqual(response.json()[0]["consumidores"], 12)
+
     def test_ranking_vazio_retorna_indisponibilidade(self) -> None:
         with patch.object(api_module, "carregar_dados_cache", return_value=(None, [])), patch.object(
             api_module, "fundir_dados_geo_mercado", return_value=[]
@@ -90,6 +169,7 @@ class ApiContractTests(unittest.TestCase):
                     {
                         "status": "published",
                         "source": "local_file",
+                        "publication_id": "publication-a",
                         "delivery_id": "delivery-a",
                         "city_target": "Aracaju, Sergipe, Brazil",
                         "row_counts": {"subestacoes": 1},
@@ -105,6 +185,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-a")
+        self.assertEqual(response.json()["publication_id"], "publication-a")
         self.assertEqual(response.json()["city_target"], "Aracaju, Sergipe, Brazil")
         self.assertEqual(response.json()["row_counts"], {"subestacoes": 1})
         self.assertEqual(response.json()["quality_report"], {"discarded_records": []})
@@ -116,6 +197,7 @@ class ApiContractTests(unittest.TestCase):
             return_value={
                 "status": "published",
                 "source": "local_file",
+                "publication_id": "publication-db",
                 "delivery_id": "delivery-db",
                 "reference_period": None,
                 "city_target": "Lagarto, Sergipe, Brazil",
@@ -130,6 +212,7 @@ class ApiContractTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["delivery_id"], "delivery-db")
+        self.assertEqual(response.json()["publication_id"], "publication-db")
         self.assertEqual(response.json()["city_target"], "Lagarto, Sergipe, Brazil")
         self.assertEqual(
             response.json()["quality_report"]["discarded_records"][0]["count"],

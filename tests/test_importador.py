@@ -45,6 +45,30 @@ class SnapshotImporterTests(unittest.TestCase):
             {"subestacoes", "territorios_voronoi", "cache_mercado"},
         )
         self.assertEqual(result.row_counts["cache_mercado"], 2)
+        self.assertTrue(result.publication_id)
+
+    def test_combina_relatorio_da_ingestao_e_dos_derivados(self) -> None:
+        importer = self._make_importer()
+        engine = MagicMock()
+
+        with patch("src.etl.importador.create_engine", return_value=engine), patch.object(
+            importer, "_validate_source"
+        ), patch.object(importer, "_create_schema"), patch.object(
+            importer,
+            "_load_layers",
+            return_value=({"subestacoes": 3}, {"discarded_records": []}),
+        ), patch.object(importer, "_publish"), patch.object(importer, "_drop_schema"):
+            result = importer.run(
+                prepare_publish=lambda _schema: (
+                    {"territorios_voronoi": 2},
+                    {"geospatial": {"outside_official_boundary_count": 1}},
+                )
+            )
+
+        self.assertEqual(
+            result.quality_report["geospatial"]["outside_official_boundary_count"],
+            1,
+        )
 
     def test_falha_na_preparacao_nao_publica_nada(self) -> None:
         importer = self._make_importer()

@@ -8,7 +8,9 @@ class PublicationPathTests(unittest.TestCase):
     @patch("src.etl.migracao_db.SnapshotImporter")
     @patch("src.etl.migracao_db._invalidate_runtime_cache")
     def test_migracao_legada_publica_derivados_no_mesmo_corte(self, invalidate_cache, importer_type):
-        importer_type.return_value.run.return_value = MagicMock(delivery_id="delivery-b")
+        importer_type.return_value.run.return_value = MagicMock(
+            delivery_id="delivery-b", publication_id="publication-b"
+        )
 
         migracao_db.migrar_gdb_para_sql("/tmp/snapshot.gdb", delivery_id="delivery-b")
 
@@ -19,7 +21,7 @@ class PublicationPathTests(unittest.TestCase):
             importer_type.call_args.kwargs["publication_metadata"],
             {"source": "local_file", "city_target": migracao_db.get_cidade_alvo()},
         )
-        invalidate_cache.assert_called_once_with("delivery-b")
+        invalidate_cache.assert_called_once_with("publication-b")
 
     @patch("src.etl.atualizar_banco.ingest_current_delivery")
     def test_atualizacao_manual_delega_ao_pipeline_canonico(self, ingest):

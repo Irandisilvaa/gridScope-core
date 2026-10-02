@@ -34,6 +34,23 @@ class CacheRedisTests(unittest.TestCase):
         cache_key = client.get.call_args.args[0]
         self.assertIn("publication=delivery-b", cache_key)
 
+    def test_resposta_tardia_nao_e_gravada_apos_troca_de_publicacao(self) -> None:
+        client = MagicMock()
+        client.get.return_value = None
+
+        @cache_redis.cache_json(ttl_seconds=30)
+        def resposta():
+            return {"status": "ok"}
+
+        with patch.object(cache_redis, "redis_client", client), patch.object(
+            cache_redis, "is_redis_available", return_value=True
+        ), patch.object(
+            cache_redis, "_publication_version", side_effect=["publication-a", "publication-b"]
+        ):
+            self.assertEqual(resposta(), {"status": "ok"})
+
+        client.setex.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

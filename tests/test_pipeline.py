@@ -76,13 +76,13 @@ class PipelineTests(unittest.TestCase):
             cleanup=Mock(),
         )
         create_data_source.return_value.fetch.return_value = delivery
-        resultado = Mock(row_counts={"subestacoes": 1})
+        resultado = Mock(row_counts={"subestacoes": 1}, publication_id="publication-b")
         snapshot_importer.return_value.run.return_value = resultado
 
         pipeline.ingest_current_delivery()
 
         write_metadata.assert_called_once_with(delivery, resultado)
-        invalidate_cache.assert_called_once_with("entrega-b")
+        invalidate_cache.assert_called_once_with("publication-b")
         delivery.cleanup.assert_called_once_with()
 
     @patch("src.etl.pipeline._invalidate_runtime_cache")
@@ -105,13 +105,15 @@ class PipelineTests(unittest.TestCase):
         )
         create_data_source.return_value.fetch.return_value = delivery
         snapshot_importer.return_value.run.return_value = Mock(
-            row_counts={"subestacoes": 1}
+            row_counts={"subestacoes": 1},
+            publication_id="publication-c",
+            quality_report={},
         )
 
         resultado = pipeline.ingest_current_delivery()
 
         self.assertEqual(resultado["delivery_id"], "entrega-c")
-        invalidate_cache.assert_called_once_with("entrega-c")
+        invalidate_cache.assert_called_once_with("publication-c")
         delivery.cleanup.assert_called_once_with()
 
 

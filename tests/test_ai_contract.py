@@ -1,13 +1,24 @@
 import unittest
 from unittest.mock import patch
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from src.ai import ai_service
+from src.auth.store import UserRecord
 
 
 class AiContractTests(unittest.TestCase):
     def setUp(self) -> None:
+        ai_service.app.dependency_overrides[ai_service.current_user] = lambda: UserRecord(
+            id=uuid4(),
+            email="teste@gridscope.local",
+            name="Usuário de teste",
+            role="user",
+            is_active=True,
+        )
+        ai_service.app.dependency_overrides[ai_service.require_csrf] = lambda: None
+        self.addCleanup(ai_service.app.dependency_overrides.clear)
         self.client = TestClient(ai_service.app)
 
     def test_rejeita_latitude_fora_do_intervalo(self) -> None:
