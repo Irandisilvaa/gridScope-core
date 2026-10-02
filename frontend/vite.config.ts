@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { THEME_COLORS } from "./src/lib/theme";
 
 export default defineConfig({
   plugins: [
@@ -14,8 +15,8 @@ export default defineConfig({
         name: "GridScope",
         short_name: "GridScope",
         description: "Monitoramento e análise de redes elétricas",
-        theme_color: "#08141f",
-        background_color: "#08141f",
+        theme_color: THEME_COLORS.surface.black,
+        background_color: THEME_COLORS.surface.surface,
         display: "standalone",
         start_url: "/",
         scope: "/",

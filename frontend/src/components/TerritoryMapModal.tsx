@@ -56,13 +56,13 @@ export const TerritoryMapModal: React.FC<TerritoryMapModalProps> = ({
     >
       {/* Modal Dialog Body (Nearly full-screen size: 97vw x 94vh) */}
       <div
-        className="relative flex flex-col w-full max-w-[97vw] h-[94vh] rounded-3xl border border-[#2B2B2B] bg-[#070707] shadow-2xl double-bezel overflow-hidden animate-in zoom-in-95 duration-200"
+        className="relative flex flex-col w-full max-w-[97vw] h-[94vh] rounded-3xl border border-grid-border-card bg-grid-surface shadow-2xl double-bezel overflow-hidden animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Top Header Bar */}
-        <div className="flex items-center justify-between border-b border-[#1C1C1C] bg-[#0D0D0D] px-5 py-3 text-xs shrink-0">
+        <div className="flex items-center justify-between border-b border-grid-border-subtle bg-grid-surface px-5 py-3 text-xs shrink-0">
           <div className="flex items-center gap-3">
-            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#FFD400]/15 text-[#FFD400]">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-grid-yellow/15 text-grid-yellow">
               <GlobeHemisphereWest size={16} weight="bold" />
             </span>
             <div>
@@ -72,15 +72,15 @@ export const TerritoryMapModal: React.FC<TerritoryMapModalProps> = ({
               >
                 Mapeamento Territorial Geoespacial · Vista Expandida
               </h2>
-              <span className="font-mono text-[0.66rem] text-[#8A8A8A]">
+              <span className="font-mono text-[0.66rem] text-grid-gray">
                 Aracaju / Sergipe · {data.features.length} Polígonos de Cobertura Conformal
               </span>
             </div>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-[#2A2A2A] bg-[#141414] px-3 py-1 font-mono text-[0.68rem] text-[#A0A0A0]">
-              <span className="h-1.5 w-1.5 rounded-full bg-[#FFD400]" />
+            <span className="hidden sm:inline-flex items-center gap-1.5 rounded-full border border-grid-border bg-grid-surface-elevated px-3 py-1 font-mono text-[0.68rem] text-grid-gray-light">
+              <span className="h-1.5 w-1.5 rounded-full bg-grid-yellow" />
               <span>Modo Alta Resolução</span>
             </span>
 
@@ -88,7 +88,7 @@ export const TerritoryMapModal: React.FC<TerritoryMapModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex items-center gap-1.5 rounded-xl border border-[#2B2B2B] bg-[#161616] px-3 py-1.5 font-mono text-xs font-semibold text-[#CCCCCC] transition-colors hover:border-[#FFD400] hover:bg-[#FFD400] hover:text-black"
+              className="flex items-center gap-1.5 rounded-xl border border-grid-border-card bg-grid-surface-elevated px-3 py-1.5 font-mono text-xs font-semibold text-grid-gray-subtle transition-colors hover:border-grid-yellow hover:bg-grid-yellow hover:text-black"
               title="Fechar Vista Expandida (Esc)"
             >
               <span>Fechar</span>
@@ -98,7 +98,7 @@ export const TerritoryMapModal: React.FC<TerritoryMapModalProps> = ({
         </div>
 
         {/* Modal Content Area: Full Height Interactive Map */}
-        <div className="relative flex-1 min-h-0 w-full overflow-hidden bg-[#050505]">
+        <div className="relative flex-1 min-h-0 w-full overflow-hidden bg-grid-black">
           <TerritoryMap
             data={data}
             substations={substations}

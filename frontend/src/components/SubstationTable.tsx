@@ -88,18 +88,18 @@ export const SubstationTable: React.FC<SubstationTableProps> = ({
   const renderSortIcon = (field: SortField) => {
     if (sortField !== field) return null;
     return sortAsc ? (
-      <ArrowUp size={12} className="inline ml-1 text-[#FFD400]" />
+      <ArrowUp size={12} className="inline ml-1 text-grid-yellow" />
     ) : (
-      <ArrowDown size={12} className="inline ml-1 text-[#FFD400]" />
+      <ArrowDown size={12} className="inline ml-1 text-grid-yellow" />
     );
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#222222] bg-[#0c0c0c] shadow-md">
+    <div className="overflow-hidden rounded-xl border border-grid-border bg-grid-surface shadow-md">
       <div className="overflow-x-auto">
         <table className="w-full min-w-[700px] border-collapse text-left">
           <thead>
-            <tr className="border-b border-[#242424] bg-[#121212] text-[0.68rem] font-mono font-semibold uppercase tracking-[0.1em] text-[#8A8A8A]">
+            <tr className="border-b border-grid-surface-border bg-grid-surface-raised text-[0.68rem] font-mono font-semibold uppercase tracking-[0.1em] text-grid-gray">
               <th
                 className="cursor-pointer px-4 py-3.5 transition-colors hover:text-white"
                 onClick={() => handleSort("name")}
@@ -140,7 +140,7 @@ export const SubstationTable: React.FC<SubstationTableProps> = ({
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[#1A1A1A]">
+          <tbody className="divide-y divide-grid-border-subtle">
             {displayedRows.map((row) => {
               const isSelected = selectedId === row.id_tecnico;
               const cleanName = row.subestacao.split(" (ID:")[0];
@@ -151,30 +151,30 @@ export const SubstationTable: React.FC<SubstationTableProps> = ({
                   onClick={() => onSelect && onSelect(row)}
                   className={`group cursor-pointer transition-colors ${
                     isSelected
-                      ? "bg-[#FFD400]/[0.08] border-l-2 border-l-[#FFD400]"
-                      : "hover:bg-[#151515]"
+                      ? "bg-grid-yellow/[0.08] border-l-2 border-l-grid-yellow"
+                      : "hover:bg-grid-surface-elevated"
                   }`}
                 >
                   <td className="px-4 py-3">
                     <div className="flex flex-col">
-                      <strong className={`font-display text-xs ${isSelected ? "text-[#FFD400]" : "text-white group-hover:text-[#FFD400]"}`}>
+                      <strong className={`font-display text-xs ${isSelected ? "text-grid-yellow" : "text-white group-hover:text-grid-yellow"}`}>
                         {cleanName}
                       </strong>
-                      <span className="font-mono text-[0.66rem] text-[#8A8A8A]">
+                      <span className="font-mono text-[0.66rem] text-grid-gray">
                         ID: {row.id_tecnico}
                       </span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#E0E0E0]">
+                  <td className="px-4 py-3 font-mono text-xs text-grid-gray-subtle">
                     {formatNumber(row.metricas_rede.total_clientes)}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-[#E0E0E0]">
+                  <td className="px-4 py-3 font-mono text-xs text-grid-gray-subtle">
                     {formatNumber(row.metricas_rede.consumo_anual_mwh, 2)}{" "}
-                    <span className="text-[0.68rem] text-[#8A8A8A]">MWh</span>
+                    <span className="text-[0.68rem] text-grid-gray">MWh</span>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs font-semibold text-[#FFD400]">
+                  <td className="px-4 py-3 font-mono text-xs font-semibold text-grid-yellow">
                     {formatNumber(row.geracao_distribuida.potencia_total_kw, 2)}{" "}
-                    <span className="text-[0.68rem] text-[#8A8A8A]">kW</span>
+                    <span className="text-[0.68rem] text-grid-gray">kW</span>
                   </td>
                   <td className="px-4 py-3">
                     <StatusPill
@@ -189,7 +189,7 @@ export const SubstationTable: React.FC<SubstationTableProps> = ({
                         e.stopPropagation();
                         onSelect && onSelect(row);
                       }}
-                      className="inline-flex items-center gap-1 rounded-lg border border-[#2E2E2E] bg-[#141414] px-2.5 py-1 text-[0.7rem] font-medium text-[#8A8A8A] transition-all hover:border-[#FFD400] hover:text-[#FFD400] group-hover:border-[#FFD400]/50"
+                      className="inline-flex items-center gap-1 rounded-lg border border-grid-border bg-grid-surface-elevated px-2.5 py-1 text-[0.7rem] font-medium text-grid-gray transition-all hover:border-grid-yellow hover:text-grid-yellow group-hover:border-grid-yellow/50"
                     >
                       <span>Inspecionar</span>
                       <CaretRight size={12} />

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import type { Substation, Territories } from "../lib/api";
+import { THEME_COLORS } from "../lib/theme";
 import { StatusPill } from "./StatusPill";
 import { TerritoryMapModal } from "./TerritoryMapModal";
 import {
@@ -97,19 +98,101 @@ function geometryPath(geometry: Geometry | undefined, project: Project): string 
   return projectPath(geometry.coordinates, project);
 }
 
-// Compute centroid of polygon coordinates
+function ringCentroid(ring: Position[]): { point: Position; area: number } | null {
+  if (ring.length < 3) return null;
+  let twiceArea = 0;
+  let x = 0;
+  let y = 0;
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    const [currentX, currentY] = ring[index];
+    const [nextX, nextY] = ring[index + 1];
+    const cross = currentX * nextY - nextX * currentY;
+    twiceArea += cross;
+    x += (currentX + nextX) * cross;
+    y += (currentY + nextY) * cross;
+  }
+  if (Math.abs(twiceArea) < Number.EPSILON) return null;
+  return {
+    point: [x / (3 * twiceArea), y / (3 * twiceArea)],
+    area: Math.abs(twiceArea / 2),
+  };
+}
+
+function pointInRing(point: Position, ring: Position[]): boolean {
+  let inside = false;
+  for (let index = 0, previous = ring.length - 1; index < ring.length; previous = index++) {
+    const [x, y] = ring[index];
+    const [previousX, previousY] = ring[previous];
+    const intersects =
+      y > point[1] !== previousY > point[1] &&
+      point[0] < ((previousX - x) * (point[1] - y)) / (previousY - y) + x;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygon(point: Position, rings: Position[][]): boolean {
+  return Boolean(rings[0] && pointInRing(point, rings[0])) &&
+    !rings.slice(1).some((ring) => pointInRing(point, ring));
+}
+
 function calculateCentroid(geometry: Geometry | undefined, project: Project): [number, number] | null {
   if (!geometry?.coordinates) return null;
-  const positions: Position[] = [];
-  collectPositions(geometry.coordinates, positions);
-  if (!positions.length) return null;
+  const polygons: Position[][][] = geometry.type === "Polygon"
+    ? [geometry.coordinates as Position[][]]
+    : geometry.type === "MultiPolygon"
+      ? (geometry.coordinates as Position[][][])
+      : [];
+  const candidates = polygons
+    .map((rings) => ({
+      rings,
+      centroid: ringCentroid(rings[0] ?? []),
+    }))
+    .filter((candidate) => candidate.centroid !== null)
+    .sort((left, right) => (right.centroid?.area ?? 0) - (left.centroid?.area ?? 0));
+  const selected = candidates[0];
+  if (!selected?.centroid) return null;
 
-  const sumX = positions.reduce((acc, curr) => acc + curr[0], 0);
-  const sumY = positions.reduce((acc, curr) => acc + curr[1], 0);
-  const avgLon = sumX / positions.length;
-  const avgLat = sumY / positions.length;
+  let representative = selected.centroid.point;
+  if (!pointInPolygon(representative, selected.rings)) {
+    const positions: Position[] = [];
+    collectPositions(selected.rings[0], positions);
+    const bounds = positions.reduce(
+      (current, [longitude, latitude]) => ({
+        minLongitude: Math.min(current.minLongitude, longitude),
+        maxLongitude: Math.max(current.maxLongitude, longitude),
+        minLatitude: Math.min(current.minLatitude, latitude),
+        maxLatitude: Math.max(current.maxLatitude, latitude),
+      }),
+      {
+        minLongitude: Number.POSITIVE_INFINITY,
+        maxLongitude: Number.NEGATIVE_INFINITY,
+        minLatitude: Number.POSITIVE_INFINITY,
+        maxLatitude: Number.NEGATIVE_INFINITY,
+      },
+    );
+    const gridSize = 12;
+    for (let row = 0; row <= gridSize; row += 1) {
+      for (let column = 0; column <= gridSize; column += 1) {
+        const candidate: Position = [
+          bounds.minLongitude + ((bounds.maxLongitude - bounds.minLongitude) * column) / gridSize,
+          bounds.minLatitude + ((bounds.maxLatitude - bounds.minLatitude) * row) / gridSize,
+        ];
+        if (pointInPolygon(candidate, selected.rings)) {
+          representative = candidate;
+          row = gridSize + 1;
+          break;
+        }
+      }
+    }
+  }
+  return project(representative);
+}
 
-  return project([avgLon, avgLat]);
+function formatDistanceKm(distanceKm: number): string {
+  if (distanceKm < 1) return `${Math.round(distanceKm * 1000)}m`;
+  if (distanceKm < 10) return `${distanceKm.toFixed(1)}km`;
+  return `${Math.round(distanceKm)}km`;
 }
 
 export const TerritoryMap: React.FC<TerritoryMapProps> = ({
@@ -176,6 +259,14 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     };
   }, [isModalView]);
 
+  useEffect(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setPitch(0);
+    setBearing(0);
+    setHoveredId(null);
+  }, [data]);
+
   // Extract all coordinates to build bounding box
   const positions: Position[] = useMemo(() => {
     const pos: Position[] = [];
@@ -186,20 +277,22 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return pos;
   }, [data]);
 
-  if (!positions.length) {
-    return (
-      <div className="flex h-64 items-center justify-center rounded-2xl border border-[#222222] bg-[#0c0c0c] text-sm text-[#8A8A8A]">
-        Nenhuma geometria válida disponível na carga atual.
-      </div>
-    );
-  }
-
-  const longitudes = positions.map(([longitude]) => longitude);
-  const latitudes = positions.map(([, latitude]) => latitude);
-  const minLongitude = Math.min(...longitudes);
-  const maxLongitude = Math.max(...longitudes);
-  const minLatitude = Math.min(...latitudes);
-  const maxLatitude = Math.max(...latitudes);
+  const positionsForProjection: Position[] = positions.length ? positions : [[0, 0]];
+  const bounds = positionsForProjection.reduce(
+    (current, [longitude, latitude]) => ({
+      minLongitude: Math.min(current.minLongitude, longitude),
+      maxLongitude: Math.max(current.maxLongitude, longitude),
+      minLatitude: Math.min(current.minLatitude, latitude),
+      maxLatitude: Math.max(current.maxLatitude, latitude),
+    }),
+    {
+      minLongitude: Number.POSITIVE_INFINITY,
+      maxLongitude: Number.NEGATIVE_INFINITY,
+      minLatitude: Number.POSITIVE_INFINITY,
+      maxLatitude: Number.NEGATIVE_INFINITY,
+    },
+  );
+  const { minLongitude, maxLongitude, minLatitude, maxLatitude } = bounds;
   const longitudeSpan = Math.max(maxLongitude - minLongitude, 0.001);
   const latitudeSpan = Math.max(maxLatitude - minLatitude, 0.001);
 
@@ -250,6 +343,19 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     [minLongitude, offsetX, cosLat, scaleGeo, maxLatitude, offsetY]
   );
 
+  const scaleBar = useMemo(() => {
+    const targetPixels = 96;
+    const rawDistanceKm = (targetPixels / Math.max(zoom, 0.75) / scaleGeo) * 111.32;
+    const magnitude = 10 ** Math.floor(Math.log10(Math.max(rawDistanceKm, 0.001)));
+    const normalized = rawDistanceKm / magnitude;
+    const preferred = normalized >= 5 ? 5 : normalized >= 2 ? 2 : 1;
+    const distanceKm = preferred * magnitude;
+    return {
+      distanceKm,
+      pixels: Math.max(36, (distanceKm / rawDistanceKm) * targetPixels),
+    };
+  }, [scaleGeo, zoom]);
+
   // Substation lookup map
   const subMap = useMemo(() => {
     const map = new Map<string, Substation>();
@@ -270,13 +376,22 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     return Math.max(...substations.map((s) => s.metricas_rede.total_clientes), 1);
   }, [substations]);
 
-  // Compute centroids for each feature
-  const featureCentroids = useMemo(() => {
+  const featurePositions = useMemo(() => {
     return data.features.map((feature, idx) => {
       const props = (feature.properties ?? {}) as Record<string, unknown>;
       const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
-      const centroid = calculateCentroid(feature.geometry as Geometry | undefined, project);
-      return { codId, centroid, idx };
+      const coordinate = (longitude: unknown, latitude: unknown) =>
+        typeof longitude === "number" && Number.isFinite(longitude) &&
+        typeof latitude === "number" && Number.isFinite(latitude)
+          ? project([longitude, latitude])
+          : null;
+      const fallback = calculateCentroid(feature.geometry as Geometry | undefined, project);
+      return {
+        codId,
+        sitePoint: coordinate(props.SITE_LON, props.SITE_LAT),
+        labelPoint: coordinate(props.LABEL_LON, props.LABEL_LAT) ?? fallback,
+        idx,
+      };
     });
   }, [data, project]);
 
@@ -381,6 +496,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
   };
 
   const isFlat2D = pitch === 0 && bearing === 0;
+  const labelFontSize = Math.max(3.5, Math.min(8.5, 8.5 / Math.max(zoom, 0.75)));
+  const showMapLabels = showLabels && zoom >= 0.85;
   const activeSubstation = hoveredId ? subMap.get(hoveredId) : (selectedId ? subMap.get(selectedId) : null);
 
   const handleToggleExpand = () => {
@@ -393,33 +510,41 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
     }
   };
 
+  if (!positions.length) {
+    return (
+      <div className="flex h-64 items-center justify-center rounded-2xl border border-grid-graphite-light bg-grid-surface text-sm text-grid-gray">
+        Nenhuma geometria válida disponível na carga atual.
+      </div>
+    );
+  }
+
   return (
     <div
       ref={containerRef}
       className={`relative overflow-hidden transition-all ${
         isModalView
           ? "h-full w-full flex flex-col rounded-none border-0 bg-transparent"
-          : "rounded-3xl border border-[#222222] bg-[#070707] double-bezel"
+          : "rounded-3xl border border-grid-graphite-light bg-grid-surface double-bezel"
       }`}
     >
       {/* HUD Header Toolbar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#1C1C1C] bg-[#0D0D0D]/95 px-4 py-3 text-xs backdrop-blur-md">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-grid-border-subtle bg-grid-surface/95 px-4 py-3 text-xs backdrop-blur-md">
         {/* Left: Title & Mode Toggle */}
         <div className="flex flex-wrap items-center gap-2.5">
-          <span className="h-2 w-2 rounded-full bg-[#FFD400] shadow-[0_0_8px_#FFD400]" />
+          <span className="h-2 w-2 rounded-full bg-grid-yellow energy-glow" />
           <strong className="font-display font-semibold text-white tracking-wide uppercase text-xs">
             Mapeamento Territorial Geoespacial
           </strong>
 
           {/* Perspective Preset Switcher: 2D Plano (Default) vs 3D Tático */}
-          <div className="flex items-center gap-1 rounded-xl border border-[#242424] bg-[#141414] p-0.5 font-mono text-[0.68rem] ml-2">
+          <div className="flex items-center gap-1 rounded-xl border border-grid-surface-border bg-grid-surface-elevated p-0.5 font-mono text-[0.68rem] ml-2">
             <button
               type="button"
               onClick={setFlat2DMode}
               className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition-all ${
                 isFlat2D
-                  ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                  : "text-[#8A8A8A] hover:text-white"
+                  ? "bg-grid-yellow font-bold text-black energy-glow"
+                  : "text-grid-gray hover:text-white"
               }`}
               title="Visão 2D Ortogonal Plana (Padrão Geográfico)"
             >
@@ -432,8 +557,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               onClick={setTactical3DMode}
               className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 transition-all ${
                 !isFlat2D
-                  ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                  : "text-[#8A8A8A] hover:text-white"
+                  ? "bg-grid-yellow font-bold text-black energy-glow"
+                  : "text-grid-gray hover:text-white"
               }`}
               title="Inclinar Mapa em Perspectiva 3D Tática"
             >
@@ -448,8 +573,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onClick={() => setDragMode(dragMode === "pan" ? "orbit" : "pan")}
             className={`flex items-center gap-1.5 rounded-lg border px-2 py-1 font-mono text-[0.66rem] transition-colors ${
               dragMode === "orbit"
-                ? "border-[#FFD400]/50 bg-[#FFD400]/15 text-[#FFD400]"
-                : "border-[#242424] bg-[#141414] text-[#8A8A8A] hover:text-white"
+                ? "border-grid-yellow/50 bg-grid-yellow/15 text-grid-yellow"
+                : "border-grid-surface-border bg-grid-surface-elevated text-grid-gray hover:text-white"
             }`}
             title="Alternar função do clique principal entre Mover (Pan) ou Rotacionar/Inclinar (Órbita 3D)"
           >
@@ -459,14 +584,14 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         </div>
 
         {/* Center: Theme Selector Pills */}
-        <div className="flex items-center gap-1 rounded-xl border border-[#222222] bg-[#121212] p-1 font-mono text-[0.66rem]">
+        <div className="flex items-center gap-1 rounded-xl border border-grid-graphite-light bg-grid-surface-raised p-1 font-mono text-[0.66rem]">
           <button
             type="button"
             onClick={() => setThemeMode("criticality")}
             className={`rounded-lg px-2 py-1 transition-all ${
               themeMode === "criticality"
-                ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                : "text-[#8A8A8A] hover:text-white"
+                ? "bg-grid-yellow font-bold text-black energy-glow"
+                : "text-grid-gray hover:text-white"
             }`}
           >
             Criticidade
@@ -476,8 +601,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onClick={() => setThemeMode("gd_power")}
             className={`rounded-lg px-2 py-1 transition-all ${
               themeMode === "gd_power"
-                ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                : "text-[#8A8A8A] hover:text-white"
+                ? "bg-grid-yellow font-bold text-black energy-glow"
+                : "text-grid-gray hover:text-white"
             }`}
           >
             Calor GD (kW)
@@ -487,8 +612,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onClick={() => setThemeMode("consumption")}
             className={`rounded-lg px-2 py-1 transition-all ${
               themeMode === "consumption"
-                ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                : "text-[#8A8A8A] hover:text-white"
+                ? "bg-grid-yellow font-bold text-black energy-glow"
+                : "text-grid-gray hover:text-white"
             }`}
           >
             Consumo (MWh)
@@ -498,8 +623,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onClick={() => setThemeMode("clients")}
             className={`rounded-lg px-2 py-1 transition-all ${
               themeMode === "clients"
-                ? "bg-[#FFD400] font-bold text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                : "text-[#8A8A8A] hover:text-white"
+                ? "bg-grid-yellow font-bold text-black energy-glow"
+                : "text-grid-gray hover:text-white"
             }`}
           >
             Clientes
@@ -510,13 +635,13 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         <div className="flex items-center gap-2">
           {/* Quick Search Input */}
           <div className="relative">
-            <MagnifyingGlass size={13} className="pointer-events-none absolute left-2.5 top-2 text-[#777777]" />
+            <MagnifyingGlass size={13} className="pointer-events-none absolute left-2.5 top-2 text-grid-gray-muted" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Localizar zona..."
-              className="w-28 sm:w-36 rounded-lg border border-[#262626] bg-[#141414] py-1 pl-7 pr-2 font-mono text-[0.7rem] text-white placeholder:text-[#555555] outline-none focus:border-[#FFD400]"
+              className="w-28 sm:w-36 rounded-lg border border-grid-border bg-grid-surface-elevated py-1 pl-7 pr-2 font-mono text-[0.7rem] text-white placeholder:text-grid-gray-dim outline-none focus:border-grid-yellow"
             />
           </div>
 
@@ -526,8 +651,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             onClick={() => setShowLabels(!showLabels)}
             className={`flex items-center gap-1 rounded-lg border px-2 py-1 font-mono text-[0.68rem] transition-colors ${
               showLabels
-                ? "border-[#FFD400]/40 bg-[#FFD400]/10 text-[#FFD400]"
-                : "border-[#242424] bg-[#141414] text-[#8A8A8A]"
+                ? "border-grid-yellow/40 bg-grid-yellow/10 text-grid-yellow"
+                : "border-grid-surface-border bg-grid-surface-elevated text-grid-gray"
             }`}
             title="Alternar Rótulos de Nomes"
           >
@@ -536,11 +661,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </button>
 
           {/* 3D Rotation Controls */}
-          <div className="flex items-center rounded-lg border border-[#242424] bg-[#141414] p-0.5">
+          <div className="flex items-center rounded-lg border border-grid-surface-border bg-grid-surface-elevated p-0.5">
             <button
               type="button"
               onClick={handleRotateLeft}
-              className="px-1.5 py-1 text-[#8A8A8A] hover:text-white transition-colors font-mono text-[0.68rem]"
+              className="px-1.5 py-1 text-grid-gray hover:text-white transition-colors font-mono text-[0.68rem]"
               title="Girar 30° para a Esquerda"
             >
               ↺
@@ -548,7 +673,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <button
               type="button"
               onClick={handleRotateRight}
-              className="px-1.5 py-1 text-[#8A8A8A] hover:text-white transition-colors font-mono text-[0.68rem] border-l border-[#242424]"
+              className="px-1.5 py-1 text-grid-gray hover:text-white transition-colors font-mono text-[0.68rem] border-l border-grid-surface-border"
               title="Girar 30° para a Direita"
             >
               ↻
@@ -556,11 +681,11 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </div>
 
           {/* Zoom Controls */}
-          <div className="flex items-center rounded-lg border border-[#242424] bg-[#141414] p-0.5">
+          <div className="flex items-center rounded-lg border border-grid-surface-border bg-grid-surface-elevated p-0.5">
             <button
               type="button"
               onClick={handleZoomIn}
-              className="p-1 text-[#8A8A8A] hover:text-white transition-colors"
+              className="p-1 text-grid-gray hover:text-white transition-colors"
               title="Aproximar Zoom (+)"
             >
               <MagnifyingGlassPlus size={15} />
@@ -568,7 +693,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <button
               type="button"
               onClick={handleZoomOut}
-              className="p-1 text-[#8A8A8A] hover:text-white transition-colors"
+              className="p-1 text-grid-gray hover:text-white transition-colors"
               title="Afastar Zoom (-)"
             >
               <MagnifyingGlassMinus size={15} />
@@ -576,7 +701,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <button
               type="button"
               onClick={handleResetView}
-              className="p-1 text-[#8A8A8A] hover:text-[#FFD400] transition-colors border-l border-[#242424]"
+              className="p-1 text-grid-gray hover:text-grid-yellow transition-colors border-l border-grid-surface-border"
               title="Redefinir Visão (2D Plano, Centro)"
             >
               <ArrowsCounterClockwise size={14} />
@@ -587,7 +712,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           <button
             type="button"
             onClick={handleToggleExpand}
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#242424] bg-[#141414] text-[#8A8A8A] hover:border-[#FFD400] hover:text-[#FFD400] transition-colors"
+            className="flex h-7 w-7 items-center justify-center rounded-lg border border-grid-surface-border bg-grid-surface-elevated text-grid-gray hover:border-grid-yellow hover:text-grid-yellow transition-colors"
             title={isModalView ? "Fechar Vista Expandida" : "Expandir Mapa em Tela Cheia (Modal)"}
           >
             {isModalView ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}
@@ -623,7 +748,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             className="pointer-events-none absolute inset-x-0 top-0 h-32 z-10 transition-opacity duration-500"
             style={{
               background:
-                "linear-gradient(to bottom, #060606 0%, rgba(6, 6, 6, 0.85) 35%, rgba(6, 6, 6, 0.4) 65%, rgba(6, 6, 6, 0) 100%)",
+                "linear-gradient(to bottom, rgba(5, 5, 5, 1) 0%, rgba(5, 5, 5, 0.85) 35%, rgba(5, 5, 5, 0.4) 65%, rgba(5, 5, 5, 0) 100%)",
             }}
           />
         )}
@@ -633,16 +758,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           {/* Tactical Corner Reticles: ONLY shown in 2D mode so 3D mode stays visually infinite without box borders */}
           {isFlat2D && (
             <>
-              <svg className="absolute top-3.5 left-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+              <svg className="absolute top-3.5 left-3.5 h-5 w-5 text-grid-yellow" viewBox="0 0 20 20" fill="none">
                 <path d="M 0 16 L 0 0 L 16 0" stroke="currentColor" strokeWidth="2.5" />
               </svg>
-              <svg className="absolute top-3.5 right-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+              <svg className="absolute top-3.5 right-3.5 h-5 w-5 text-grid-yellow" viewBox="0 0 20 20" fill="none">
                 <path d="M 20 16 L 20 0 L 4 0" stroke="currentColor" strokeWidth="2.5" />
               </svg>
-              <svg className="absolute bottom-3.5 left-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+              <svg className="absolute bottom-3.5 left-3.5 h-5 w-5 text-grid-yellow" viewBox="0 0 20 20" fill="none">
                 <path d="M 0 4 L 0 20 L 16 20" stroke="currentColor" strokeWidth="2.5" />
               </svg>
-              <svg className="absolute bottom-3.5 right-3.5 h-5 w-5 text-[#FFD400]" viewBox="0 0 20 20" fill="none">
+              <svg className="absolute bottom-3.5 right-3.5 h-5 w-5 text-grid-yellow" viewBox="0 0 20 20" fill="none">
                 <path d="M 20 4 L 20 20 L 4 20" stroke="currentColor" strokeWidth="2.5" />
               </svg>
             </>
@@ -655,7 +780,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               e.stopPropagation();
               setFlat2DMode();
             }}
-            className="pointer-events-auto absolute top-3.5 right-3.5 flex h-9 w-9 items-center justify-center rounded-full border border-[#2B2B2B] bg-[#0A0A0A]/90 shadow-xl backdrop-blur-md transition-all hover:border-[#FFD400] hover:scale-105 active:scale-95"
+            className="pointer-events-auto absolute top-3.5 right-3.5 flex h-9 w-9 items-center justify-center rounded-full border border-grid-border-card bg-grid-surface/90 shadow-xl backdrop-blur-md transition-all hover:border-grid-yellow hover:scale-105 active:scale-95"
             title="Clique para alinhar ao Norte e retornar ao modo 2D Plano"
           >
             <div
@@ -663,9 +788,9 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
               style={{ transform: `rotate(${-bearing}deg)` }}
             >
               <svg width="24" height="24" viewBox="-12 -12 24 24">
-                <polygon points="0,-10 3,0 0,2.5 -3,0" fill="#FFD400" />
-                <polygon points="0,10 3,0 0,-2.5 -3,0" fill="#555555" />
-                <text x="0" y="-10.5" textAnchor="middle" className="font-mono text-[6.5px] font-bold fill-[#FFD400]">
+                <polygon points="0,-10 3,0 0,2.5 -3,0" fill={THEME_COLORS.brand.yellow} />
+                <polygon points="0,10 3,0 0,-2.5 -3,0" fill={THEME_COLORS.text.placeholder} />
+                <text x="0" y="-10.5" textAnchor="middle" fill={THEME_COLORS.brand.yellow} className="font-mono text-[6.5px] font-bold">
                   N
                 </text>
               </svg>
@@ -673,14 +798,18 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           </button>
 
           {/* Graphic Scale Bar in HUD */}
-          <div className="absolute bottom-3.5 left-4 flex flex-col gap-0.5 font-mono text-[9px] text-[#8A8A8A]">
-            <div className="flex w-24 items-center justify-between text-[8px]">
+          <div
+            className="absolute bottom-3.5 left-4 flex flex-col gap-0.5 font-mono text-[9px] text-grid-gray"
+            aria-label={`Escala aproximada: ${formatDistanceKm(scaleBar.distanceKm)}`}
+            style={{ width: scaleBar.pixels }}
+          >
+            <div className="flex w-full items-center justify-between text-[8px]">
               <span>0</span>
-              <span>2.5km</span>
-              <span>5km</span>
+              <span>{formatDistanceKm(scaleBar.distanceKm / 2)}</span>
+              <span>{formatDistanceKm(scaleBar.distanceKm)}</span>
             </div>
-            <div className="flex h-1.5 w-24 border border-[#3A3A3A] bg-[#111111]/90">
-              <div className="w-1/2 bg-[#FFD400]/50 border-r border-[#3A3A3A]" />
+            <div className="flex h-1.5 w-full border border-grid-border-strong bg-grid-surface-raised/90">
+              <div className="w-1/2 bg-grid-yellow/50 border-r border-grid-border-strong" />
               <div className="w-1/2 bg-transparent" />
             </div>
           </div>
@@ -705,9 +834,24 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             viewBox={`0 0 ${svgWidth} ${svgHeight}`}
           >
             <defs>
-              {/* Glowing Golden Filter */}
+              {/* Tone-Preserving Glow Filters */}
+              <filter id="glowNormal" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={THEME_COLORS.status.success} floodOpacity="0.65" />
+              </filter>
+              <filter id="glowAttention" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={THEME_COLORS.status.warning} floodOpacity="0.70" />
+              </filter>
+              <filter id="glowCritical" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="6" floodColor={THEME_COLORS.status.danger} floodOpacity="0.80" />
+              </filter>
+              <filter id="glowInfo" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={THEME_COLORS.status.info} floodOpacity="0.65" />
+              </filter>
+              <filter id="glowYellow" x="-30%" y="-30%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={THEME_COLORS.brand.yellow} floodOpacity="0.65" />
+              </filter>
               <filter id="territoryGlow" x="-30%" y="-30%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#FFD400" floodOpacity="0.6" />
+                <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor={THEME_COLORS.brand.yellow} floodOpacity="0.6" />
               </filter>
 
               {/* Infinite World Tactical Ground Grid Pattern */}
@@ -721,21 +865,21 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 {/* Secondary sub-grid lines 20px */}
                 <path
                   d="M 20 0 L 20 60 M 40 0 L 40 60 M 0 20 L 60 20 M 0 40 L 60 40"
-                  stroke="#161616"
+                  stroke={THEME_COLORS.surface.elevatedAlt}
                   strokeWidth="0.8"
                   fill="none"
                 />
                 {/* Primary grid lines 60px */}
                 <path
                   d="M 60 0 L 0 0 0 60"
-                  stroke="#262626"
+                  stroke={THEME_COLORS.border.default}
                   strokeWidth="1.2"
                   fill="none"
                 />
                 {/* CAD-style corner tick at intersections */}
                 <path
                   d="M -3 0 L 3 0 M 0 -3 L 0 3"
-                  stroke="#FFD400"
+                  stroke={THEME_COLORS.brand.yellow}
                   strokeOpacity="0.28"
                   strokeWidth="1.2"
                 />
@@ -750,12 +894,12 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 r={groundRadius * 0.7}
                 gradientUnits="userSpaceOnUse"
               >
-                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-                <stop offset="25%" stopColor="#ffffff" stopOpacity="0.85" />
-                <stop offset="50%" stopColor="#ffffff" stopOpacity="0.5" />
-                <stop offset="70%" stopColor="#ffffff" stopOpacity="0.2" />
-                <stop offset="88%" stopColor="#ffffff" stopOpacity="0.04" />
-                <stop offset="100%" stopColor="#000000" stopOpacity="0" />
+                <stop offset="0%" stopColor={THEME_COLORS.text.white} stopOpacity="0.95" />
+                <stop offset="25%" stopColor={THEME_COLORS.text.white} stopOpacity="0.85" />
+                <stop offset="50%" stopColor={THEME_COLORS.text.white} stopOpacity="0.5" />
+                <stop offset="70%" stopColor={THEME_COLORS.text.white} stopOpacity="0.2" />
+                <stop offset="88%" stopColor={THEME_COLORS.text.white} stopOpacity="0.04" />
+                <stop offset="100%" stopColor={THEME_COLORS.surface.black} stopOpacity="0" />
               </radialGradient>
 
               {/* Mask for Infinite Ground Plane Fade */}
@@ -781,7 +925,7 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 y={groundY}
                 width={groundSize}
                 height={groundSize}
-                fill="#070707"
+                fill={THEME_COLORS.surface.surfaceModal}
                 mask="url(#groundHorizonFadeMask)"
               />
 
@@ -803,13 +947,16 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                 if (!path) return null;
 
                 const sub = subMap.get(codId);
-                const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
-                const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
+                const hasMetrics = Boolean(sub);
+                const critStr = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase() ?? "";
+                const isCritical = critStr.includes("CRÍT") || critStr.includes("CRIT");
+                const isAttention = critStr.includes("ATEN") || critStr.includes("MÉD") || critStr.includes("MED");
+                const isNormal = hasMetrics && !isCritical && !isAttention;
                 const isHovered = hoveredId === codId;
                 const isSelected = selectedId === codId;
 
                 // Filter out if statusFilter doesn't match
-                if (statusFilter === "normal" && (isCritical || isAttention)) return null;
+                if (statusFilter === "normal" && !isNormal) return null;
                 if (statusFilter === "attention" && !isAttention) return null;
                 if (statusFilter === "critical" && !isCritical) return null;
 
@@ -819,132 +966,262 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
                   (name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     codId.includes(searchQuery));
 
-                // Compute Theme Fill Color
-                let fill = "#101010";
-                let stroke = "#242424";
+                // Compute Theme Fill & Stroke with Tone-Preserving Interaction Highlights
+                let fill: string = THEME_COLORS.surface.raised;
+                let stroke: string = THEME_COLORS.border.surface;
                 let strokeWidth = 1.0 / zoom;
+                let strokeDasharray: string | undefined;
+                let glowFilterId: string | undefined;
 
-                if (themeMode === "criticality") {
-                  if (isCritical) {
-                    fill = "rgba(239, 68, 68, 0.22)";
-                    stroke = "#EF4444";
-                  } else if (isAttention) {
-                    fill = "rgba(245, 158, 11, 0.18)";
-                    stroke = "#F59E0B";
+                if (!hasMetrics) {
+                  strokeDasharray = `${4 / zoom} ${3 / zoom}`;
+                  if (isSelected) {
+                    fill = "rgba(148, 163, 184, 0.32)";
+                    stroke = "#CBD5E1";
+                    strokeWidth = 2.4 / zoom;
+                  } else if (isHovered) {
+                    fill = "rgba(148, 163, 184, 0.22)";
+                    stroke = "rgba(148, 163, 184, 0.85)";
+                    strokeWidth = 2.0 / zoom;
                   } else {
-                    fill = "rgba(255, 255, 255, 0.04)";
-                    stroke = "rgba(255, 255, 255, 0.14)";
+                    fill = "rgba(148, 163, 184, 0.08)";
+                    stroke = "rgba(148, 163, 184, 0.48)";
+                  }
+                } else if (themeMode === "criticality") {
+                  if (isCritical) {
+                    if (isSelected) {
+                      glowFilterId = "glowCritical";
+                      fill = "rgba(239, 68, 68, 0.48)";
+                      stroke = THEME_COLORS.status.danger;
+                      strokeWidth = 2.8 / zoom;
+                    } else if (isHovered) {
+                      glowFilterId = "glowCritical";
+                      fill = "rgba(239, 68, 68, 0.38)";
+                      stroke = THEME_COLORS.status.danger;
+                      strokeWidth = 2.4 / zoom;
+                    } else if (matchesSearch) {
+                      fill = "rgba(239, 68, 68, 0.40)";
+                      stroke = THEME_COLORS.status.danger;
+                      strokeWidth = 2.2 / zoom;
+                    } else {
+                      fill = "rgba(239, 68, 68, 0.25)";
+                      stroke = THEME_COLORS.status.danger;
+                      strokeWidth = 1.6 / zoom;
+                    }
+                  } else if (isAttention) {
+                    if (isSelected) {
+                      glowFilterId = "glowAttention";
+                      fill = "rgba(245, 158, 11, 0.46)";
+                      stroke = THEME_COLORS.status.warning;
+                      strokeWidth = 2.6 / zoom;
+                    } else if (isHovered) {
+                      glowFilterId = "glowAttention";
+                      fill = "rgba(245, 158, 11, 0.36)";
+                      stroke = THEME_COLORS.status.warning;
+                      strokeWidth = 2.3 / zoom;
+                    } else if (matchesSearch) {
+                      fill = "rgba(245, 158, 11, 0.38)";
+                      stroke = THEME_COLORS.status.warning;
+                      strokeWidth = 2.0 / zoom;
+                    } else {
+                      fill = "rgba(245, 158, 11, 0.22)";
+                      stroke = THEME_COLORS.status.warning;
+                      strokeWidth = 1.3 / zoom;
+                    }
+                  } else {
+                    // Normal: intensifica o tom verde na interação
+                    if (isSelected) {
+                      glowFilterId = "glowNormal";
+                      fill = "rgba(34, 197, 94, 0.40)";
+                      stroke = THEME_COLORS.status.success;
+                      strokeWidth = 2.6 / zoom;
+                    } else if (isHovered) {
+                      glowFilterId = "glowNormal";
+                      fill = "rgba(34, 197, 94, 0.28)";
+                      stroke = THEME_COLORS.status.success;
+                      strokeWidth = 2.2 / zoom;
+                    } else if (matchesSearch) {
+                      fill = "rgba(34, 197, 94, 0.30)";
+                      stroke = THEME_COLORS.status.success;
+                      strokeWidth = 2.0 / zoom;
+                    } else {
+                      fill = "rgba(34, 197, 94, 0.09)";
+                      stroke = "rgba(34, 197, 94, 0.40)";
+                      strokeWidth = 1.0 / zoom;
+                    }
                   }
                 } else if (themeMode === "gd_power") {
                   const gdVal = sub?.geracao_distribuida.potencia_total_kw ?? 0;
                   const ratio = Math.min(1.0, gdVal / maxGdPower);
-                  const alpha = (0.06 + ratio * 0.45).toFixed(2);
-                  fill = `rgba(255, 212, 0, ${alpha})`;
-                  stroke = ratio > 0.4 ? "#FFD400" : "rgba(255, 212, 0, 0.35)";
+                  if (isSelected) {
+                    glowFilterId = "glowYellow";
+                    fill = "rgba(255, 212, 0, 0.50)";
+                    stroke = THEME_COLORS.brand.yellow;
+                    strokeWidth = 2.8 / zoom;
+                  } else if (isHovered) {
+                    glowFilterId = "glowYellow";
+                    fill = "rgba(255, 212, 0, 0.40)";
+                    stroke = THEME_COLORS.brand.yellow;
+                    strokeWidth = 2.4 / zoom;
+                  } else if (matchesSearch) {
+                    fill = "rgba(255, 212, 0, 0.42)";
+                    stroke = THEME_COLORS.brand.yellow;
+                    strokeWidth = 2.2 / zoom;
+                  } else {
+                    const alpha = (0.06 + ratio * 0.45).toFixed(2);
+                    fill = `rgba(255, 212, 0, ${alpha})`;
+                    stroke = ratio > 0.4 ? THEME_COLORS.brand.yellow : "rgba(255, 212, 0, 0.35)";
+                  }
                 } else if (themeMode === "consumption") {
                   const consVal = sub?.metricas_rede.consumo_anual_mwh ?? 0;
                   const ratio = Math.min(1.0, consVal / maxConsumption);
-                  const alpha = (0.06 + ratio * 0.40).toFixed(2);
-                  fill = `rgba(59, 130, 246, ${alpha})`;
-                  stroke = ratio > 0.4 ? "#3B82F6" : "rgba(59, 130, 246, 0.35)";
+                  if (isSelected) {
+                    glowFilterId = "glowInfo";
+                    fill = "rgba(59, 130, 246, 0.48)";
+                    stroke = THEME_COLORS.status.info;
+                    strokeWidth = 2.8 / zoom;
+                  } else if (isHovered) {
+                    glowFilterId = "glowInfo";
+                    fill = "rgba(59, 130, 246, 0.38)";
+                    stroke = THEME_COLORS.status.info;
+                    strokeWidth = 2.4 / zoom;
+                  } else if (matchesSearch) {
+                    fill = "rgba(59, 130, 246, 0.40)";
+                    stroke = THEME_COLORS.status.info;
+                    strokeWidth = 2.2 / zoom;
+                  } else {
+                    const alpha = (0.06 + ratio * 0.40).toFixed(2);
+                    fill = `rgba(59, 130, 246, ${alpha})`;
+                    stroke = ratio > 0.4 ? THEME_COLORS.status.info : "rgba(59, 130, 246, 0.35)";
+                  }
                 } else if (themeMode === "clients") {
                   const cliVal = sub?.metricas_rede.total_clientes ?? 0;
                   const ratio = Math.min(1.0, cliVal / maxClients);
-                  const alpha = (0.06 + ratio * 0.40).toFixed(2);
-                  fill = `rgba(34, 197, 94, ${alpha})`;
-                  stroke = ratio > 0.4 ? "#22C55E" : "rgba(34, 197, 94, 0.35)";
-                }
-
-                // Highlight on hover, selected, or search match
-                if (isHovered) {
-                  fill = "rgba(255, 212, 0, 0.40)";
-                  stroke = "#FFD400";
-                  strokeWidth = 2.4 / zoom;
-                } else if (isSelected) {
-                  fill = "rgba(255, 212, 0, 0.30)";
-                  stroke = "#FFD400";
-                  strokeWidth = 2.8 / zoom;
-                } else if (matchesSearch) {
-                  fill = "rgba(255, 212, 0, 0.42)";
-                  stroke = "#FFD400";
-                  strokeWidth = 2.2 / zoom;
+                  if (isSelected) {
+                    glowFilterId = "glowNormal";
+                    fill = "rgba(34, 197, 94, 0.48)";
+                    stroke = THEME_COLORS.status.success;
+                    strokeWidth = 2.8 / zoom;
+                  } else if (isHovered) {
+                    glowFilterId = "glowNormal";
+                    fill = "rgba(34, 197, 94, 0.38)";
+                    stroke = THEME_COLORS.status.success;
+                    strokeWidth = 2.4 / zoom;
+                  } else if (matchesSearch) {
+                    fill = "rgba(34, 197, 94, 0.40)";
+                    stroke = THEME_COLORS.status.success;
+                    strokeWidth = 2.2 / zoom;
+                  } else {
+                    const alpha = (0.06 + ratio * 0.40).toFixed(2);
+                    fill = `rgba(34, 197, 94, ${alpha})`;
+                    stroke = ratio > 0.4 ? THEME_COLORS.status.success : "rgba(34, 197, 94, 0.35)";
+                  }
                 }
 
                 return (
                   <g key={codId || `${name}-${index}`}>
                     <path
                       d={path}
+                      fillRule="evenodd"
+                      clipRule="evenodd"
                       fill={fill}
                       stroke={stroke}
                       strokeWidth={strokeWidth}
+                      strokeDasharray={strokeDasharray}
                       strokeLinejoin="round"
                       className="transition-colors duration-150 cursor-pointer"
                       onMouseEnter={() => setHoveredId(codId)}
                       onClick={() => {
                         if (onSelectSubstation && codId) onSelectSubstation(codId);
                       }}
-                      filter={isHovered || isSelected ? "url(#territoryGlow)" : undefined}
+                      filter={glowFilterId ? `url(#${glowFilterId})` : undefined}
                     >
-                      <title>{`${name} (ID: ${codId})`}</title>
+                      <title>{`${name} (ID: ${codId})${hasMetrics ? "" : " — sem métricas neste município"}`}</title>
                     </path>
                   </g>
                 );
               })}
 
-              {/* Substation Centroid Pins & Labels Overlay */}
+              {/* Physical substation pins & territory labels overlay */}
               {data.features.map((feature, index) => {
                 const props = (feature.properties ?? {}) as Record<string, unknown>;
                 const codId = String(props.COD_ID ?? props.id_tecnico ?? "");
                 const name = String(props.NOM ?? props.NOME ?? `Zona ${index + 1}`).replace("SUBESTACAO", "SE");
-                const centroid = featureCentroids[index]?.centroid;
-                if (!centroid) return null;
+                const { sitePoint, labelPoint } = featurePositions[index] ?? {};
+                if (!sitePoint && !labelPoint) return null;
 
                 const sub = subMap.get(codId);
-                const isCritical = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("CRÍT");
-                const isAttention = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase().includes("ATEN");
+                const critStr = sub?.metricas_rede.nivel_criticidade_gd.toUpperCase() ?? "";
+                const isCritical = critStr.includes("CRÍT") || critStr.includes("CRIT");
+                const isAttention = critStr.includes("ATEN") || critStr.includes("MÉD") || critStr.includes("MED");
                 const isHovered = hoveredId === codId;
                 const isSelected = selectedId === codId;
 
-                const pinColor = isHovered || isSelected ? "#FFD400" : isCritical ? "#EF4444" : isAttention ? "#F59E0B" : "#FFFFFF";
+                // Determine tone-specific color for pins & labels that intensifies on interaction
+                let pinColor: string = THEME_COLORS.text.placeholder;
+                let labelHighlightColor: string = THEME_COLORS.text.white;
+
+                if (themeMode === "criticality") {
+                  if (isCritical) {
+                    pinColor = isHovered || isSelected ? "#F87171" : THEME_COLORS.status.danger;
+                    labelHighlightColor = "#F87171";
+                  } else if (isAttention) {
+                    pinColor = isHovered || isSelected ? "#FBBF24" : THEME_COLORS.status.warning;
+                    labelHighlightColor = "#FBBF24";
+                  } else if (sub) {
+                    pinColor = isHovered || isSelected ? "#4ADE80" : THEME_COLORS.status.success;
+                    labelHighlightColor = "#4ADE80";
+                  }
+                } else if (themeMode === "consumption") {
+                  pinColor = isHovered || isSelected ? "#60A5FA" : THEME_COLORS.status.info;
+                  labelHighlightColor = "#60A5FA";
+                } else if (themeMode === "clients") {
+                  pinColor = isHovered || isSelected ? "#4ADE80" : THEME_COLORS.status.success;
+                  labelHighlightColor = "#4ADE80";
+                } else if (themeMode === "gd_power") {
+                  pinColor = isHovered || isSelected ? "#FFE033" : THEME_COLORS.brand.yellow;
+                  labelHighlightColor = THEME_COLORS.brand.yellow;
+                } else if (sub) {
+                  pinColor = THEME_COLORS.text.white;
+                  labelHighlightColor = THEME_COLORS.text.white;
+                }
 
                 return (
                   <g
                     key={`pin-${codId}-${index}`}
-                    transform={`translate(${centroid[0]}, ${centroid[1]})`}
                     className="pointer-events-none"
                   >
-                    {/* Substation Centroid Node */}
-                    {showNodes && (
-                      <g>
+                    {showNodes && sitePoint && (
+                      <g transform={`translate(${sitePoint[0]}, ${sitePoint[1]})`}>
                         {/* Pulse Ring when Active */}
-                        {(isHovered || isSelected || isCritical) && (
+                        {(isHovered || isSelected || isCritical || isAttention) && (
                           <circle
-                            r={9 / Math.sqrt(zoom)}
+                            r={(isHovered || isSelected ? 11 : isCritical ? 10 : 8) / Math.sqrt(zoom)}
                             fill="none"
                             stroke={pinColor}
                             strokeWidth={1.5 / zoom}
-                            opacity={0.75}
+                            opacity={isHovered || isSelected ? 0.95 : isCritical ? 0.85 : 0.65}
                           />
                         )}
                         {/* Core Dot */}
                         <circle
-                          r={3.8 / Math.sqrt(zoom)}
+                          r={(isHovered || isSelected ? 5.2 : 3.8) / Math.sqrt(zoom)}
                           fill={pinColor}
-                          stroke="#000000"
-                          strokeWidth={1 / zoom}
+                          stroke={THEME_COLORS.surface.black}
+                          strokeWidth={1.2 / zoom}
                         />
                       </g>
                     )}
 
                     {/* Clean Map Label */}
-                    {showLabels && (
-                      <g transform={`translate(0, ${showNodes ? 12 / zoom : 0})`}>
+                    {showMapLabels && labelPoint && (
+                      <g transform={`translate(${labelPoint[0]}, ${labelPoint[1]})`}>
                         <text
                           textAnchor="middle"
                           className="select-none font-mono font-bold tracking-tight"
                           style={{
-                            fontSize: `${Math.max(7.5, Math.min(11, 8.5 / Math.sqrt(zoom)))}px`,
-                            fill: isHovered || isSelected ? "#FFD400" : "#E2E2E2",
+                            fontSize: `${labelFontSize}px`,
+                            fill: isHovered || isSelected ? labelHighlightColor : THEME_COLORS.text.subtle,
                             textShadow: "0 1px 3px rgba(0,0,0,0.95)",
                           }}
                         >
@@ -961,51 +1238,68 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         </div>
 
         {/* Floating Active Substation HUD Card */}
-        {activeSubstation && (
-          <div
-            className="absolute bottom-4 right-4 z-30 min-w-[280px] max-w-[340px] rounded-2xl border border-[#FFD400]/40 bg-[#0A0A0A]/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200"
-          >
-            <div className="flex items-start justify-between gap-2 border-b border-[#222222] pb-2 mb-2.5">
-              <div>
-                <span className="font-mono text-[0.65rem] text-[#8A8A8A] block">
-                  SUBESTAÇÃO DETECTADA
-                </span>
-                <strong className="font-display text-sm font-bold text-white block">
-                  {activeSubstation.subestacao.split(" (ID:")[0]}
-                </strong>
-                <span className="font-mono text-[0.68rem] text-[#FFD400]">
-                  ID Técnico: {activeSubstation.id_tecnico}
-                </span>
+        {activeSubstation && (() => {
+          const actCrit = activeSubstation.metricas_rede.nivel_criticidade_gd.toUpperCase();
+          const isActCrit = actCrit.includes("CRÍT") || actCrit.includes("CRIT");
+          const isActAttn = actCrit.includes("ATEN") || actCrit.includes("MÉD") || actCrit.includes("MED");
+
+          const hudBorder = isActCrit
+            ? "border-status-danger/50 shadow-[0_0_25px_rgba(239,68,68,0.22)]"
+            : isActAttn
+              ? "border-status-warning/50 shadow-[0_0_25px_rgba(245,158,11,0.22)]"
+              : "border-status-success/50 shadow-[0_0_25px_rgba(34,197,94,0.18)]";
+
+          const hudIdColor = isActCrit
+            ? "text-status-danger"
+            : isActAttn
+              ? "text-status-warning"
+              : "text-status-success";
+
+          return (
+            <div
+              className={`absolute bottom-4 right-4 z-30 min-w-[280px] max-w-[340px] rounded-2xl border ${hudBorder} bg-grid-surface/95 p-4 shadow-2xl backdrop-blur-xl animate-in fade-in slide-in-from-bottom-2 duration-200`}
+            >
+              <div className="flex items-start justify-between gap-2 border-b border-grid-graphite-light pb-2 mb-2.5">
+                <div>
+                  <span className="font-mono text-[0.65rem] text-grid-gray block">
+                    SUBESTAÇÃO DETECTADA
+                  </span>
+                  <strong className="font-display text-sm font-bold text-white block">
+                    {activeSubstation.subestacao.split(" (ID:")[0]}
+                  </strong>
+                  <span className={`font-mono text-[0.68rem] ${hudIdColor}`}>
+                    ID Técnico: {activeSubstation.id_tecnico}
+                  </span>
+                </div>
+                <StatusPill
+                  label={activeSubstation.metricas_rede.nivel_criticidade_gd}
+                  size="sm"
+                />
               </div>
-              <StatusPill
-                label={activeSubstation.metricas_rede.nivel_criticidade_gd}
-                size="sm"
-              />
-            </div>
 
             <div className="grid grid-cols-3 gap-2 font-mono text-center">
-              <div className="rounded-lg border border-[#1F1F1F] bg-[#121212] p-1.5">
-                <span className="block text-[0.62rem] text-[#8A8A8A]">POTÊNCIA GD</span>
-                <strong className="block text-xs font-bold text-[#FFD400] mt-0.5">
+              <div className="rounded-lg border border-grid-border-subtle bg-grid-surface-raised p-1.5">
+                <span className="block text-[0.62rem] text-grid-gray">POTÊNCIA GD</span>
+                <strong className="block text-xs font-bold text-grid-yellow mt-0.5">
                   {activeSubstation.geracao_distribuida.potencia_total_kw.toLocaleString("pt-BR", {
                     maximumFractionDigits: 1,
                   })}{" "}
-                  <span className="text-[0.6rem] font-normal text-[#8A8A8A]">kW</span>
+                  <span className="text-[0.6rem] font-normal text-grid-gray">kW</span>
                 </strong>
               </div>
 
-              <div className="rounded-lg border border-[#1F1F1F] bg-[#121212] p-1.5">
-                <span className="block text-[0.62rem] text-[#8A8A8A]">CONSUMO</span>
+              <div className="rounded-lg border border-grid-border-subtle bg-grid-surface-raised p-1.5">
+                <span className="block text-[0.62rem] text-grid-gray">CONSUMO</span>
                 <strong className="block text-xs font-bold text-white mt-0.5">
                   {activeSubstation.metricas_rede.consumo_anual_mwh.toLocaleString("pt-BR", {
                     maximumFractionDigits: 0,
                   })}{" "}
-                  <span className="text-[0.6rem] font-normal text-[#8A8A8A]">MWh</span>
+                  <span className="text-[0.6rem] font-normal text-grid-gray">MWh</span>
                 </strong>
               </div>
 
-              <div className="rounded-lg border border-[#1F1F1F] bg-[#121212] p-1.5">
-                <span className="block text-[0.62rem] text-[#8A8A8A]">CLIENTES</span>
+              <div className="rounded-lg border border-grid-border-subtle bg-grid-surface-raised p-1.5">
+                <span className="block text-[0.62rem] text-grid-gray">CLIENTES</span>
                 <strong className="block text-xs font-bold text-white mt-0.5">
                   {activeSubstation.metricas_rede.total_clientes.toLocaleString("pt-BR")}
                 </strong>
@@ -1016,29 +1310,30 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
             <button
               type="button"
               onClick={() => onSelectSubstation && onSelectSubstation(activeSubstation.id_tecnico)}
-              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#FFD400]/40 bg-[#FFD400]/10 py-2 font-mono text-xs font-bold text-[#FFD400] transition-colors hover:bg-[#FFD400]/20"
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-grid-yellow/40 bg-grid-yellow/10 py-2 font-mono text-xs font-bold text-grid-yellow transition-colors hover:bg-grid-yellow/20"
             >
               <span>Abrir Telemetria do Ativo</span>
               <ArrowSquareOut size={14} />
             </button>
           </div>
-        )}
-      </div>
+        );
+      })()}
+    </div>
 
       {/* Footer Status Bar with Live Coordinates & Legend */}
-      <div className="flex flex-wrap items-center justify-between border-t border-[#1C1C1C] bg-[#0A0A0A] px-4 py-2.5 text-[0.7rem] font-mono text-[#8A8A8A]">
+      <div className="flex flex-wrap items-center justify-between border-t border-grid-border-subtle bg-grid-surface px-4 py-2.5 text-[0.7rem] font-mono text-grid-gray">
         {/* Live Coordinate Crosshair Readout */}
         <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1 text-[#CCCCCC]">
-            <Compass size={14} className="text-[#FFD400]" />
+          <span className="flex items-center gap-1 text-grid-gray-subtle">
+            <Compass size={14} className="text-grid-yellow" />
             <span>
               {cursorGeo
                 ? `LAT: ${cursorGeo.lat.toFixed(4)}° | LON: ${cursorGeo.lon.toFixed(4)}°`
                 : "POSICIONE O CURSOR SOBRE O MAPA"}
             </span>
           </span>
-          <span className="text-[#333333]">|</span>
-          <span className="text-[#777777]">
+          <span className="text-grid-border-strong">|</span>
+          <span className="text-grid-gray-muted">
             {isFlat2D ? "2D Plano (Ortogonal)" : `3D Tático (${pitch}° inclinação · ${bearing}° azimute)`} · Zoom: {(zoom * 100).toFixed(0)}%
           </span>
         </div>
@@ -1047,26 +1342,67 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
         <div className="flex items-center gap-4">
           {themeMode === "criticality" && (
             <>
-              <span className="flex items-center gap-1.5">
-                <span className="h-2 w-3 rounded-sm border border-[#2E2E2E] bg-[#141414]" />
+              <button
+                type="button"
+                onClick={() => setStatusFilter((prev) => (prev === "normal" ? "all" : "normal"))}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.68rem] transition-colors ${
+                  statusFilter === "normal"
+                    ? "bg-status-success/20 text-status-success ring-1 ring-status-success"
+                    : "text-status-success/90 hover:text-status-success"
+                }`}
+                title="Filtrar por Normal"
+              >
+                <span className="h-2 w-3 rounded-sm border border-status-success/70 bg-status-success/25" />
                 Normal
-              </span>
-              <span className="flex items-center gap-1.5 text-[#F59E0B]">
-                <span className="h-2 w-3 rounded-sm border border-[#F59E0B] bg-[#F59E0B]/30" />
-                Atenção
-              </span>
-              <span className="flex items-center gap-1.5 text-[#EF4444]">
-                <span className="h-2 w-3 rounded-sm border border-[#EF4444] bg-[#EF4444]/30" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter((prev) => (prev === "attention" ? "all" : "attention"))}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.68rem] transition-colors ${
+                  statusFilter === "attention"
+                    ? "bg-status-warning/20 text-status-warning ring-1 ring-status-warning"
+                    : "text-status-warning/90 hover:text-status-warning"
+                }`}
+                title="Filtrar por Médio / Atenção"
+              >
+                <span className="h-2 w-3 rounded-sm border border-status-warning bg-status-warning/30" />
+                Médio
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter((prev) => (prev === "critical" ? "all" : "critical"))}
+                className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.68rem] transition-colors ${
+                  statusFilter === "critical"
+                    ? "bg-status-danger/20 text-status-danger ring-1 ring-status-danger"
+                    : "text-status-danger/90 hover:text-status-danger"
+                }`}
+                title="Filtrar por Crítico"
+              >
+                <span className="h-2 w-3 rounded-sm border border-status-danger bg-status-danger/30" />
                 Crítico
+              </button>
+              <span className="flex items-center gap-1.5 text-grid-gray text-[0.68rem]">
+                <span className="h-2 w-3 rounded-sm border border-dashed border-grid-gray/50 bg-grid-gray/10" />
+                Sem métricas
               </span>
+              {statusFilter !== "all" && (
+                <button
+                  type="button"
+                  onClick={() => setStatusFilter("all")}
+                  className="rounded bg-grid-surface-elevated border border-grid-border px-1.5 py-0.5 text-[0.65rem] text-grid-yellow hover:text-white"
+                  title="Limpar filtro de criticidade"
+                >
+                  Exibir Todas
+                </button>
+              )}
             </>
           )}
 
           {themeMode === "gd_power" && (
             <div className="flex items-center gap-2">
               <span>0 kW</span>
-              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-[#141414] via-[#FFD400]/40 to-[#FFD400]" />
-              <span className="text-[#FFD400] font-bold">
+              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-grid-surface-elevated via-grid-yellow/40 to-grid-yellow" />
+              <span className="text-grid-yellow font-bold">
                 {maxGdPower.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} kW
               </span>
             </div>
@@ -1075,8 +1411,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           {themeMode === "consumption" && (
             <div className="flex items-center gap-2">
               <span>0 MWh</span>
-              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-[#141414] via-[#3B82F6]/40 to-[#3B82F6]" />
-              <span className="text-[#3B82F6] font-bold">
+              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-grid-surface-elevated via-status-info/40 to-status-info" />
+              <span className="text-status-info font-bold">
                 {maxConsumption.toLocaleString("pt-BR", { maximumFractionDigits: 0 })} MWh
               </span>
             </div>
@@ -1085,8 +1421,8 @@ export const TerritoryMap: React.FC<TerritoryMapProps> = ({
           {themeMode === "clients" && (
             <div className="flex items-center gap-2">
               <span>0 UCs</span>
-              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-[#141414] via-[#22C55E]/40 to-[#22C55E]" />
-              <span className="text-[#22C55E] font-bold">
+              <div className="h-2 w-20 rounded-full bg-gradient-to-r from-grid-surface-elevated via-status-success/40 to-status-success" />
+              <span className="text-status-success font-bold">
                 {maxClients.toLocaleString("pt-BR")} UCs
               </span>
             </div>

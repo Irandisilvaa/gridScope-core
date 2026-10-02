@@ -26,6 +26,7 @@ export type EvolucaoTemporal = {
 export type Substation = {
   subestacao: string;
   id_tecnico: string;
+  municipio_codigo?: string | null;
   metricas_rede: MetricasRede;
   geracao_distribuida: GeracaoDistribuida;
   perfil_consumo: Record<string, PerfilClasse>;
@@ -33,9 +34,20 @@ export type Substation = {
   geometry?: Record<string, unknown> | null;
 };
 
+export type MunicipalityCoverage = {
+  codigo: string;
+  nome: string;
+  uf: string;
+  consumidores: number;
+  transformadores: number;
+  subestacoes: number;
+  unidades_gd: number;
+};
+
 export type DataStatus = {
   status: string;
   source: string;
+  publication_id?: string | null;
   delivery_id?: string | null;
   reference_period?: string | null;
   city_target?: string | null;
@@ -49,8 +61,42 @@ export type DataStatus = {
       ids?: string[];
       transformer_ids?: string[];
     }>;
+    geospatial?: {
+      policy?: string;
+      outside_tolerance_m?: number;
+      outside_official_boundary_count?: number;
+      outside_official_boundary?: Array<{
+        transformador_id: string;
+        subestacao_id: string;
+        municipio_codigo?: string | null;
+        distance_m: number;
+        action: string;
+      }>;
+    };
   };
-  mode?: "live" | "fallback";
+  mode?: "live";
+};
+
+export type AuthUser = {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "user";
+  is_active: boolean;
+  created_at?: string | null;
+  last_login_at?: string | null;
+};
+
+export type ChatMessage = {
+  role: "user" | "model";
+  content: string;
+};
+
+export type ChatResponse = {
+  resposta: string;
+  historico_atualizado: ChatMessage[];
+  conversa_id?: number | null;
+  graficos?: Array<Record<string, unknown>> | null;
 };
 
 export type Territories = {
@@ -74,6 +120,7 @@ export type SolarSimulation = {
 export type RankingCsvFilters = {
   busca?: string;
   situacao?: "all" | "normal" | "attention";
+  municipio?: string;
 };
 
 export class ApiError extends Error {
@@ -88,71 +135,33 @@ export class ApiError extends Error {
 
 export class GridScopeApi {
   private readonly baseUrl: string;
-  private cachedSubstations: Substation[] | null = null;
-  private cachedTerritories: Territories | null = null;
 
   constructor(baseUrl = import.meta.env.VITE_API_BASE_URL || "/api") {
     this.baseUrl = baseUrl.replace(/\/$/, "");
   }
 
   async getDataStatus(signal?: AbortSignal): Promise<DataStatus> {
-    try {
-      const data = await this.get<DataStatus>("/data/status", signal);
-      return { ...data, mode: "live" };
-    } catch {
-      // Graceful local mode status
-      return {
-        status: "published",
-        source: "Carga Estrutural (Local Cache)",
-        delivery_id: "GS-PROD-2026",
-        reference_period: "2025/2026",
-        city_target: null,
-        published_at: new Date().toISOString(),
-        row_counts: {
-          subestacoes: 32,
-          geometrias: 32,
-        },
-        quality_report: {},
-        mode: "fallback",
-      };
-    }
+    const data = await this.get<DataStatus>("/data/status", signal);
+    return { ...data, mode: "live" };
   }
 
-  async getRanking(signal?: AbortSignal): Promise<Substation[]> {
-    try {
-      const data = await this.get<Substation[]>("/mercado/ranking", signal);
-      this.cachedSubstations = data;
-      return data;
-    } catch {
-      // Fallback to local high-fidelity dataset
-      if (this.cachedSubstations) return this.cachedSubstations;
-      const resp = await fetch("/data/perfil_mercado.json", { signal });
-      if (!resp.ok) throw new ApiError("Erro ao carregar dados locais de mercado", resp.status);
-      const localData = (await resp.json()) as Substation[];
-      this.cachedSubstations = localData;
-      return localData;
-    }
+  async getMunicipalities(signal?: AbortSignal): Promise<MunicipalityCoverage[]> {
+    return this.get<MunicipalityCoverage[]>("/coverage/municipalities", signal);
   }
 
-  async getTerritories(signal?: AbortSignal): Promise<Territories> {
-    try {
-      const data = await this.get<Territories>("/mercado/geojson", signal);
-      this.cachedTerritories = data;
-      return data;
-    } catch {
-      if (this.cachedTerritories) return this.cachedTerritories;
-      const resp = await fetch("/data/subestacoes_logicas.geojson", { signal });
-      if (!resp.ok) throw new ApiError("Erro ao carregar geometrias locais", resp.status);
-      const localGeo = (await resp.json()) as Territories;
-      this.cachedTerritories = localGeo;
-      return localGeo;
-    }
+  async getRanking(municipio = "all", signal?: AbortSignal): Promise<Substation[]> {
+    return this.get<Substation[]>(`/mercado/ranking?municipio=${encodeURIComponent(municipio)}`, signal);
+  }
+
+  async getTerritories(municipio = "all", signal?: AbortSignal): Promise<Territories> {
+    return this.get<Territories>(`/mercado/geojson?municipio=${encodeURIComponent(municipio)}`, signal);
   }
 
   getRankingCsvUrl(filters?: RankingCsvFilters) {
     const params = new URLSearchParams();
     if (filters?.busca?.trim()) params.set("busca", filters.busca.trim());
     if (filters?.situacao && filters.situacao !== "all") params.set("situacao", filters.situacao);
+    if (filters?.municipio && filters.municipio !== "all") params.set("municipio", filters.municipio);
     const query = params.toString();
     return `${this.baseUrl}/mercado/ranking.csv${query ? `?${query}` : ""}`;
   }
@@ -191,57 +200,124 @@ export class GridScopeApi {
     return [headers.join(";"), ...lines].join("\n");
   }
 
-  async getSolarSimulation(idTecnico: string, date?: string, signal?: AbortSignal): Promise<SolarSimulation> {
-    try {
-      const query = date ? `?data=${encodeURIComponent(date)}` : "";
-      return await this.get<SolarSimulation>(`/simulacao/id/${encodeURIComponent(idTecnico)}${query}`, signal);
-    } catch {
-      // Local solar calculation based on realistic PV model
-      const sub = this.cachedSubstations?.find((s) => s.id_tecnico === idTecnico);
-      const potenciaKw = sub?.geracao_distribuida.potencia_total_kw ?? 1500;
-      const refDate = date || new Date().toISOString().split("T")[0];
-
-      // Simulated irradiation (standard Northeast Brazil average: ~5.4 kWh/m2/day)
-      const irradiacao = 5.25 + Math.sin(idTecnico.length) * 0.45;
-      const tempMax = 31.4 + (potenciaKw % 5) * 0.4;
-      const perdaTermica = 5.8 + (tempMax > 30 ? (tempMax - 25) * 0.4 : 2.0);
-      
-      // Generation in MWh for 30 days
-      const geracaoEstimadaMwh = (potenciaKw * irradiacao * (1 - perdaTermica / 100) * 30) / 1000;
-
-      let impacto = "Fluxo reverso moderado em horário de pico solar. Barramento estável.";
-      if (potenciaKw > 8000) {
-        impacto = "Alerta de sobretensão no alimentador principal às 12:30. Recomenda-se controle de tap.";
-      } else if (potenciaKw < 500) {
-        impacto = "Impacto insignificante no perfil de tensão da subestação.";
-      }
-
-      return {
-        subestacao: sub?.subestacao ?? `Subestação ${idTecnico}`,
-        data_referencia: refDate,
-        fonte_dados: "Modelo Fotovoltaico GridScope v1.0",
-        condicao_tempo: "Céu claro / Alta irradiância",
-        irradiacao_solar_kwh_m2: Number(irradiacao.toFixed(2)),
-        temperatura_max_c: Number(tempMax.toFixed(1)),
-        fator_perda_termica: Number(perdaTermica.toFixed(2)),
-        potencia_instalada_kw: Number(potenciaKw.toFixed(2)),
-        geracao_estimada_mwh: Number(geracaoEstimadaMwh.toFixed(2)),
-        impacto_na_rede: impacto,
-      };
-    }
+  async getSolarSimulation(
+    idTecnico: string,
+    date?: string,
+    municipio = "all",
+    signal?: AbortSignal,
+  ): Promise<SolarSimulation> {
+    const params = new URLSearchParams({ municipio });
+    if (date) params.set("data", date);
+    const query = `?${params.toString()}`;
+    return this.get<SolarSimulation>(`/simulacao/id/${encodeURIComponent(idTecnico)}${query}`, signal);
   }
 
   private async get<T>(path: string, signal?: AbortSignal): Promise<T> {
+    return this.request<T>(path, { method: "GET", signal });
+  }
+
+  private csrfToken() {
+    if (typeof document === "undefined") return "";
+    const token = document.cookie
+      .split(";")
+      .map((item) => item.trim())
+      .find((item) => item.startsWith("gridscope_csrf="));
+    return token ? decodeURIComponent(token.slice("gridscope_csrf=".length)) : "";
+  }
+
+  private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const method = (init.method || "GET").toUpperCase();
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    if (method !== "GET" && method !== "HEAD") {
+      const csrf = this.csrfToken();
+      if (csrf) headers.set("X-CSRF-Token", csrf);
+    }
+
     const response = await fetch(`${this.baseUrl}${path}`, {
-      headers: { Accept: "application/json" },
-      signal,
+      ...init,
+      headers,
+      credentials: "include",
     });
 
     if (!response.ok) {
-      throw new ApiError(`A API retornou ${response.status}`, response.status);
+      let detail = `A API retornou ${response.status}`;
+      try {
+        const payload = (await response.json()) as { detail?: unknown };
+        if (typeof payload.detail === "string" && payload.detail.trim()) detail = payload.detail;
+      } catch {
+        // Keep the status-based message when the response is not JSON.
+      }
+      throw new ApiError(detail, response.status);
     }
 
+    if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
+  }
+
+  async login(email: string, password: string, signal?: AbortSignal): Promise<AuthUser> {
+    const response = await this.request<{ user: AuthUser }>("/auth/login", {
+      method: "POST",
+      signal,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    return response.user;
+  }
+
+  async logout(): Promise<void> {
+    await this.request<void>("/auth/logout", { method: "POST" });
+  }
+
+  async getCurrentUser(signal?: AbortSignal): Promise<AuthUser> {
+    const response = await this.request<{ user: AuthUser }>("/auth/me", { method: "GET", signal });
+    return response.user;
+  }
+
+  async listUsers(): Promise<AuthUser[]> {
+    return this.get<AuthUser[]>("/auth/admin/users");
+  }
+
+  async createUser(payload: { email: string; name: string; password: string; role: "admin" | "user" }) {
+    return this.request<AuthUser>("/auth/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateUser(userId: string, payload: { name?: string; role?: "admin" | "user"; is_active?: boolean }) {
+    return this.request<AuthUser>(`/auth/admin/users/${encodeURIComponent(userId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async resetUserPassword(userId: string, password: string) {
+    await this.request<void>(`/auth/admin/users/${encodeURIComponent(userId)}/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async sendChat(
+    message: string,
+    history: ChatMessage[] = [],
+    conversationId?: number | null,
+    municipio = "all",
+  ) {
+    return this.request<ChatResponse>("/chat/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mensagem: message,
+        historico: history,
+        conversa_id: conversationId ?? undefined,
+        municipio,
+      }),
+    });
   }
 }
 

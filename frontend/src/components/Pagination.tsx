@@ -44,12 +44,12 @@ export const Pagination: React.FC<PaginationProps> = ({
 
   return (
     <div
-      className={`flex flex-wrap items-center justify-between gap-3 border-t border-[#1F1F1F] bg-[#0A0A0A] px-3 py-2.5 font-mono text-xs text-[#8A8A8A] ${className}`}
+      className={`flex flex-wrap items-center justify-between gap-3 border-t border-grid-border-subtle bg-grid-surface px-3 py-2.5 font-mono text-xs text-grid-gray ${className}`}
     >
       <div className="text-[0.7rem]">
         Mostrando <strong className="text-white">{startItem}</strong> a{" "}
         <strong className="text-white">{endItem}</strong> de{" "}
-        <strong className="text-[#FFD400]">{totalItems}</strong> registros
+        <strong className="text-grid-yellow">{totalItems}</strong> registros
       </div>
 
       <div className="flex items-center gap-1.5">
@@ -58,7 +58,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           type="button"
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
-          className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#262626] bg-[#141414] text-[#8A8A8A] transition-colors hover:border-[#FFD400] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-grid-border bg-grid-surface-elevated text-grid-gray transition-colors hover:border-grid-yellow hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
           title="Página anterior"
           aria-label="Página anterior"
         >
@@ -74,14 +74,14 @@ export const Pagination: React.FC<PaginationProps> = ({
               onClick={() => onPageChange(p)}
               className={`flex h-7 min-w-[28px] px-1.5 items-center justify-center rounded-lg border text-xs font-semibold transition-colors ${
                 currentPage === p
-                  ? "border-[#FFD400] bg-[#FFD400] text-black shadow-[0_0_8px_rgba(255,212,0,0.3)]"
-                  : "border-[#222222] bg-[#121212] text-[#8A8A8A] hover:border-[#383838] hover:text-white"
+                  ? "border-grid-yellow bg-grid-yellow text-black energy-glow"
+                  : "border-grid-graphite-light bg-grid-surface-raised text-grid-gray hover:border-grid-border-strong hover:text-white"
               }`}
             >
               {p}
             </button>
           ) : (
-            <span key={idx} className="px-1 text-[#555555]">
+            <span key={idx} className="px-1 text-grid-gray-dim">
               {p}
             </span>
           )
@@ -92,7 +92,7 @@ export const Pagination: React.FC<PaginationProps> = ({
           type="button"
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}
-          className="flex h-7 w-7 items-center justify-center rounded-lg border border-[#262626] bg-[#141414] text-[#8A8A8A] transition-colors hover:border-[#FFD400] hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
+          className="flex h-7 w-7 items-center justify-center rounded-lg border border-grid-border bg-grid-surface-elevated text-grid-gray transition-colors hover:border-grid-yellow hover:text-white disabled:cursor-not-allowed disabled:opacity-30"
           title="Próxima página"
           aria-label="Próxima página"
         >

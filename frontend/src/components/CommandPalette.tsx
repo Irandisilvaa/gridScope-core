@@ -83,13 +83,13 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-2xl rounded-2xl border border-[#2F2F2F] bg-[#0A0A0A] shadow-2xl overflow-hidden double-bezel"
+        className="relative w-full max-w-2xl rounded-2xl border border-grid-border-card bg-grid-surface shadow-2xl overflow-hidden double-bezel"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDownNav}
       >
         {/* Search Input Bar */}
-        <div className="flex items-center gap-3 border-b border-[#202020] bg-[#0F0F0F] px-4 py-3.5">
-          <MagnifyingGlass size={18} className="text-[#FFD400]" />
+        <div className="flex items-center gap-3 border-b border-grid-border-subtle bg-grid-surface px-4 py-3.5">
+          <MagnifyingGlass size={18} className="text-grid-yellow" />
           <input
             ref={inputRef}
             type="text"
@@ -99,22 +99,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
               setSelectedIndex(0);
             }}
             placeholder="Buscar por subestação, ID técnico ou status... (Ex: SUBESTA1, 3029)"
-            className="flex-1 bg-transparent text-sm font-mono text-white placeholder:text-[#666666] outline-none"
+            className="flex-1 bg-transparent text-sm font-mono text-white placeholder:text-grid-gray-dim outline-none"
           />
-          <kbd className="hidden sm:inline-block rounded border border-[#2B2B2B] bg-[#141414] px-1.5 py-0.5 font-mono text-[0.65rem] text-[#8A8A8A]">
+          <kbd className="hidden sm:inline-block rounded border border-grid-border-card bg-grid-surface-elevated px-1.5 py-0.5 font-mono text-[0.65rem] text-grid-gray">
             ESC
           </kbd>
           <button
             type="button"
             onClick={onClose}
-            className="flex h-7 w-7 items-center justify-center rounded-lg text-[#8A8A8A] hover:text-white"
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-grid-gray hover:text-white"
           >
             <X size={16} />
           </button>
         </div>
 
         {/* Results Stream */}
-        <div className="max-h-80 overflow-y-auto divide-y divide-[#181818] p-2">
+        <div className="max-h-80 overflow-y-auto divide-y divide-grid-border-subtle p-2">
           {filtered.length > 0 ? (
             filtered.map((sub, idx) => {
               const isSelected = idx === selectedIndex;
@@ -129,31 +129,31 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   }}
                   onMouseEnter={() => setSelectedIndex(idx)}
                   className={`flex cursor-pointer items-center justify-between rounded-xl px-3.5 py-2.5 transition-colors ${
-                    isSelected ? "bg-[#FFD400]/10 text-white" : "hover:bg-[#141414] text-[#CCCCCC]"
+                    isSelected ? "bg-grid-yellow/10 text-white" : "hover:bg-grid-surface-elevated text-grid-gray-subtle"
                   }`}
                 >
                   <div className="flex items-center gap-3">
                     <span
                       className={`flex h-8 w-8 items-center justify-center rounded-lg border text-sm ${
                         isSelected
-                          ? "border-[#FFD400]/40 bg-[#FFD400]/20 text-[#FFD400]"
-                          : "border-[#222222] bg-[#121212] text-[#8A8A8A]"
+                          ? "border-grid-yellow/40 bg-grid-yellow/20 text-grid-yellow"
+                          : "border-grid-graphite-light bg-grid-surface-raised text-grid-gray"
                       }`}
                     >
                       <Lightning size={16} weight={isSelected ? "fill" : "regular"} />
                     </span>
                     <div>
-                      <strong className={`block font-display text-xs ${isSelected ? "text-[#FFD400]" : "text-white"}`}>
+                      <strong className={`block font-display text-xs ${isSelected ? "text-grid-yellow" : "text-white"}`}>
                         {cleanName}
                       </strong>
-                      <span className="font-mono text-[0.68rem] text-[#8A8A8A]">
+                      <span className="font-mono text-[0.68rem] text-grid-gray">
                         ID: {sub.id_tecnico} · {sub.metricas_rede.total_clientes} clientes
                       </span>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-3">
-                    <span className="font-mono text-xs font-semibold text-[#FFD400]">
+                    <span className="font-mono text-xs font-semibold text-grid-yellow">
                       {sub.geracao_distribuida.potencia_total_kw.toFixed(1)} kW
                     </span>
                     <StatusPill
@@ -162,29 +162,29 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     />
                     <CaretRight
                       size={14}
-                      className={isSelected ? "text-[#FFD400]" : "text-transparent"}
+                      className={isSelected ? "text-grid-yellow" : "text-transparent"}
                     />
                   </div>
                 </div>
               );
             })
           ) : (
-            <div className="p-8 text-center font-mono text-xs text-[#8A8A8A]">
+            <div className="p-8 text-center font-mono text-xs text-grid-gray">
               Nenhum ativo encontrado para "{query}".
             </div>
           )}
         </div>
 
         {/* Footer Navigation Hints */}
-        <div className="flex items-center justify-between border-t border-[#1C1C1C] bg-[#0A0A0A] px-4 py-2 font-mono text-[0.66rem] text-[#777777]">
+        <div className="flex items-center justify-between border-t border-grid-border-subtle bg-grid-surface px-4 py-2 font-mono text-[0.66rem] text-grid-gray-muted">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="rounded border border-[#2B2B2B] bg-[#141414] px-1 py-0.5">↑</kbd>
-              <kbd className="rounded border border-[#2B2B2B] bg-[#141414] px-1 py-0.5">↓</kbd>
+              <kbd className="rounded border border-grid-border-card bg-grid-surface-elevated px-1 py-0.5">↑</kbd>
+              <kbd className="rounded border border-grid-border-card bg-grid-surface-elevated px-1 py-0.5">↓</kbd>
               Navegar
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="rounded border border-[#2B2B2B] bg-[#141414] px-1 py-0.5">Enter</kbd>
+              <kbd className="rounded border border-grid-border-card bg-grid-surface-elevated px-1 py-0.5">Enter</kbd>
               Selecionar
             </span>
           </div>

@@ -26,19 +26,19 @@ export const BrandSymbol: React.FC<{ size?: number; className?: string; animated
       role="img"
     >
       {/* Outer Glow Halo */}
-      <circle cx="50" cy="50" r="44" stroke="#FFD400" strokeWidth="1" strokeOpacity="0.25" strokeDasharray="3 3" />
+      <circle cx="50" cy="50" r="44" stroke="var(--color-grid-yellow)" strokeWidth="1" strokeOpacity="0.25" strokeDasharray="3 3" />
       
       {/* Top Arc with Arrow */}
       <g className={animated ? "origin-center animate-[spin_8s_linear_infinite]" : ""}>
         <path
           d="M 22,35 A 36 36 0 0 1 78,35"
-          stroke="#FFFFFF"
+          stroke="var(--color-grid-white)"
           strokeWidth="6"
           strokeLinecap="round"
         />
         <path
           d="M 72,25 L 82,35 L 72,45"
-          stroke="#FFFFFF"
+          stroke="var(--color-grid-white)"
           strokeWidth="6"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -47,23 +47,23 @@ export const BrandSymbol: React.FC<{ size?: number; className?: string; animated
         {/* Bottom Arc with Arrow */}
         <path
           d="M 78,65 A 36 36 0 0 1 22,65"
-          stroke="#FFFFFF"
+          stroke="var(--color-grid-white)"
           strokeWidth="6"
           strokeLinecap="round"
         />
         <path
           d="M 28,75 L 18,65 L 28,55"
-          stroke="#FFFFFF"
+          stroke="var(--color-grid-white)"
           strokeWidth="6"
           strokeLinecap="round"
           strokeLinejoin="round"
         />
       </g>
 
-      {/* GridScope Central Lightning Bolt in #FFD400 */}
+      {/* GridScope Central Lightning Bolt */}
       <path
         d="M 54,16 L 33,52 L 50,52 L 44,84 L 68,48 L 50,48 Z"
-        fill="#FFD400"
+        fill="var(--color-grid-yellow)"
         className="drop-shadow-[0_0_8px_rgba(255,212,0,0.6)]"
       />
     </svg>
@@ -132,10 +132,10 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
 
   return (
     <div className={`inline-flex flex-col select-none ${className}`}>
-      {/* Brand Logotype: Grid (#FFD400) + Sc + Symbol(O) + pe (#FFFFFF) */}
+      {/* Brand Logotype: Grid (grid-yellow) + Sc + Symbol(O) + pe (white) */}
       <div className="flex items-center leading-none">
         <span
-          className={`font-display font-extrabold tracking-[-0.04em] text-[#FFD400] ${textSizes.text}`}
+          className={`font-display font-extrabold tracking-[-0.04em] text-grid-yellow ${textSizes.text}`}
         >
           Grid
         </span>
@@ -159,7 +159,7 @@ export const BrandLogo: React.FC<BrandLogoProps> = ({
       {/* Signature: Dados. Equilíbrio. Futuro. */}
       {variant === "full" && (
         <span
-          className={`font-sans font-medium uppercase text-[#8A8A8A] transition-colors duration-200 ${textSizes.sub}`}
+          className={`font-sans font-medium uppercase text-grid-gray transition-colors duration-200 ${textSizes.sub}`}
         >
           Dados. Equilíbrio. Futuro.
         </span>
